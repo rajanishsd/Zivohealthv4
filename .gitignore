@@ -3,6 +3,7 @@ venv/
 env/
 .venv/
 .env/
+backend/.env
 
 # Python cache
 __pycache__/
@@ -18,7 +19,6 @@ node_modules/
 *.sqlite
 *.sqlite3
 backend/data/redis/
-backend/data/postgres/
 backend/data/uploads/
 backend/data/aws_responses/
 backend/data/chatgpt_interactions/
