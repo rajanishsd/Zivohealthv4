@@ -1,0 +1,99 @@
+graph TD
+    %% Vitals Agent Workflow
+    V_Start([Vitals Request]) --> V_Initialize[🔧 Initialize Agent State]
+    V_Initialize --> V_Route{🎯 Route Operation}
+    
+    V_Route -->|Extract| V_Extract[📊 Extract Vital Signs]
+    V_Route -->|Store| V_Store[💾 Store Vitals Data]
+    V_Route -->|Retrieve| V_Retrieve[📋 Retrieve Vitals Data]
+    V_Route -->|Assess| V_Assess[🧠 Assess Question Relevance]
+    
+    V_Extract --> V_Analyze[📈 Analyze Extracted Data]
+    V_Store --> V_Trends[📊 Calculate Trends]
+    V_Retrieve --> V_Format[📋 Format Retrieved Data]
+    V_Assess --> V_Strategy[🎯 Determine Strategy]
+    
+    V_Analyze --> V_Finalize[✅ Finalize Response]
+    V_Trends --> V_Finalize
+    V_Format --> V_Finalize
+    V_Strategy --> V_Finalize
+    V_Finalize --> V_End([Vitals Complete])
+    
+    %% Pharmacy Agent Workflow
+    P_Start([Pharmacy Request]) --> P_Initialize[🔧 Initialize Agent State]
+    P_Initialize --> P_Route{🎯 Route Operation}
+    
+    P_Route -->|Extract| P_Extract[📊 Extract Pharmacy Data]
+    P_Route -->|Store| P_Store[💾 Store Pharmacy Data]
+    P_Route -->|Retrieve| P_Retrieve[📋 Retrieve Pharmacy Data]
+    P_Route -->|Assess| P_Assess[🧠 Assess Question Relevance]
+    
+    P_Extract --> P_ParseMeds[💊 Parse Medications]
+    P_Store --> P_LinkData[🔗 Link Related Data]
+    P_Retrieve --> P_AnalyzeSpending[💰 Analyze Spending]
+    P_Assess --> P_DetermineScope[🎯 Determine Retrieval Scope]
+    
+    P_ParseMeds --> P_Finalize[✅ Finalize Response]
+    P_LinkData --> P_Finalize
+    P_AnalyzeSpending --> P_Finalize
+    P_DetermineScope --> P_Finalize
+    P_Finalize --> P_End([Pharmacy Complete])
+    
+    %% Lab Agent Workflow
+    L_Start([Lab Request]) --> L_Initialize[🔧 Initialize Agent State]
+    L_Initialize --> L_Route{🎯 Route Operation}
+    
+    L_Route -->|Extract| L_Extract[📊 Extract Lab Data]
+    L_Route -->|Store| L_Store[💾 Store Lab Data]
+    L_Route -->|Retrieve| L_Retrieve[📋 Retrieve Lab Data]
+    L_Route -->|Assess| L_Assess[🧠 Assess Question Relevance]
+    
+    L_Extract --> L_ParseTests[🧪 Parse Individual Tests]
+    L_Store --> L_CategorizeTests[📋 Categorize Tests]
+    L_Retrieve --> L_AnalyzeResults[📈 Analyze Results]
+    L_Assess --> L_FocusStrategy[🎯 Focus Strategy]
+    
+    L_ParseTests --> L_Finalize[✅ Finalize Response]
+    L_CategorizeTests --> L_Finalize
+    L_AnalyzeResults --> L_Finalize
+    L_FocusStrategy --> L_Finalize
+    L_Finalize --> L_End([Lab Complete])
+    
+    %% Prescription Agent Workflow
+    R_Start([Prescription Request]) --> R_Initialize[🔧 Initialize Agent State]
+    R_Initialize --> R_Route{🎯 Route Operation}
+    
+    R_Route -->|Extract| R_Extract[📊 Extract Prescription Data]
+    R_Route -->|Store| R_Store[💾 Store Prescription Data]
+    R_Route -->|Retrieve| R_Retrieve[📋 Retrieve Prescription Data]
+    R_Route -->|Assess| R_Assess[🧠 Assess Question Relevance]
+    
+    R_Extract --> R_ParseMedications[💊 Parse Medications]
+    R_Store --> R_TrackHistory[📝 Track Medication History]
+    R_Retrieve --> R_AnalyzePatterns[📊 Analyze Prescription Patterns]
+    R_Assess --> R_DetermineFocus[🎯 Determine Focus]
+    
+    R_ParseMedications --> R_Finalize[✅ Finalize Response]
+    R_TrackHistory --> R_Finalize
+    R_AnalyzePatterns --> R_Finalize
+    R_DetermineFocus --> R_Finalize
+    R_Finalize --> R_End([Prescription Complete])
+    
+    %% Styling
+    classDef startEnd fill:#e3f2fd
+    classDef route fill:#fff3e0
+    classDef extract fill:#e8f5e8
+    classDef store fill:#f3e5f5
+    classDef retrieve fill:#e1f5fe
+    classDef assess fill:#f1f8e9
+    classDef process fill:#fce4ec
+    classDef finalize fill:#e0f2f1
+    
+    class V_Start,V_End,P_Start,P_End,L_Start,L_End,R_Start,R_End startEnd
+    class V_Route,P_Route,L_Route,R_Route route
+    class V_Extract,P_Extract,L_Extract,R_Extract extract
+    class V_Store,P_Store,L_Store,R_Store store
+    class V_Retrieve,P_Retrieve,L_Retrieve,R_Retrieve retrieve
+    class V_Assess,P_Assess,L_Assess,R_Assess assess
+    class V_Analyze,P_ParseMeds,L_ParseTests,R_ParseMedications,V_Trends,P_LinkData,L_CategorizeTests,R_TrackHistory process
+    class V_Finalize,P_Finalize,L_Finalize,R_Finalize finalize 

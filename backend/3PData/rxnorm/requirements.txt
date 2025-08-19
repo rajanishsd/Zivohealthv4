@@ -1,0 +1,32 @@
+# RxNorm Embedder Requirements
+# ===========================
+
+# Core dependencies
+langchain==0.1.0
+langchain-community==0.0.10
+langchain-core==0.1.10
+
+# Database
+psycopg2-binary==2.9.7
+sqlalchemy==2.0.23
+pgvector==0.2.4
+
+# Data processing
+pandas==2.1.4
+numpy==1.24.3
+
+# Machine Learning
+torch==2.1.1
+transformers==4.36.2
+sentence-transformers==2.2.2
+
+# Utilities
+tqdm==4.66.1
+python-dotenv==1.0.0
+argparse
+
+# Logging and monitoring
+logging
+
+# Optional: For GPU acceleration (uncomment if needed)
+# torch==2.1.1+cu118 --index-url https://download.pytorch.org/whl/cu118 

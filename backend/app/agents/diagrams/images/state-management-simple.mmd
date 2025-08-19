@@ -1,0 +1,66 @@
+graph TD
+    %% LangGraph State Management
+    StateInit[📋 Initialize AgentState]
+    StateInit --> CheckpointLoad[💾 Load Agent Checkpoint]
+    CheckpointLoad --> StateRoute{🎯 Route Based on Operation}
+    
+    StateRoute -->|extract| ExtractState[📊 Extract Operation State]
+    StateRoute -->|store| StoreState[💾 Store Operation State]
+    StateRoute -->|retrieve| RetrieveState[📋 Retrieve Operation State]
+    StateRoute -->|assess| AssessState[🧠 Assessment Operation State]
+    
+    ExtractState --> ProcessExtract[⚡ Execute Extraction]
+    StoreState --> ProcessStore[⚡ Execute Storage]
+    RetrieveState --> ProcessRetrieve[⚡ Execute Retrieval]
+    AssessState --> ProcessAssess[⚡ Execute Assessment]
+    
+    ProcessExtract --> UpdateExtract[🔄 Update State with Results]
+    ProcessStore --> UpdateStore[🔄 Update State with Results]
+    ProcessRetrieve --> UpdateRetrieve[🔄 Update State with Results]
+    ProcessAssess --> UpdateAssess[🔄 Update State with Results]
+    
+    UpdateExtract --> FinalizeState[✅ Finalize Agent State]
+    UpdateStore --> FinalizeState
+    UpdateRetrieve --> FinalizeState
+    UpdateAssess --> FinalizeState
+    
+    FinalizeState --> CheckpointSave[💾 Save Agent Checkpoint]
+    CheckpointSave --> StateReturn[📤 Return Final State]
+    
+    %% Inter-Agent Message Passing
+    CustomerRequest[👤 Customer Request] --> CustomerState[📋 Customer Agent State]
+    CustomerState --> CustomerRoute{🎯 Customer Agent Routing}
+    
+    CustomerRoute -->|File Processing| DocOrchState[🏗️ Document Orchestrator State]
+    CustomerRoute -->|Data Retrieval| AssessmentState[🧠 Multi-Agent Assessment State]
+    
+    DocOrchState --> SpecialistState[📊 Specialized Agent State]
+    AssessmentState --> RelevantAgents[🎯 Relevant Agent States]
+    
+    SpecialistState --> AgentResponse1[📤 Specialist Agent Response]
+    RelevantAgents --> AgentResponse2[📤 Retrieval Agent Responses]
+    
+    AgentResponse1 --> AggregateState[🔄 Aggregate Response State]
+    AgentResponse2 --> AggregateState
+    AggregateState --> FinalCustomerState[✅ Final Customer State]
+    FinalCustomerState --> CustomerResponse[📱 Customer Response]
+    
+    %% Memory Management
+    RequestStart[🔄 Request Starts] --> CreateThread[🧵 Create Thread ID]
+    CreateThread --> MemoryLookup[🔍 Memory Lookup]
+    MemoryLookup --> AgentMemories[💾 Individual Agent Memories]
+    AgentMemories --> ContextSharing[🔄 Context Sharing]
+    ContextSharing --> UpdateMemories[📝 Update Agent Memories]
+    UpdateMemories --> PersistMemory[💾 Persist to Storage]
+    PersistMemory --> MemoryReady[✅ Memory Ready for Next Request]
+    
+    %% Styling
+    classDef stateClass fill:#e8f5e8
+    classDef processClass fill:#f3e5f5
+    classDef memoryClass fill:#fff3e0
+    classDef messageClass fill:#e1f5fe
+    
+    class StateInit,ExtractState,StoreState,RetrieveState,AssessState,CustomerState stateClass
+    class ProcessExtract,ProcessStore,ProcessRetrieve,ProcessAssess,UpdateExtract,UpdateStore processClass
+    class CheckpointLoad,CheckpointSave,AgentMemories,ContextSharing,UpdateMemories,PersistMemory memoryClass
+    class CustomerRequest,AgentResponse1,AgentResponse2,AggregateState,FinalCustomerState messageClass 

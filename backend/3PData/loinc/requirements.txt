@@ -1,0 +1,27 @@
+# LOINC Embedder Requirements
+# ===========================
+# 
+# This file contains all dependencies needed for the LOINC embedder
+# using sentence-transformers all-MiniLM-L6-v2 embeddings.
+
+# Core dependencies
+pandas>=2.1.0
+numpy>=1.24.0
+tqdm>=4.66.0
+
+# Database dependencies
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+pgvector>=0.2.0
+
+# LangChain dependencies
+langchain>=0.3.26
+langchain-community>=0.3.26
+
+# Sentence Transformers dependencies
+sentence-transformers>=2.2.0
+transformers>=4.35.0
+torch>=2.0.0
+
+# Utility dependencies
+python-dotenv>=1.0.0 

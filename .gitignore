@@ -1,0 +1,45 @@
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Node.js dependencies
+node_modules/
+
+# Database files
+*.rdb
+*.db
+*.sqlite
+*.sqlite3
+backend/data/redis/
+backend/data/postgres/
+backend/data/uploads/
+backend/data/aws_responses/
+backend/data/chatgpt_interactions/
+backend/data/plots/
+backend/data/unprocessed/
+
+# User data uploads
+data/unprocessed/
+
+# 3rd Party Data
+backend/3PData/data/
+backend/3PData/pubmed/colab/models/
+backend/model/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+dump.rdb
+*.rdb
+
+

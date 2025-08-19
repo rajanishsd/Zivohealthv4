@@ -1,0 +1,82 @@
+graph TD
+    %% Use Case 1: File Upload Only
+    UC1_Start[👤 User uploads medical document]
+    UC1_Start --> UC1_Customer[🎯 Enhanced Customer Agent]
+    UC1_Customer --> UC1_Analyze[📊 Analyze File Only Request]
+    UC1_Analyze --> UC1_DocOrch[🏗️ Document Orchestrator]
+
+    UC1_DocOrch --> UC1_OCR[🔍 OCR Extraction]
+    UC1_OCR --> UC1_Classify[🏷️ LLM Classification]
+    UC1_Classify --> UC1_Route{📋 Route Document}
+
+    UC1_Route -->|Vitals| UC1_Vitals[💓 Process as Vitals]
+    UC1_Route -->|Pharmacy| UC1_Pharmacy[💊 Process as Pharmacy]
+    UC1_Route -->|Lab| UC1_Lab[🧪 Process as Lab]
+    UC1_Route -->|Prescription| UC1_Prescription[📝 Process as Prescription]
+
+    UC1_Vitals --> UC1_Store1[(💾 Store in vital_signs)]
+    UC1_Pharmacy --> UC1_Store2[(💾 Store in pharmacy_bills)]
+    UC1_Lab --> UC1_Store3[(💾 Store in lab_reports)]
+    UC1_Prescription --> UC1_Store4[(💾 Store in prescriptions)]
+
+    UC1_Store1 --> UC1_Response[✅ Document processed successfully]
+    UC1_Store2 --> UC1_Response
+    UC1_Store3 --> UC1_Response
+    UC1_Store4 --> UC1_Response
+
+    %% Use Case 2: Question Only
+    UC2_Start[👤 User asks health question]
+    UC2_Start --> UC2_Customer[🎯 Enhanced Customer Agent]
+    UC2_Customer --> UC2_Analyze[📊 Analyze Question Only Request]
+    UC2_Analyze --> UC2_Delegate[🧠 Delegate to All Specialized Agents]
+
+    UC2_Delegate --> UC2_VitalsAssess[💓 Vitals Agent Assessment]
+    UC2_Delegate --> UC2_PharmacyAssess[💊 Pharmacy Agent Assessment]
+    UC2_Delegate --> UC2_LabAssess[🧪 Lab Agent Assessment]
+    UC2_Delegate --> UC2_PrescriptionAssess[📝 Prescription Agent Assessment]
+
+    UC2_VitalsAssess --> UC2_VitalsRetrieve[💓 Intelligent Vitals Retrieval]
+    UC2_PharmacyAssess --> UC2_PharmacySkip[💊 Skip if not relevant]
+    UC2_LabAssess --> UC2_LabRetrieve[🧪 Targeted Lab Retrieval]
+    UC2_PrescriptionAssess --> UC2_PrescriptionRetrieve[📝 Smart Prescription Retrieval]
+
+    UC2_VitalsRetrieve --> UC2_Synthesize[🔄 Synthesize Response]
+    UC2_LabRetrieve --> UC2_Synthesize
+    UC2_PrescriptionRetrieve --> UC2_Synthesize
+    UC2_PharmacySkip --> UC2_Synthesize
+
+    UC2_Synthesize --> UC2_Response[✅ Comprehensive Answer]
+
+    %% Use Case 3: File + Question
+    UC3_Start[👤 User uploads file + asks question]
+    UC3_Start --> UC3_Customer[🎯 Enhanced Customer Agent]
+    UC3_Customer --> UC3_Analyze[📊 Analyze Dual Request]
+
+    UC3_Analyze --> UC3_ProcessFile[📄 Process Document First]
+    UC3_Analyze --> UC3_PrepareRetrieval[❓ Prepare Question Analysis]
+
+    UC3_ProcessFile --> UC3_OCR[🔍 OCR + Classification]
+    UC3_OCR --> UC3_SpecialistExtract[📊 Specialist Agent Extraction]
+    UC3_SpecialistExtract --> UC3_Store[(💾 Store New Data)]
+
+    UC3_PrepareRetrieval --> UC3_AgentAssess[🧠 All Agents Assess Question]
+    UC3_AgentAssess --> UC3_RetrieveHistorical[📊 Retrieve Historical Data]
+
+    UC3_Store --> UC3_Combine[🔄 Combine New + Historical Data]
+    UC3_RetrieveHistorical --> UC3_Combine
+
+    UC3_Combine --> UC3_ComprehensiveAnswer[🧠 Generate Comprehensive Answer]
+    UC3_ComprehensiveAnswer --> UC3_Response[✅ Document processed AND answer provided]
+
+    %% Styling
+    classDef startClass fill:#e3f2fd
+    classDef processClass fill:#e8f5e8
+    classDef agentClass fill:#f3e5f5
+    classDef dataClass fill:#fff3e0
+    classDef responseClass fill:#f1f8e9
+
+    class UC1_Start,UC2_Start,UC3_Start startClass
+    class UC1_OCR,UC1_Classify,UC2_Delegate,UC3_OCR,UC3_Combine processClass
+    class UC1_Customer,UC2_Customer,UC3_Customer,UC1_Vitals,UC1_Pharmacy,UC1_Lab,UC1_Prescription agentClass
+    class UC1_Store1,UC1_Store2,UC1_Store3,UC1_Store4,UC3_Store dataClass
+    class UC1_Response,UC2_Response,UC3_Response,UC2_Synthesize,UC3_ComprehensiveAnswer responseClass

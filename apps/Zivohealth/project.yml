@@ -1,0 +1,112 @@
+name: ZivoHealth
+options:
+  createIntermediateGroups: true
+  bundleIdPrefix: com.zivohealth
+  deploymentTarget:
+    iOS: 15.0
+  xcodeVersion: "15.0"
+
+packages:
+  Alamofire:
+    url: https://github.com/Alamofire/Alamofire.git
+    from: 5.10.0
+  LiveKit:
+    url: https://github.com/livekit/client-sdk-swift.git
+    from: 2.0.0
+
+targets:
+  ZivoHealth:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+        excludes:
+          - "**/.DS_Store"
+          - "**/Package.swift"
+          - "**/Package.resolved"
+          - "**/.build/"
+          - "**/.swiftpm/"
+    resources:
+      - path: Sources/Resources
+        optional: true
+    dependencies:
+      - package: Alamofire
+      - package: LiveKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zivohealth.app
+        DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM} # Set this in Xcode or via environment variable
+        TARGETED_DEVICE_FAMILY: 1,2 # Universal (iPhone + iPad)
+        SUPPORTS_MACCATALYST: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_VERSION: 5.0
+        IPHONEOS_DEPLOYMENT_TARGET: 15.0
+        ENABLE_BITCODE: NO
+        OTHER_LDFLAGS: $(inherited)
+        CODE_SIGN_STYLE: Automatic # Changed to Automatic for easier development
+        # WebView and networking configuration for 3D visualization
+        WKWebViewConfiguration_allowsArbitraryLoads: YES
+        WKWebViewConfiguration_allowsLocalNetworking: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        MARKETING_VERSION: 1.0
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: ZivoHealth
+        INFOPLIST_KEY_NSCameraUsageDescription: This app needs camera access for video consultations
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: This app needs microphone access for video consultations
+        INFOPLIST_KEY_NSHealthShareUsageDescription: This app needs access to your health data to track your metrics
+        INFOPLIST_KEY_NSHealthUpdateUsageDescription: This app needs to update your health data with new metrics
+        INFOPLIST_KEY_NSAppTransportSecurity: |
+          <dict>
+            <key>NSAllowsArbitraryLoads</key>
+            <true/>
+            <key>NSExceptionDomains</key>
+            <dict>
+              <key>cdnjs.cloudflare.com</key>
+              <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+                <key>NSExceptionMinimumTLSVersion</key>
+                <string>TLSv1.0</string>
+              </dict>
+              <key>cdn.jsdelivr.net</key>
+              <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+                <key>NSExceptionMinimumTLSVersion</key>
+                <string>TLSv1.0</string>
+              </dict>
+            </dict>
+          </dict>
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: This app uses 3D visualization for medical anatomy exploration
+        # Swift 6 compatibility
+        SWIFT_UPCOMING_FEATURE_CONCISE_MAGIC_FILE: YES
+        SWIFT_UPCOMING_FEATURE_FORWARD_TRAILING_CLOSURES: YES
+        SWIFT_STRICT_CONCURRENCY: complete
+      debug:
+        SWIFT_OPTIMIZATION_LEVEL: -Onone
+        SWIFT_COMPILATION_MODE: incremental
+      release:
+        SWIFT_OPTIMIZATION_LEVEL: -O
+        SWIFT_COMPILATION_MODE: wholemodule
+    preBuildScripts:
+      - name: SwiftLint
+        script: |
+          if ! which swiftlint >/dev/null; then
+            echo "warning: SwiftLint not installed, skipping linting"
+          else
+            swiftlint Sources --config .swiftlint.yml
+          fi
+
+fileGroups:
+  - name: Documentation
+    path: .
+    children:
+      - CHAT_TITLE_IMPLEMENTATION.md
+      - NAVIGATION_FIX.md
+      - CHAT_DELETE_FUNCTIONALITY.md
+      - README.md 

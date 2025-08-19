@@ -1,0 +1,1 @@
+# Configuration package for backend settings and table definitions 

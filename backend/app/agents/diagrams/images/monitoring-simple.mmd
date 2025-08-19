@@ -1,0 +1,79 @@
+graph TD
+    %% OpenTelemetry Monitoring
+    RequestStart[🔄 Request Begins] --> InitTrace[🔍 Initialize Trace]
+    InitTrace --> AgentSpans[📊 Create Agent Operation Spans]
+    
+    AgentSpans --> VitalsSpan[💓 Vitals Agent Span]
+    AgentSpans --> PharmacySpan[💊 Pharmacy Agent Span]
+    AgentSpans --> LabSpan[🧪 Lab Agent Span]
+    AgentSpans --> PrescriptionSpan[📝 Prescription Agent Span]
+    
+    VitalsSpan --> VitalsOps[💓 Vitals Operations]
+    PharmacySpan --> PharmacyOps[💊 Pharmacy Operations]
+    LabSpan --> LabOps[🧪 Lab Operations]
+    PrescriptionSpan --> PrescriptionOps[📝 Prescription Operations]
+    
+    VitalsOps --> DatabaseSpans[🗄️ Database Operation Spans]
+    PharmacyOps --> DatabaseSpans
+    LabOps --> DatabaseSpans
+    PrescriptionOps --> DatabaseSpans
+    
+    DatabaseSpans --> DBOperations[💾 Database Operations]
+    DBOperations --> StoreTrace[📊 Store Trace Data]
+    StoreTrace --> TraceAnalysis[📈 Trace Analysis]
+    
+    %% Error Handling
+    ErrorTrigger[⚠️ Error Triggered] --> ClassifyError{🔍 Classify Error Type}
+    
+    ClassifyError -->|OCR Failure| OCRError[📷 OCR Processing Error]
+    ClassifyError -->|LLM Failure| LLMError[🧠 LLM Processing Error]
+    ClassifyError -->|Database Failure| DBError[🗄️ Database Error]
+    ClassifyError -->|Agent Failure| AgentError[🤖 Agent Processing Error]
+    
+    OCRError --> OCRRecovery[🔄 OCR Recovery]
+    LLMError --> LLMRecovery[🔄 LLM Recovery]
+    DBError --> DBRecovery[🔄 Database Recovery]
+    AgentError --> AgentRecovery[🔄 Agent Recovery]
+    
+    OCRRecovery --> RecoveryCheck{✅ Recovery Successful?}
+    LLMRecovery --> RecoveryCheck
+    DBRecovery --> RecoveryCheck
+    AgentRecovery --> RecoveryCheck
+    
+    RecoveryCheck -->|Yes| ContinueNormal[🔄 Continue Normal Processing]
+    RecoveryCheck -->|No| GracefulDegradation[⚠️ Graceful Degradation]
+    
+    ContinueNormal --> LogSuccess[📝 Log Recovery Success]
+    GracefulDegradation --> LogFailure[📝 Log Graceful Failure]
+    
+    LogSuccess --> UpdateMetrics[📊 Update Success Metrics]
+    LogFailure --> UpdateMetrics
+    UpdateMetrics --> Alerting[🚨 Intelligent Alerting]
+    
+    %% Workflow Coordination
+    WorkflowStart[🎬 Workflow Orchestration Begins] --> CustomerWorkflow[🎯 Customer Agent Workflow]
+    CustomerWorkflow --> ParallelProcessing{🔄 Parallel Processing Needed?}
+    
+    ParallelProcessing -->|Yes| ParallelCoordinator[⚡ Parallel Coordinator]
+    ParallelProcessing -->|No| SequentialProcessing[📝 Sequential Processing]
+    
+    ParallelCoordinator --> StatSync[🔄 State Synchronization]
+    SequentialProcessing --> StatSync
+    
+    StatSync --> WorkflowComplete[✅ Workflow Completion]
+    WorkflowComplete --> FinalValidation[🔍 Final Validation]
+    FinalValidation --> DeliveryReady[📦 Ready for Delivery]
+    DeliveryReady --> UserDelivery[📱 Deliver to User]
+    
+    %% Styling
+    classDef monitoringClass fill:#e3f2fd
+    classDef errorClass fill:#ffebee
+    classDef workflowClass fill:#e8f5e8
+    classDef recoveryClass fill:#fff3e0
+    classDef successClass fill:#f1f8e9
+    
+    class RequestStart,InitTrace,AgentSpans,TraceAnalysis monitoringClass
+    class ErrorTrigger,ClassifyError,OCRError,LLMError,DBError,AgentError errorClass
+    class WorkflowStart,CustomerWorkflow,ParallelCoordinator,StatSync,WorkflowComplete workflowClass
+    class OCRRecovery,LLMRecovery,DBRecovery,AgentRecovery,RecoveryCheck recoveryClass
+    class ContinueNormal,LogSuccess,UpdateMetrics,DeliveryReady,UserDelivery successClass 

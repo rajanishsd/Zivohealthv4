@@ -1,0 +1,294 @@
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware 
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
+import uvicorn
+import logging
+import sys
+import os
+import warnings
+
+# Suppress pkg_resources deprecation warning from guardrails package
+warnings.filterwarnings(
+    "ignore", 
+    message="pkg_resources is deprecated as an API.*",
+    category=UserWarning,
+    module="guardrails.hub.install"
+)
+
+# Import core modules (but not API routes yet)
+from app.core.config import settings
+from app.db.session import engine
+from app.db.base import Base
+from app.core.redis import get_redis
+from app.core.system_metrics import system_metrics
+from app.core.database_metrics import db_monitor
+from app.middleware.performance import PerformanceMiddleware
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("server.log")
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan events"""
+    # Startup
+    logger.info("Starting up ZivoHealth Backend...")
+    
+    # Check database tables
+    try:
+        from sqlalchemy import inspect
+        from app.db.session import SessionLocal
+        
+        db = SessionLocal()
+        try:
+            inspector = inspect(db.bind)
+            existing_tables = inspector.get_table_names()
+            required_tables = [table.name for table in Base.metadata.tables.values()]
+            missing_tables = [table for table in required_tables if table not in existing_tables]
+            
+            if missing_tables:
+                logger.warning(f"Missing database tables: {missing_tables}")
+                logger.warning("Please run the database setup script before starting the server:")
+                logger.warning("cd deployment && python database_setup.py")
+            else:
+                logger.info("All required database tables exist")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Could not check database tables: {e}")
+    
+    # Initialize Redis connection
+    try:
+        redis_gen = get_redis()
+        redis_client = next(redis_gen)
+        redis_client.ping()
+        logger.info("Redis connection established")
+    except Exception as e:
+        logger.warning(f"Redis connection failed: {e}")
+    
+    # Start performance monitoring
+    try:
+        # Setup database monitoring
+        db_monitor.setup_sqlalchemy_monitoring(engine)
+        logger.info("Database performance monitoring configured")
+        
+        # Start system metrics collection
+        await system_metrics.start_collection()
+        logger.info("System metrics collection started")
+    except Exception as e:
+        logger.error(f"Failed to start performance monitoring: {e}")
+    
+    # Event-driven aggregation setup
+    try:
+        from app.core.background_worker import EventDrivenVitalsAggregationWorker
+        
+        # Check if there's any pending data and trigger separate worker process
+        if os.getenv("PROCESS_PENDING_ON_STARTUP", "true").lower() == "true":
+            logger.info("🚀 [Startup] Checking for pending aggregation data...")
+            
+            # Check if there's pending work without processing it in-process
+            from app.db.session import SessionLocal
+            from app.crud.vitals import VitalsCRUD
+            
+            db = SessionLocal()
+            try:
+                pending_count = len(VitalsCRUD.get_pending_aggregation_entries(db, limit=1))
+                if pending_count > 0:
+                    logger.info(f"📊 [Startup] Found pending data - triggering separate worker process")
+                    
+                    # Trigger separate worker process for startup processing
+                    import subprocess
+                    
+                    try:
+                        worker_script = os.path.join(os.path.dirname(__file__), "..", "aggregation", "worker_process.py")
+                        subprocess.Popen(
+                            ["python", worker_script],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            cwd=os.path.dirname(worker_script)
+                        )
+                        logger.info("✅ [Startup] Separate worker process triggered for pending data")
+                    except Exception as e:
+                        logger.error(f"❌ [Startup] Failed to trigger worker process: {e}")
+                else:
+                    logger.info("ℹ️ [Startup] No pending aggregation data found")
+            finally:
+                db.close()
+        else:
+            logger.info("⏸️ [Startup] Pending data processing disabled by environment variable")
+            
+        logger.info("🎯 [Startup] Event-driven aggregation system ready - will trigger on data submission")
+        
+    except Exception as e:
+        logger.error(f"Failed to setup event-driven aggregation: {e}")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down ZivoHealth Backend...")
+    
+    # Stop performance monitoring
+    try:
+        await system_metrics.stop_collection()
+        logger.info("System metrics collection stopped")
+    except Exception as e:
+        logger.error(f"Error stopping performance monitoring: {e}")
+    
+    logger.info("✅ ZivoHealth Backend shutdown complete")
+
+def create_application() -> FastAPI:
+    """Create and configure the FastAPI application"""
+    
+    logger.info("Starting create_application()")
+    
+    app = FastAPI(
+        title=settings.PROJECT_NAME,
+        version=settings.VERSION,
+        description="ZivoHealth - Healthcare Management and AI-Powered Consultation Platform",
+        openapi_url=f"{settings.API_V1_STR}/openapi.json",
+        docs_url=f"{settings.API_V1_STR}/docs",
+        redoc_url=f"{settings.API_V1_STR}/redoc",
+        lifespan=lifespan
+    )
+    
+    logger.info("FastAPI instance created successfully")
+    
+    # CORS Middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
+    
+    # GZip Middleware for response compression
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+    
+    # Performance monitoring middleware
+    app.add_middleware(PerformanceMiddleware)
+    
+    # Import and include API routes AFTER middleware setup
+    # This delays agent loading until after the app is configured
+    try:
+        from app.api.v1.api import api_router
+        logger.info("API router imported successfully")
+    except Exception as e:
+        logger.error(f"Failed to import API router: {e}")
+        raise
+    
+    try:
+        from app.routes.performance import router as performance_router
+        logger.info("Performance router imported successfully")
+    except Exception as e:
+        logger.error(f"Failed to import performance router: {e}")
+        raise
+    
+    try:
+        from app.routes.dashboard import router as dashboard_router
+        logger.info("Dashboard router imported successfully")
+    except Exception as e:
+        logger.error(f"Failed to import dashboard router: {e}")
+        raise
+    
+    app.include_router(api_router, prefix=settings.API_V1_STR)
+    app.include_router(performance_router, prefix="/performance")
+    app.include_router(dashboard_router, prefix="/dashboard")
+    
+    # Mount static files for serving uploaded images and documents
+    uploads_dir = "data/uploads"
+    if not os.path.exists(uploads_dir):
+        os.makedirs(uploads_dir, exist_ok=True)
+        logger.info(f"Created uploads directory: {uploads_dir}")
+    
+    app.mount("/data", StaticFiles(directory="data"), name="data")
+    logger.info("Static files mounted at /data for serving uploads")
+    
+    logger.info("create_application() completed successfully")
+    
+    return app
+
+# Create the FastAPI app instance
+app = create_application()
+
+@app.get("/", include_in_schema=False)
+async def root():
+    """Root endpoint that redirects to API documentation"""
+    return RedirectResponse(url=f"{settings.API_V1_STR}/docs")
+
+@app.get("/health", tags=["Health Check"])
+async def health_check():
+    """Health check endpoint"""
+    try:
+        # Test database connection
+        from app.db.session import get_db
+        db = next(get_db())
+        db.execute("SELECT 1")
+        db_status = "healthy"
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
+        db_status = "unhealthy"
+    
+    try:
+        # Test Redis connection
+        redis_gen = get_redis()
+        redis_client = next(redis_gen)
+        redis_client.ping()
+        redis_status = "healthy"
+    except Exception as e:
+        logger.error(f"Redis health check failed: {e}")
+        redis_status = "unhealthy"
+    
+    return {
+        "status": "healthy",
+        "version": settings.VERSION,
+        "project": settings.PROJECT_NAME,
+        "database": db_status,
+        "redis": redis_status
+    }
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Global HTTP exception handler"""
+    logger.error(f"HTTP {exc.status_code}: {exc.detail} - {request.url}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": True,
+            "message": exc.detail,
+            "status_code": exc.status_code
+        }
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Global exception handler for unhandled exceptions"""
+    logger.error(f"Unhandled exception: {exc} - {request.url}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": True,
+            "message": "Internal server error",
+            "status_code": 500
+        }
+    )
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "main:app",
+        host=settings.SERVER_HOST,
+        port=settings.SERVER_PORT,
+        reload=True,
+        log_level="info"
+    )

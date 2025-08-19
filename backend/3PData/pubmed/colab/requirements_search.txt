@@ -1,0 +1,10 @@
+langchain
+langchain-community
+langchain-core
+sqlalchemy
+psycopg2-binary
+torch
+transformers
+sentence-transformers
+tqdm
+pgvector 
