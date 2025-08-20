@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct ZivoHealthApp: App {
     @Environment(\.scenePhase) var scenePhase
+    @AppStorage("apiEndpoint") private var apiEndpoint = ""
     
     init() {
         // Configure tab bar appearance globally to prevent transparency
@@ -18,6 +19,12 @@ struct ZivoHealthApp: App {
         WindowGroup {
             ContentView()
                 .tint(.zivoRed)
+                .onAppear {
+                    // Seed default endpoint on first launch if empty
+                    if apiEndpoint.isEmpty {
+                        apiEndpoint = AppConfig.defaultAPIEndpoint
+                    }
+                }
                 .onChange(of: scenePhase) { newPhase in
                     handleScenePhaseChange(newPhase)
                 }

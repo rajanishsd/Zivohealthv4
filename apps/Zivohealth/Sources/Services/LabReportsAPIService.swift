@@ -5,7 +5,7 @@ import SwiftUI
 class LabReportsAPIService: ObservableObject {
     static let shared = LabReportsAPIService()
     
-    @AppStorage("apiEndpoint") private var apiEndpoint = "http://192.168.0.105:8000"
+    @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
     
     private var baseURL: String {
         return "\(apiEndpoint)/api/v1/lab-reports"

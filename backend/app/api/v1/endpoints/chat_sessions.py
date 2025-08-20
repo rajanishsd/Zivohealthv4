@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timedelta
 import traceback
 import asyncio
+import threading
 import json
 
 from app import crud, models, schemas
@@ -111,6 +112,121 @@ connection_manager = ChatConnectionManager()
 # Cache for storing processed messages for streaming
 message_cache: dict[str, dict[str, Any]] = {}
 
+# Centralized pending-response coordination for agent questions
+pending_response_events: dict[str, asyncio.Event] = {}
+pending_responses: dict[str, str] = {}
+_pending_lock = threading.Lock()
+async def _wait_for_ws_connection(session_id: int, timeout_seconds: float = 20.0):
+    """Wait briefly for a /status WebSocket connection to be active for this session."""
+    try:
+        checks = int(timeout_seconds * 10)
+        for _ in range(checks):
+            if connection_manager.active_connections.get(session_id):
+                return
+            await asyncio.sleep(0.1)
+    except Exception:
+        pass
+
+
+async def persist_assistant_message_and_notify(session_id: int, message_in: ChatMessageCreate) -> ChatMessage:
+    """Persist an assistant message and notify connected clients, waiting briefly for WS attachment."""
+    from app.db.session import SessionLocal
+    db = SessionLocal()
+    try:
+        # Ensure role is assistant for clarity
+        message_in.role = message_in.role or "assistant"
+        if message_in.role != "assistant":
+            message_in.role = "assistant"
+
+        message = crud.chat_message.create_with_session(db=db, obj_in=message_in, session_id=session_id)
+        db.commit()
+
+        # Wait for WS connection if needed (longer to catch UI attachment)
+        await _wait_for_ws_connection(session_id, 20.0)
+
+        # Notify clients
+        try:
+            from app.schemas.chat_session import ChatMessage as ChatMessageSchema
+            from app.models.chat_session import ChatMessage as ChatMessageModel
+
+            message_schema = ChatMessageSchema(
+                id=message.id,
+                session_id=session_id,
+                user_id=message.user_id,
+                role=message.role,
+                content=message.content,
+                created_at=message.created_at,
+                file_path=message.file_path,
+                file_type=message.file_type,
+                visualizations=message.visualizations
+            )
+
+            total_count = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
+            await connection_manager.notify_message_added(session_id, message_schema, total_count)
+        except Exception:
+            pass
+
+        return message
+    finally:
+        db.close()
+
+
+def _create_pending_response_key(session_id: int) -> str:
+    import time
+    ts = int(time.time() * 1000000)
+    return f"user_response_{session_id}_{ts}"
+
+
+def chat_session_get_pending_response_keys() -> list[str]:
+    with _pending_lock:
+        return list(pending_response_events.keys())
+
+
+def chat_session_set_user_response(response_key: str, response: str):
+    with _pending_lock:
+        if response_key in pending_responses:
+            pending_responses[response_key] = response
+            if response_key in pending_response_events:
+                pending_response_events[response_key].set()
+
+
+async def ask_user_question_and_wait(session_id: int, user_id: str, question: str, timeout_sec: float = 300.0) -> str:
+    """Persist an assistant question, notify clients, and wait for a user reply.
+
+    This is the single entry-point other modules should use to ask users questions.
+    """
+    # Register a pending response event
+    response_key = _create_pending_response_key(session_id)
+    with _pending_lock:
+        pending_response_events[response_key] = asyncio.Event()
+        pending_responses[response_key] = ""
+
+    try:
+        # Persist and notify the assistant question
+        await persist_assistant_message_and_notify(
+            session_id,
+            ChatMessageCreate(
+                role="assistant",
+                content=question,
+                tokens_used=0,
+                response_time_ms=0,
+            ),
+        )
+
+        # Wait for user reply bound via handle_agent_question_response
+        try:
+            await asyncio.wait_for(pending_response_events[response_key].wait(), timeout=timeout_sec)
+            with _pending_lock:
+                reply = pending_responses.get(response_key, "")
+            return reply or "No response received"
+        except asyncio.TimeoutError:
+            return "User did not respond within the timeout period"
+    finally:
+        with _pending_lock:
+            pending_response_events.pop(response_key, None)
+            pending_responses.pop(response_key, None)
+
+
 
 def handle_agent_question_response(session_id: int, user_message: str) -> bool:
     """
@@ -118,28 +234,51 @@ def handle_agent_question_response(session_id: int, user_message: str) -> bool:
     If so, set the response and return True. Otherwise return False.
     """
     try:
-        # Import the workflow functions
-        from app.agentsv2.customer_workflow import get_pending_response_keys, set_user_response
-        
-        # Get all pending response keys
-        pending_keys = get_pending_response_keys()
-        print(f"🔍 [handle_agent_question_response] All pending keys: {pending_keys}")
-        
-        # Find keys that match this session
-        session_keys = [key for key in pending_keys if f"user_response_{session_id}_" in key]
-        print(f"🔍 [handle_agent_question_response] Session {session_id} keys: {session_keys}")
-        
+        # First, check centralized pending store
+        with _pending_lock:
+            session_keys = [k for k in pending_response_events.keys() if f"user_response_{session_id}_" in k]
         if session_keys:
-            # Use the most recent key (they should be timestamped with microseconds)
-            # Sort by the timestamp part to get the latest
-            sorted_keys = sorted(session_keys, key=lambda k: int(k.split('_')[-1]))
-            response_key = sorted_keys[-1]  # Get the most recent one
-            
-            print(f"🔄 [handle_agent_question_response] Setting response for key {response_key}: {user_message}")
-            set_user_response(response_key, user_message)
-            print(f"✅ [handle_agent_question_response] Successfully handled agent question response for session {session_id}")
+            # Use FIFO so replies map to the earliest unanswered question
+            session_keys.sort(key=lambda k: int(k.split('_')[-1]))
+            response_key = session_keys[0]
+            print(f"🔄 [handle_agent_question_response] Setting centralized response (FIFO) for key {response_key}")
+            chat_session_set_user_response(response_key, user_message)
             return True
-        
+
+        # Backward compatibility: also check legacy workflow-managed stores
+        cw_get = cw_set = md_get = md_set = None
+        try:
+            from app.agentsv2.customer_workflow import get_pending_response_keys as cw_get, set_user_response as cw_set
+        except Exception:
+            pass
+        try:
+            from app.agentsv2.medical_doctor_workflow import get_pending_response_keys as md_get, set_user_response as md_set
+        except Exception:
+            pass
+
+        key_setter_pairs: list[tuple[str, Any]] = []
+        if cw_get and cw_set:
+            try:
+                for key in cw_get():
+                    key_setter_pairs.append((key, cw_set))
+            except Exception:
+                pass
+        if md_get and md_set:
+            try:
+                for key in md_get():
+                    key_setter_pairs.append((key, md_set))
+            except Exception:
+                pass
+
+        session_pairs = [(k, setter) for (k, setter) in key_setter_pairs if f"user_response_{session_id}_" in k]
+        if session_pairs:
+            # Use FIFO for legacy stores as well
+            session_pairs.sort(key=lambda pair: int(pair[0].split('_')[-1]))
+            response_key, setter_fn = session_pairs[0]
+            print(f"🔄 [handle_agent_question_response] Setting legacy response (FIFO) for key {response_key}")
+            setter_fn(response_key, user_message)
+            return True
+
         print(f"ℹ️  [handle_agent_question_response] No pending questions for session {session_id}")
         return False
     except Exception as e:
@@ -372,483 +511,10 @@ async def add_direct_message_to_session(
     
     return {"message": "Message saved successfully", "id": message.id}
 
-# Message endpoints
-@router.post("/{session_id}/messages", response_model=ChatMessageResponse)
-async def add_message_to_session(
-    *,
-    db: Session = Depends(deps.get_db),
-    session_id: int,
-    message_in: ChatMessageCreate,
-    current_user: models.User = Depends(deps.get_current_active_user),
-) -> Any:
-    """
-    Add a message to a chat session and get AI response.
-    """
-    # Generate request ID for telemetry tracking
-    request_id = f"chat_{current_user.id}_{session_id}_{uuid.uuid4().hex[:8]}"
-    
-    with trace_agent_operation(
-        "ChatSessionAPI",
-        "add_message_to_session",
-        user_id=current_user.id,
-        session_id=session_id,
-        request_id=request_id
-    ):
-        session = crud.chat_session.get_session_with_messages(
-            db=db, session_id=session_id, user_id=current_user.id
-        )
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Chat session not found",
-            )
-
-        # Automatically set role to 'user' and store the user message
-        user_message_create = ChatMessageCreate(
-            role="user",
-            content=message_in.content,
-            tokens_used=0,
-            response_time_ms=0
-        )
-
-        user_message = crud.chat_message.create_with_session(
-            db=db, obj_in=user_message_create, session_id=session_id
-        )
-        
-        # Send WebSocket notification for the new user message
-        try:
-            from app.schemas.chat_session import ChatMessage as ChatMessageSchema
-            from app.models.chat_session import ChatMessage as ChatMessageModel
-            
-            user_message_schema = ChatMessageSchema(
-                id=user_message.id,
-                role=user_message.role,
-                content=user_message.content,
-                session_id=session_id,
-                user_id=user_message.user_id,
-                created_at=user_message.created_at,
-                file_path=user_message.file_path,
-                file_type=user_message.file_type
-            )
-            
-            # Get current message count
-            total_count = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
-            
-            # Send message update notification
-            await connection_manager.notify_message_added(session_id, user_message_schema, total_count)
-            print(f"📨 [Regular] Sent WebSocket notification for user message in session {session_id}")
-            
-        except Exception as e:
-            print(f"⚠️ [Regular] Failed to send WebSocket notification for user message: {e}")
-        
-        # Log user message to telemetry
-        log_agent_interaction(
-            "ChatSessionAPI",
-            "User",
-            "message_received",
-            {
-                "user_message": message_in.content,
-                "message_length": len(message_in.content)
-            },
-            user_id=current_user.id,
-            session_id=session_id,
-            request_id=request_id
-        )
-
-        ai_message = None
-
-        # Generate AI response with title
-        try:
-            # Get conversation history for context
-            existing_messages = crud.chat_message.get_session_messages(
-                db=db, session_id=session_id, skip=0, limit=50
-            )
-
-            # Prepare messages for OpenAI API
-            messages = [
-                {"role": "system", "content": "You are a helpful health assistant for ZivoHealth. Provide helpful, accurate medical information while always recommending users consult with healthcare professionals for specific medical advice."}
-            ]
-
-            # Add conversation history
-            for msg in existing_messages:
-                messages.append({"role": msg.role, "content": msg.content})
-
-            # Choose between enhanced customer agent and new customer workflow
-            if settings.USE_CUSTOMER_WORKFLOW:
-                # Use new customer workflow
-                from app.agentsv2.customer_workflow import process_customer_request_async
-                
-                agent_result = await process_customer_request_async(
-                    user_id=str(current_user.id),
-                    user_input=message_in.content,
-                    conversation_history=messages,
-                    uploaded_file=None,
-                    session_id=session_id
-                )
-            else:
-                # Use enhanced customer agent for comprehensive processing (legacy)
-                from app.agents import get_process_customer_request
-
-                process_customer_request = get_process_customer_request()
-                agent_result = await process_customer_request(
-                    user_message=message_in.content,
-                    user_id=current_user.id,
-                    session_id=session_id,
-                    uploaded_file=None
-                )
-
-            # Extract AI response from standardized response_data format or fallback to legacy format
-            ai_response = ""
-            ai_title = "Chat"
-            visualizations = None
-            
-            if isinstance(agent_result, dict):
-                # All agents now use standardized response format with "message" field
-                if "message" in agent_result:
-                    ai_response = agent_result["message"]
-                    print(f"✅ [DEBUG] Using standardized message field")
-                else:
-                    ai_response = "No response content found"
-                    print(f"⚠️ [DEBUG] No message field found in agent_result keys: {list(agent_result.keys())}")
-                
-                # Extract title from standardized location
-                ai_title = agent_result.get("title", "Chat")
-                
-                # Extract visualizations from standardized location
-                visualizations = agent_result.get("visualizations", [])
-                print(f"🔍 [DEBUG] [Regular] Found {len(visualizations)} visualizations in response")
-
-            # Store AI response
-            ai_message_create = ChatMessageCreate(
-                role="assistant",
-                content=ai_response,
-                tokens_used=0,  # You could track this if needed
-                response_time_ms=0,  # You could track this if needed
-                visualizations=visualizations
-            )
-
-            ai_message = crud.chat_message.create_with_session(
-                db=db, obj_in=ai_message_create, session_id=session_id
-            )
-            
-            # Send WebSocket notification for the new AI message
-            try:
-                from app.schemas.chat_session import ChatMessage as ChatMessageSchema
-                from app.models.chat_session import ChatMessage as ChatMessageModel
-                
-                message_schema = ChatMessageSchema(
-                    id=ai_message.id,
-                    session_id=session_id,
-                    user_id=ai_message.user_id,
-                    role=ai_message.role,
-                    content=ai_message.content,
-                    created_at=ai_message.created_at,
-                    file_path=ai_message.file_path,
-                    file_type=ai_message.file_type
-                )
-                
-                # Get current message count
-                total_count = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
-                
-                # Send message update notification
-                await connection_manager.notify_message_added(session_id, message_schema, total_count)
-                print(f"📨 [Regular] Sent WebSocket notification for AI message in session {session_id}")
-                
-            except Exception as e:
-                print(f"⚠️ [Regular] Failed to send WebSocket notification: {e}")
-            
-            # Log AI response to telemetry
-            log_agent_interaction(
-                "ChatSessionAPI",
-                "Assistant",
-                "ai_response_generated",
-                {
-                    "ai_response": ai_response,
-                    "response_length": len(ai_response),
-                    "agent_swarm_metrics": agent_result.get("agent_swarm_metrics", {}),
-                    "processing_complete": agent_result.get("processing_complete", False),
-                    "has_error": bool(agent_result.get("error"))
-                },
-                user_id=current_user.id,
-                session_id=session_id,
-                request_id=request_id
-            )
-
-            # Update session title with AI-generated title if available
-            if ai_title and len(ai_title) > 3:
-                session = crud.chat_session.get(db=db, id=session_id)
-                if session:
-                    session.title = ai_title
-                    db.commit()
-                    print(f"📝 [Chat Sessions] Updated session {session_id} title to: '{ai_title}'")
-
-        except Exception as e:
-            print(f"Error generating AI response: {e}")
-            traceback.print_exc()
-            # Log error to telemetry
-            log_agent_interaction(
-                "ChatSessionAPI",
-                "System",
-                "ai_response_error",
-                {
-                    "error_message": str(e),
-                    "user_message": message_in.content
-                },
-                user_id=current_user.id,
-                session_id=session_id,
-                request_id=request_id
-            )
-            # Continue without AI response if it fails
-
-        # Get updated session
-        updated_session = crud.chat_session.get(db=db, id=session_id)
-
-        return ChatMessageResponse(
-            user_message=user_message,
-            ai_message=ai_message,
-            session=updated_session
-        )
+## [Deprecated] Non-stream messaging endpoint removed. Use /{session_id}/messages/stream.
 
 
-@router.post("/{session_id}/messages/upload", response_model=ChatMessageResponse)
-async def add_message_with_file_to_session(
-    *,
-    db: Session = Depends(deps.get_db),
-    session_id: int,
-    current_user: models.User = Depends(deps.get_current_active_user),
-    content: str = Form(...),
-    file: Optional[UploadFile] = File(None),
-) -> Any:
-    """
-    Add a message with optional file upload to a chat session and get AI response.
-    """
-    session = crud.chat_session.get_session_with_messages(
-        db=db, session_id=session_id, user_id=current_user.id
-    )
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chat session not found",
-        )
-    
-    file_info = None
-    print(f"🔍 [DEBUG] File upload debug - file parameter: {file}")
-    print(f"🔍 [DEBUG] File upload debug - file is None: {file is None}")
-    if file:
-        print(f"🔍 [DEBUG] File upload debug - filename: {file.filename}")
-        print(f"🔍 [DEBUG] File upload debug - content_type: {file.content_type}")
-        # Validate file type
-        allowed_types = ['jpg', 'jpeg', 'png', 'pdf']
-        file_extension = file.filename.split('.')[-1].lower() if file.filename else ''
-        
-        if file_extension not in allowed_types:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"File type {file_extension} not supported. Allowed types: {', '.join(allowed_types)}"
-            )
-        
-        # Create uploads directory
-        upload_dir = "data/uploads/chat"
-        os.makedirs(upload_dir, exist_ok=True)
-        
-        # Generate unique filename
-        file_id = str(uuid.uuid4())
-        filename = f"{file_id}_{current_user.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{file_extension}"
-        file_path = os.path.join(upload_dir, filename)
-        
-        # Save file
-        try:
-            with open(file_path, "wb") as buffer:
-                content_bytes = await file.read()
-                buffer.write(content_bytes)
-            
-            file_info = {
-                "file_path": file_path,
-                "file_type": file_extension,
-                "original_name": file.filename,
-                "size": len(content_bytes)
-            }
-            print(f"🔍 [DEBUG] File info created: {file_info}")
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to save file: {str(e)}"
-            )
-    
-    # Store user message
-    # For file uploads with empty content, use empty string (no placeholder message)
-    message_content = content if content.strip() else ""
-    
-    user_message_create = ChatMessageCreate(
-        role="user",
-        content=message_content,
-        file_path=file_info["file_path"] if file_info else None,
-        file_type=file_info["file_type"] if file_info else None,
-        tokens_used=0,
-        response_time_ms=0
-    )
-    
-    print(f"🔍 [DEBUG] Creating user message with content: '{message_content}', file_path: '{file_info['file_path'] if file_info else None}'")
-    
-    user_message = crud.chat_message.create_with_session(
-        db=db, obj_in=user_message_create, session_id=session_id
-    )
-    
-    # Send WebSocket notification for the new user message with file
-    try:
-        from app.schemas.chat_session import ChatMessage as ChatMessageSchema
-        from app.models.chat_session import ChatMessage as ChatMessageModel
-        
-        user_message_schema = ChatMessageSchema(
-            id=user_message.id,
-            session_id=session_id,
-            user_id=user_message.user_id,
-            role=user_message.role,
-            content=user_message.content,
-            created_at=user_message.created_at,
-            file_path=user_message.file_path,
-            file_type=user_message.file_type
-        )
-        
-        # Get current message count
-        total_count = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
-        
-        # Send message update notification
-        await connection_manager.notify_message_added(session_id, user_message_schema, total_count)
-        print(f"📨 [Upload] Sent WebSocket notification for user message with file in session {session_id}")
-        
-    except Exception as e:
-        print(f"⚠️ [Upload] Failed to send WebSocket notification for user message: {e}")
-    
-    ai_message = None
-    
-    try:
-        # Get existing messages for context
-        existing_messages = crud.chat_message.get_session_messages(
-            db=db, session_id=session_id, skip=0, limit=50
-        )
-        
-        # Prepare conversation history for context
-        messages = [{"role": msg.role, "content": msg.content} for msg in existing_messages]
-        
-        # Choose between enhanced customer agent and new customer workflow
-        if settings.USE_CUSTOMER_WORKFLOW:
-            # Use new customer workflow
-            from app.agentsv2.customer_workflow import process_customer_request_async
-            
-            print(f"🔍 [DEBUG] About to call customer workflow with uploaded_file: {file_info}")
-            agent_result = await process_customer_request_async(
-                user_id=str(current_user.id),
-                user_input=content,
-                conversation_history=messages,
-                uploaded_file=file_info,
-                session_id=session_id
-            )
-        else:
-            # Use enhanced customer agent for comprehensive processing (legacy)
-            from app.agents import get_process_customer_request
-            
-            process_customer_request = get_process_customer_request()
-            agent_result = await process_customer_request(
-                user_message=content,
-                user_id=current_user.id,
-                session_id=session_id,
-                uploaded_file=file_info
-            )
-        
-        # Extract AI response from standardized response_data format or fallback to legacy format
-        ai_response = ""
-        ai_title = "Chat"
-        visualizations = None
-        
-        if isinstance(agent_result, dict):
-            # All agents now use standardized response format with "message" field
-            if "message" in agent_result:
-                ai_response = agent_result["message"] 
-                print(f"✅ [DEBUG] Using standardized message field")
-            else:
-                ai_response = "No response content found"
-                print(f"⚠️ [DEBUG] No message field found in agent_result keys: {list(agent_result.keys())}")
-            
-            # Extract title from standardized location
-            ai_title = agent_result.get("title", "Chat")
-            
-            # Extract visualizations from standardized location
-            visualizations = agent_result.get("visualizations", [])
-            print(f"🔍 [DEBUG] [Upload] Found {len(visualizations)} visualizations in response")
-        
-        # Store AI response
-        ai_message_create = ChatMessageCreate(
-            role="assistant",
-            content=ai_response,
-            tokens_used=0,
-            response_time_ms=0,
-            visualizations=visualizations
-        )
-        
-        ai_message = crud.chat_message.create_with_session(
-            db=db, obj_in=ai_message_create, session_id=session_id
-        )
-        
-        # Send WebSocket notification for the new AI message
-        try:
-            from app.schemas.chat_session import ChatMessage as ChatMessageSchema
-            from app.models.chat_session import ChatMessage as ChatMessageModel
-            
-            ai_message_schema = ChatMessageSchema(
-                id=ai_message.id,
-                session_id=session_id,
-                user_id=ai_message.user_id,
-                role=ai_message.role,
-                content=ai_message.content,
-                created_at=ai_message.created_at,
-                file_path=ai_message.file_path,
-                file_type=ai_message.file_type
-            )
-            
-            # Get current message count
-            total_count = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
-            
-            # Note: WebSocket notification handled by status updates below
-            print(f"📨 [Upload] AI message stored in session {session_id} (notification via status updates)")
-            
-        except Exception as e:
-            print(f"⚠️ [Upload] Failed to store AI message: {e}")
-        
-        # Update session title with AI-generated title if available
-        if ai_title and len(ai_title) > 3:
-            session = crud.chat_session.get(db=db, id=session_id)
-            if session:
-                session.title = ai_title
-                db.commit()
-                print(f"📝 [Chat Sessions] Updated session {session_id} title to: '{ai_title}'")
-        
-        # Send completion status update
-        await connection_manager.send_status_update(
-            session_id,
-            ChatStatusMessage(
-                session_id=session_id,
-                status="complete",
-                message="File processing complete",
-                progress=1.0,
-                agent_name="System"
-            )
-        )
-        print(f"📡 [Upload] Sent completion status for session {session_id}")
-        
-    except Exception as e:
-        print(f"Error generating AI response: {e}")
-        traceback.print_exc()
-        # Continue without AI response if it fails
-    
-    # Get updated session
-    updated_session = crud.chat_session.get(db=db, id=session_id)
-    
-    return ChatMessageResponse(
-        user_message=user_message,
-        ai_message=ai_message,
-        session=updated_session
-    )
+## [Deprecated] Non-stream file upload endpoint removed. Use /{session_id}/messages/upload/stream.
 
 
 @router.get("/{session_id}/messages", response_model=List[ChatMessage])
@@ -1075,6 +741,17 @@ async def websocket_chat_status(
     print(f"🔌 [WebSocket] New connection attempt for session {session_id}")
     await connection_manager.connect(websocket, session_id)
     print(f"✅ [WebSocket] Successfully connected for session {session_id}")
+    # Notify clients (including the just-connected one) so UIs can optionally reload history
+    try:
+        await connection_manager.send_status_update(session_id, ChatStatusMessage(
+            session_id=session_id,
+            status="connected",
+            message=None,
+            progress=0.0,
+            agent_name="System"
+        ))
+    except Exception:
+        pass
     try:
         while True:
             # Keep connection alive and listen for disconnect

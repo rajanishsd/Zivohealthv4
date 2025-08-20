@@ -3,7 +3,7 @@ import SwiftUI
 struct MealDetailView: View {
     let meal: NutritionDataResponse
     @Environment(\.presentationMode) var presentationMode
-    @AppStorage("apiEndpoint") private var apiEndpoint = "http://192.168.0.105:8000"
+    @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
     
     var body: some View {
         NavigationView {

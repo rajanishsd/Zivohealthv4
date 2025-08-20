@@ -8,7 +8,7 @@ struct LabCategoryDetailView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var cancellables = Set<AnyCancellable>()
-    @AppStorage("apiEndpoint") private var apiEndpoint = "http://192.168.0.105:8000"
+    @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
     
     var body: some View {
         ScrollView {

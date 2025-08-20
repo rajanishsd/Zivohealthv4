@@ -51,8 +51,8 @@ restart_service() {
         "postgresql"|"postgres"|"redis"|"backend")
             print_status "Restarting $service only..."
             # Stop the service
-            if [ -f "./scripts/stop-all.sh" ]; then
-                ./scripts/stop-all.sh "$service"
+            if [ -f "./scripts/dev/stop-all.sh" ]; then
+                ./scripts/dev/stop-all.sh "$service"
             else
                 print_error "Stop script not found!"
                 exit 1
@@ -64,8 +64,8 @@ restart_service() {
             echo ""
             
             # Start the service
-            if [ -f "./scripts/start-all.sh" ]; then
-                ./scripts/start-all.sh "$service"
+            if [ -f "./scripts/dev/start-all.sh" ]; then
+                ./scripts/dev/start-all.sh "$service"
             else
                 print_error "Start script not found!"
                 exit 1
@@ -93,8 +93,8 @@ main() {
     # Step 1: Stop all services
     print_status "Step 1: Stopping all services..."
     echo "----------------------------------------"
-    if [ -f "./scripts/stop-all.sh" ]; then
-        ./scripts/stop-all.sh
+    if [ -f "./scripts/dev/stop-all.sh" ]; then
+        ./scripts/dev/stop-all.sh
     else
         print_error "stop-all.sh script not found!"
         exit 1
@@ -112,8 +112,8 @@ main() {
     # Step 2: Start all services
     print_status "Step 2: Starting all services..."
     echo "----------------------------------------"
-    if [ -f "./scripts/start-all.sh" ]; then
-        ./scripts/start-all.sh
+    if [ -f "./scripts/dev/start-all.sh" ]; then
+        ./scripts/dev/start-all.sh
     else
         print_error "start-all.sh script not found!"
         exit 1
@@ -123,7 +123,7 @@ main() {
     print_success "🎉 ZivoHealth services restart complete!"
     echo ""
     echo "💡 Tip: You can restart individual services with:"
-    echo "   ./scripts/restart-all.sh [service]"
+    echo "   ./scripts/dev/restart-all.sh [service]"
     echo "   Available services: postgresql, redis, backend, dashboard"
 }
 

@@ -206,134 +206,22 @@ class CustomerState(TypedDict):
 
 
 
-async def ask_user_question(question: str, session_id: int, user_id: str) -> str:
-    """Ask a clarifying question to the user and get their response.
-    
-    This tool will present a question to the user through the interface
-    and wait for their response to clarify incomplete requests.
-    
-    Args:
-        question: The clarifying question to ask the user
-        session_id: The session ID for the chat session
-        user_id: The user ID for the user
-        
-    Returns:
-        String containing the user's response
-    """
+async def ask_user_question(question: str, session_id: Optional[int], user_id: str) -> str:
+    """Ask a clarifying question to the user and wait for their response (with DB + WS updates)."""
     if not session_id or not user_id:
-        print(f"⚠️ [ask_user_question] No session context available. session_id={session_id}, user_id={user_id}")
         return f"I need more context to ask this question: {question}"
-    
-    # Create unique response key with more precise timestamp
-    import time
-    timestamp = int(time.time() * 1000000)  # Use microseconds for better uniqueness
-    response_key = f"user_response_{session_id}_{timestamp}"
-    
-    print(f"🔑 [ask_user_question] Created response key: {response_key}")
-    
-    with _lock:
-        # Create an event for this response  
-        user_response_events[response_key] = asyncio.Event()
-        user_responses[response_key] = ""
-        print(f"📝 [ask_user_question] Registered response tracking for key: {response_key}")
-    
-    try:
-        # Store the question as an assistant message in the chat session
-        db = SessionLocal()
-        try:
-            question_message = ChatMessageCreate(
-                role="assistant",
-                content=question,
-                tokens_used=0,
-                response_time_ms=0
-            )
-            created_message = crud.chat_message.create_with_session(
-                db=db, obj_in=question_message, session_id=session_id
-            )
-            db.commit()
-            print(f"💬 [ask_user_question] Question stored in session {session_id}: {question}")
-            
-            # Send WebSocket notification for the agent question
-            try:
-                from app.api.v1.endpoints.chat_sessions import connection_manager
-                from app.schemas.chat_session import ChatMessage as ChatMessageSchema
-                from app.models.chat_session import ChatMessage as ChatMessageModel
-                
-                message_schema = ChatMessageSchema(
-                    id=created_message.id,
-                    session_id=session_id,
-                    user_id=created_message.user_id,
-                    role=created_message.role,
-                    content=created_message.content,
-                    created_at=created_message.created_at,
-                    file_path=created_message.file_path,
-                    file_type=created_message.file_type
-                )
-                
-                # Get current message count
-                total_count = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
-                
-                # Send message update notification
-                await connection_manager.notify_message_added(session_id, message_schema, total_count)
-                print(f"📨 [ask_user_question] Sent WebSocket notification for agent question in session {session_id}")
-                
-            except Exception as e:
-                print(f"⚠️ [ask_user_question] Failed to send WebSocket notification: {e}")
-        except Exception as e:
-            print(f"❌ [ask_user_question] Error storing question: {e}")
-        finally:
-            db.close()
-        
-        print(f"⏳ [ask_user_question] Waiting for user response with key: {response_key}")
-        print(f"📋 [ask_user_question] Current pending keys: {list(user_response_events.keys())}")
-        
-        # Wait for user response (with timeout)
-        try:
-            await asyncio.wait_for(user_response_events[response_key].wait(), timeout=300.0)  # 5 minute timeout
-            
-            # Double-check the response is still available (race condition protection)
-            with _lock:
-                response = user_responses.get(response_key, "")
-            
-            print(f"✅ [ask_user_question] Received response: {response}")
-            
-            # Store the user response as a message in the chat session
-            if response:
-                db = SessionLocal()
-                try:
-                    response_message = ChatMessageCreate(
-                        role="user",
-                        content=response,
-                        tokens_used=0,
-                        response_time_ms=0
-                    )
-                    crud.chat_message.create_with_session(
-                        db=db, obj_in=response_message, session_id=session_id
-                    )
-                    db.commit()
-                    print(f"💬 [ask_user_question] Response stored in session {session_id}: {response}")
-                except Exception as e:
-                    print(f"❌ [ask_user_question] Error storing response: {e}")
-                finally:
-                    db.close()
-                    
-            return response or "No response received"
-            
-        except asyncio.TimeoutError:
-            print(f"⏰ [ask_user_question] Timeout waiting for user response for key: {response_key}")
-            return "User did not respond within the timeout period"
-    
-    except Exception as e:
-        print(f"❌ [ask_user_question] Error: {str(e)}")
-        return f"Error occurred while asking question: {str(e)}"
-    
-    finally:
-        # Clean up the response tracking
-        print(f"🧹 [ask_user_question] Cleaning up response key: {response_key}")
-        with _lock:
-            user_response_events.pop(response_key, None)
-            user_responses.pop(response_key, None)
 
+    try:
+        # Persist and notify via centralized chat session helper (single writer)
+        try:
+            from app.api.v1.endpoints.chat_sessions import ask_user_question_and_wait
+            # Delegate storing the question and waiting for reply to chat sessions module
+            reply = await ask_user_question_and_wait(session_id, user_id, question, timeout_sec=300.0)
+            return reply
+        except Exception:
+            pass
+    finally:
+        pass
 
 def set_user_response(response_key: str, response: str):
     """Set the user response for a pending question"""
@@ -952,9 +840,26 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         Returns:
             Dict containing medical analysis and recommendations
         """
-        from app.agentsv2.medical_doctor_panels import MedicalDoctorPanel
-        panel = MedicalDoctorPanel(api_key=settings.OPENAI_API_KEY, budget_limit=budget_limit)
-        return panel.process_patient_case(patient_case, budget_limit)
+        # Use the dedicated LangGraph medical doctor workflow
+        from app.agentsv2.medical_doctor_workflow import process_medical_request_async
+        try:
+            result = await process_medical_request_async(
+                user_id=user_id,
+                patient_case=patient_case,
+                session_id=session_id,
+                conversation_history=state.get("conversation_history", []),
+                budget_limit=budget_limit,
+            )
+            return result
+        except Exception as mdw_e:
+            print(f"⚠️ [medical_doctor_agent_tool] Workflow error: {mdw_e}")
+            # Minimal fallback using panel directly if workflow fails
+            from app.agentsv2.medical_doctor_panels import MedicalDoctorPanel
+            try:
+                panel = MedicalDoctorPanel(api_key=settings.OPENAI_API_KEY, budget_limit=budget_limit)
+                return panel.process_patient_case(patient_case, budget_limit)
+            except Exception as inner_e:
+                return {"action": "error", "details": str(inner_e)}
     
     @tool
     async def document_workflow_tool(file_path: str, analysis_only: bool = False) -> dict:

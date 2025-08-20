@@ -20,7 +20,7 @@ class ChatViewModel: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var isLoading = false
     @Published var error: String?
-    @Published var currentSessionId: Int?
+    @Published var currentSessionId: Int? { didSet { if let sessionId = currentSessionId, sessionId != oldValue { startStatusUpdates(sessionId: sessionId) } } }
     
     // Verification tracking (still local until we add backend support)
     @Published var pendingVerificationRequest: ConsultationRequestResponse?
@@ -649,251 +649,14 @@ class ChatViewModel: ObservableObject {
     }
 
     func sendMessage(_ content: String) async {
-        print("💬 [ChatViewModel] sendMessage called")
-        print("📤 [ChatViewModel] Message: '\(content)'")
-        print("📊 [ChatViewModel] Current messages count: \(messages.count)")
-        
-        await MainActor.run {
-            // Simplified approach: Don't manually add user message, let backend handle it
-            isLoading = true
-            error = nil
-            isAIResponseComplete = false
-            lastInteractionWasFileUpload = false  // This is a text-only message
-            currentStatus = "Sending message..."
-            isTyping = true
-            print("📝 [ChatViewModel] Set loading state for text message")
-        }
-        
-        await sendMessageInternal(content: content, fileURL: nil)
+        await sendStreamingMessage(content)
     }
     
     func sendMessage(_ content: String, fileURL: URL) async {
-        print("💬 [ChatViewModel] sendMessage with file called")
-        print("📤 [ChatViewModel] Message: '\(content)'")
-        print("📎 [ChatViewModel] File: \(fileURL.lastPathComponent)")
-        print("📊 [ChatViewModel] Current messages count: \(messages.count)")
-        
-        await MainActor.run {
-            // Set loading state but DON'T create local message for file uploads
-            // Let WebSocket notifications handle message creation to avoid duplicates
-            isLoading = true
-            error = nil
-            isAIResponseComplete = false
-            lastInteractionWasFileUpload = true  // This involves a file upload
-            isAnalyzingFile = true  // Immediately start showing analysis status
-            
-            // Only update filename if we're starting a new upload (different file)
-            let newFilename = fileURL.lastPathComponent
-            if currentUploadFilename != newFilename {
-                currentUploadFilename = newFilename  // Store the filename
-                print("📎 [ChatViewModel] Set filename to: \(currentUploadFilename)")
-            }
-            
-            currentStatus = "Analyzing file..."
-            isTyping = true
-            print("📝 [ChatViewModel] Set loading state for file upload - isAnalyzingFile: true")
-        }
-        
-        // Ensure we have a current session for WebSocket connection
-        if currentSessionId == nil {
-            await createNewSession()
-        }
-        
-        // Establish WebSocket connection for file upload notifications BEFORE sending
-        if let sessionId = currentSessionId {
-            print("🔌 [ChatViewModel] Starting WebSocket for file upload in session: \(sessionId)")
-            startStatusUpdates(sessionId: sessionId)
-        }
-        
-        await sendMessageInternal(content: content, fileURL: fileURL)
+        await sendStreamingMessage(content, fileURL: fileURL)
     }
     
-    private func sendMessageInternal(content: String, fileURL: URL?) async {
-        // Start tracking this message
-        let trackingKey = trackSentMessage(content: content, fileURL: fileURL)
-        
-        do {
-            // Ensure we have a current session
-            if currentSessionId == nil {
-                print("🔧 [ChatViewModel] No current session, creating new one...")
-                await createNewSession()
-            }
-            
-            guard let sessionId = currentSessionId else {
-                print("❌ [ChatViewModel] Still no session ID after creation")
-                throw URLError(.badServerResponse)
-            }
-            
-            print("🌐 [ChatViewModel] Sending message to backend for session: \(sessionId)")
-            
-            // Start WebSocket connection for status updates (needed for real-time notifications)
-            startStatusUpdates(sessionId: sessionId)
-            
-            // Send message to backend and get AI response
-            let response: ChatMessageResponse
-            if let fileURL = fileURL {
-                response = try await networkService.sendChatMessageWithFile(sessionId: sessionId, message: content, fileURL: fileURL)
-            } else {
-                response = try await networkService.sendChatMessage(sessionId: sessionId, message: content)
-            }
-            
-            print("📨 [ChatViewModel] Received response from backend")
-            
-            // Update tracking with response data
-            updateMessageTracking(trackingKey: trackingKey, response: response)
-            
-            // Simplified approach: Don't manually add messages, let status updates handle it
-            // Just update session info and let WebSocket status updates reload messages
-            await MainActor.run {
-                // Update enhanced mode setting from session data in response
-                self.updateEnhancedModeFromSession(response.session)
-                
-                // Update session title if available
-                if let title = response.session.title {
-                    self.currentSessionTitle = title
-                    print("🏷️ [ChatViewModel] Updated session title: \(title)")
-                }
-                
-                print("✅ [ChatViewModel] Backend call completed, status updates will handle message loading")
-            }
-            
-        } catch {
-            print("❌ [ChatViewModel] Error sending message: \(error)")
-            print("🔍 [ChatViewModel] Error details: \(String(describing: error))")
-            
-            // If it's a session not found error, try to recover
-            if error.localizedDescription.contains("404") || error.localizedDescription.contains("not found") && !isRetrying {
-                print("🔧 [ChatViewModel] Attempting session recovery...")
-                isRetrying = true
-                
-                UserDefaults.standard.removeObject(forKey: "currentChatSessionId")
-                currentSessionId = await historyManager.ensureCurrentSession()
-                
-                if let newSessionId = currentSessionId {
-                    UserDefaults.standard.set(newSessionId, forKey: "currentChatSessionId")
-                    print("✅ [ChatViewModel] Session recovered, checking if message already exists...")
-                    
-                    // Verify if the message was actually processed after session recovery
-                    let wasProcessed = await verifyMessageProcessing(content: content, fileURL: fileURL)
-                    
-                    if wasProcessed {
-                        print("✅ [ChatViewModel] Message was already processed after session recovery, skipping retry")
-                        await MainActor.run {
-                            self.error = nil
-                            self.isLoading = false
-                            self.isRetrying = false
-                        }
-                        return
-                    } else {
-                        print("🔄 [ChatViewModel] Message not processed after session recovery, retrying...")
-                        await MainActor.run {
-                            self.isRetrying = false
-                        }
-                        
-                        // Retry sending the message with the new session
-                        if let fileURL = fileURL {
-                            await sendMessage(content, fileURL: fileURL)
-                        } else {
-                            await sendMessage(content)
-                        }
-                        return
-                    }
-                } else {
-                    await MainActor.run {
-                        self.isRetrying = false
-                    }
-                }
-            }
-            
-            // Provide user-friendly error messages based on error content
-            let errorMessage = error.localizedDescription.lowercased()
-            
-            await MainActor.run {
-                isLoading = false
-                // Keep filename visible even on error so user knows what they tried to upload
-                
-                // Check if network service indicates no connectivity
-                if !networkService.isNetworkAvailable {
-                    self.error = "No internet connection. Please check your network settings and try again."
-                } else if networkService.isReconnecting {
-                    self.error = "Reconnecting to server. Please wait a moment and try again."
-                } else {
-                    if errorMessage.contains("network") || errorMessage.contains("connection") || errorMessage.contains("internet") {
-                        self.error = "Network error. Please check your internet connection and try again."
-                    } else if errorMessage.contains("timeout") || errorMessage.contains("timed out") {
-                        self.error = "Request timed out. Please try again."
-                    } else if errorMessage.contains("404") || errorMessage.contains("not found") {
-                        self.error = "Session expired. Your message will be retried automatically."
-                    } else if errorMessage.contains("401") || errorMessage.contains("unauthorized") {
-                        self.error = "Authentication error. Please try again."
-                    } else if errorMessage.contains("500") || errorMessage.contains("server") {
-                        self.error = "Server error. Please try again in a moment."
-                    } else {
-                        self.error = "Unable to send message. Please try again."
-                    }
-                }
-                
-                // Reset AI response completion on error
-                isAIResponseComplete = false
-                isAnalyzingFile = false  // Re-enable input on error
-            }
-            
-            // Auto-retry for network-related errors after a delay (but NOT for 404 errors)
-            if (errorMessage.contains("network") || errorMessage.contains("connection") || 
-               errorMessage.contains("timeout") || networkService.isReconnecting) &&
-               !errorMessage.contains("404") && !errorMessage.contains("not found") &&
-               !isRetrying {
-                
-                print("🔄 [ChatViewModel] Scheduling auto-retry for network error...")
-                isRetrying = true
-                
-                Task {
-                    // Wait 3 seconds then retry
-                    try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    
-                    // Check if network is back online
-                    if networkService.isNetworkAvailable && !networkService.isReconnecting {
-                        print("🔄 [ChatViewModel] Network restored, checking if retry is needed...")
-                        
-                        await MainActor.run {
-                            self.error = "Checking message status..."
-                        }
-                        
-                        // Verify if the message was actually processed by checking backend state
-                        let wasProcessed = await verifyMessageProcessing(content: content, fileURL: fileURL)
-                        
-                        if wasProcessed {
-                            print("✅ [ChatViewModel] Message was already processed successfully, skipping retry")
-                            await MainActor.run {
-                                self.error = nil
-                                self.isLoading = false
-                                self.isRetrying = false
-                            }
-                        } else {
-                            print("🔄 [ChatViewModel] Message not processed, retrying...")
-                            await MainActor.run {
-                                self.error = "Retrying message..."
-                                self.isRetrying = false
-                            }
-                            
-                            // Retry the message
-                            if let fileURL = fileURL {
-                                await sendMessage(content, fileURL: fileURL)
-                            } else {
-                                await sendMessage(content)
-                            }
-                        }
-                    } else {
-                        await MainActor.run {
-                            self.isRetrying = false
-                        }
-                    }
-                }
-            } else if errorMessage.contains("404") || errorMessage.contains("not found") {
-                print("🚫 [ChatViewModel] Not retrying 404 error - session recovery already attempted")
-            }
-        }
-    }
+    // Removed legacy non-stream send path (sendMessageInternal). All sends use streaming variants.
     
     // MARK: - Advanced Message Verification
     
@@ -1210,6 +973,7 @@ class ChatViewModel: ObservableObject {
         statusTask?.cancel()
         
         statusTask = Task {
+            // Clean start; rely on WS events only
             let statusStream = networkService.connectToStatusUpdates(sessionId: sessionId)
             
             for await statusMessage in statusStream {
@@ -1218,6 +982,7 @@ class ChatViewModel: ObservableObject {
                     
                     // Handle enriched status types that include a new message payload
                     if statusText == "message_added" || statusText == "complete" {
+                        var appendedFromPayload = false
                         // Try to parse the JSON payload that the backend sent along with the status
                         if let rawPayload = statusMessage.message,
                            let data = rawPayload.data(using: .utf8) {
@@ -1250,12 +1015,13 @@ class ChatViewModel: ObservableObject {
                                         fileName: fileName,
                                         visualizations: visualizations
                                     )
-                                    // Deduplicate on (role, content, timestamp)
+                                    // Deduplicate on (role, content)
                                     let isDuplicate = self.messages.contains(where: { existing in
                                         existing.role == chatMsg.role && existing.content == chatMsg.content
                                     })
                                     if !isDuplicate {
                                         self.messages.append(chatMsg)
+                                        appendedFromPayload = true
                                         if self.useEnhancedMode {
                                             let enhanced = self.createEnhancedMessage(from: chatMsg, content: chatMsg.content)
                                             self.enhancedMessages.append(enhanced)
@@ -1266,6 +1032,10 @@ class ChatViewModel: ObservableObject {
                                 print("⚠️ [ChatViewModel] Failed to parse status payload: \(error)")
                             }
                         }
+                        // Fallback: if nothing got appended from payload, reload from backend
+                        if !appendedFromPayload {
+                            Task { await self.reloadLatestMessages() }
+                        }
                         // Update UI flags for completion status
                         if statusText == "complete" {
                             self.currentStatus = "Complete"
@@ -1275,7 +1045,7 @@ class ChatViewModel: ObservableObject {
                             self.isAIResponseComplete = true
                             self.currentProgress = statusMessage.progress ?? 1.0
                         }
-                        return // Skip automatic reload for these statuses
+                        return // Skip automatic reload beyond the explicit fallback above
                     }
                     
                     // Update UI status for other status types
@@ -1305,13 +1075,12 @@ class ChatViewModel: ObservableObject {
                     }
                 }
                 
-                // Stop if complete or error (but not for message_added)
+                // On complete or error, clear analyzing state but keep listening for future messages
                 if statusMessage.status == "complete" || statusMessage.status == "error" {
-                    // Clear analysis state on completion or error
                     await MainActor.run {
                         self.isAnalyzingFile = false
                     }
-                    break
+                    continue
                 }
             }
         }

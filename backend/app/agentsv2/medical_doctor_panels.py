@@ -327,13 +327,19 @@ class InformationSufficiencyEvaluator:
 class MedicalDoctorPanel:
     """Orchestrates the virtual medical panel using autogen"""
     
-    def __init__(self, api_key: str, budget_limit: Optional[float] = None):
+    def __init__(self, api_key: str, budget_limit: Optional[float] = None,
+                 question_rounds_limit: int = 1,
+                 questions_per_round_limit: int = 5):
         self.api_key = api_key
         self.budget_tracker = BudgetTracker(budget_limit=budget_limit)
         self.current_hypotheses: List[DiagnosisHypothesis] = []
         self.patient_data = {}
         self.conversation_history = []
         self.sufficiency_evaluator = InformationSufficiencyEvaluator()  # Add evaluator
+        # Limits for question-asking behavior
+        self.question_rounds_limit: int = max(0, question_rounds_limit)
+        self.questions_per_round_limit: int = max(1, questions_per_round_limit)
+        self.question_rounds_used: int = 0
         self.setup_agents()
         
     def setup_agents(self):
@@ -479,10 +485,22 @@ class MedicalDoctorPanel:
             BIAS TOWARD QUESTIONING: When in doubt between asking questions vs ordering tests, ALWAYS choose questions first.
             Essential questions often missing: onset details, associated symptoms, family history, medications, social history, physical exam findings.
             
-            IMPORTANT: When you reach a decision, end your message with one of these exact phrases:
-            - "DECISION: ASK_QUESTIONS" (if you decide to ask follow-up questions)
-            - "DECISION: ORDER_TESTS" (if you decide to order diagnostic tests)  
-            - "DECISION: COMMIT_DIAGNOSIS" (if you decide to commit to a diagnosis)
+            OUTPUT FORMAT REQUIREMENT:
+            - When you reach a decision, respond with a single JSON object using this schema:
+              {
+                "action": "ASK_QUESTIONS" | "ORDER_TESTS" | "COMMIT_DIAGNOSIS",
+                "details": "string summary of reasoning",
+                "questions": ["...", "..."]        // include ONLY when action == "ASK_QUESTIONS"
+                "tests": ["...", "..."]             // include ONLY when action == "ORDER_TESTS"
+                "diagnosis": {                         // include ONLY when action == "COMMIT_DIAGNOSIS"
+                  "primary": "condition name",
+                  "confidence": "low|medium|high|percent",
+                  "differential": ["...", "..."]
+                }
+              }
+            - After the JSON object, include one final line with one of these exact decision markers to signal termination:
+              "DECISION: ASK_QUESTIONS" | "DECISION: ORDER_TESTS" | "DECISION: COMMIT_DIAGNOSIS"
+            - Do not wrap JSON in markdown fences and do not include any other prose outside the JSON and the final DECISION line.
             
             This signals the end of the panel discussion.
             
@@ -616,6 +634,7 @@ class MedicalDoctorPanel:
         )
         
         # Initiate the discussion
+        remaining_question_rounds = max(0, self.question_rounds_limit - self.question_rounds_used)
         initial_prompt = f"""
         MEDICAL PANEL CONSULTATION
         
@@ -623,6 +642,14 @@ class MedicalDoctorPanel:
         
         Current Budget Status: ${self.budget_tracker.cumulative_cost:.2f} spent
         {f'Budget Limit: ${self.budget_tracker.budget_limit:.2f}' if self.budget_tracker.budget_limit else 'No budget limit set'}
+        
+        Constraints:
+        - Total ASK_QUESTIONS rounds allowed: {self.question_rounds_limit}
+        - ASK_QUESTIONS rounds already used: {self.question_rounds_used}
+        - ASK_QUESTIONS rounds remaining: {remaining_question_rounds}
+        - Maximum questions allowed in any round: {self.questions_per_round_limit}
+        - If no ASK_QUESTIONS rounds remain, you MUST choose to ORDER_TESTS or COMMIT_DIAGNOSIS.
+        - When asking questions, include no more than {self.questions_per_round_limit} concise, high-yield questions.
         
         Please conduct a thorough Chain of Debate to reach consensus on one of three actions:
         1. Ask follow-up questions
@@ -643,6 +670,22 @@ class MedicalDoctorPanel:
         
         # Extract the final decision from the conversation
         final_decision = self._extract_final_decision(groupchat.messages)
+
+        # Enforce per-round cap defensively and apply question-round limits
+        if final_decision.get("action") == "ask_questions":
+            qs = final_decision.get("questions", []) or []
+            if len(qs) > self.questions_per_round_limit:
+                logger.info(
+                    f"Capping coordinator questions from {len(qs)} to {self.questions_per_round_limit} (per-round limit)"
+                )
+                final_decision["questions"] = qs[: self.questions_per_round_limit]
+            if self.question_rounds_used >= self.question_rounds_limit:
+                logger.info("Question limit reached before any follow-up. Forcing a decision without further questions.")
+                forced = self._conduct_forced_decision(patient_case)
+                forced["conversation_analysis"] = self._monitor_conversation_progress(groupchat.messages)
+                return forced
+            else:
+                self.question_rounds_used += 1
         
         # Add conversation analysis
         conversation_analysis = self._monitor_conversation_progress(groupchat.messages)
@@ -664,58 +707,112 @@ class MedicalDoctorPanel:
         
         last_decision = coordinator_messages[-1]['content']
         
-        # Parse the decision (this is simplified - in practice you'd want more robust parsing)
-        decision = {
+        # Attempt to parse structured JSON first
+        decision: Dict = {
             "action": "unknown",
             "details": last_decision,
             "timestamp": datetime.now(),
             "conversation_length": len(messages),
             "budget_status": {
                 "spent": self.budget_tracker.cumulative_cost,
-                "remaining": (self.budget_tracker.budget_limit - self.budget_tracker.cumulative_cost) 
-                           if self.budget_tracker.budget_limit else None
+                "remaining": (self.budget_tracker.budget_limit - self.budget_tracker.cumulative_cost)
+                               if self.budget_tracker.budget_limit else None
             }
         }
+
+        # Try to locate a JSON object within the content
+        import re
+        json_match = None
+        try:
+            # Greedy match the first top-level JSON object
+            json_match = re.search(r"\{[\s\S]*?\}", last_decision)
+            if json_match:
+                parsed = json.loads(json_match.group(0))
+                action_raw = (parsed.get("action") or "").upper()
+                if action_raw in {"ASK_QUESTIONS", "ORDER_TESTS", "COMMIT_DIAGNOSIS"}:
+                    decision["action"] = {
+                        "ASK_QUESTIONS": "ask_questions",
+                        "ORDER_TESTS": "order_tests",
+                        "COMMIT_DIAGNOSIS": "commit_diagnosis",
+                    }[action_raw]
+                    decision["details"] = parsed.get("details") or decision["details"]
+                    if decision["action"] == "ask_questions":
+                        questions = parsed.get("questions") or []
+                        # Respect per-round limit
+                        decision["questions"] = (questions or [])[: self.questions_per_round_limit]
+                    elif decision["action"] == "order_tests":
+                        decision["tests"] = parsed.get("tests") or []
+                    elif decision["action"] == "commit_diagnosis":
+                        decision["diagnosis"] = parsed.get("diagnosis") or {}
+                    return decision
+        except Exception as e:
+            logger.info(f"JSON decision parse failed, falling back to text parsing: {e}")
         
-        # Determine action type based on keywords in coordinator's final message
+        # Determine action type; prefer explicit decision markers
+        upper_decision = last_decision.upper()
         lower_decision = last_decision.lower()
-        if "ask" in lower_decision and "question" in lower_decision:
+        if "DECISION: ASK_QUESTIONS" in upper_decision:
             decision["action"] = "ask_questions"
-            # Extract specific questions from the decision
             decision["questions"] = self._extract_questions_from_text(last_decision)
-        elif "order" in lower_decision and "test" in lower_decision:
+        elif "DECISION: ORDER_TESTS" in upper_decision:
             decision["action"] = "order_tests"
-            # Extract test names from the decision
             decision["tests"] = self._extract_tests_from_text(last_decision)
-        elif "diagnos" in lower_decision and ("commit" in lower_decision or "confidence" in lower_decision):
+        elif "DECISION: COMMIT_DIAGNOSIS" in upper_decision:
             decision["action"] = "commit_diagnosis"
-            # Extract diagnosis information
             decision["diagnosis"] = self._extract_diagnosis_from_text(last_decision)
+        else:
+            # Fallback heuristic
+            if "ask" in lower_decision and "question" in lower_decision:
+                decision["action"] = "ask_questions"
+                decision["questions"] = self._extract_questions_from_text(last_decision)
+            elif "order" in lower_decision and "test" in lower_decision:
+                decision["action"] = "order_tests"
+                decision["tests"] = self._extract_tests_from_text(last_decision)
+            elif "diagnos" in lower_decision and ("commit" in lower_decision or "confidence" in lower_decision):
+                decision["action"] = "commit_diagnosis"
+                decision["diagnosis"] = self._extract_diagnosis_from_text(last_decision)
         
         return decision
     
     def _extract_questions_from_text(self, text: str) -> List[str]:
         """Extract specific questions from panel coordinator's decision text"""
-        questions = []
+        import re
+        questions: List[str] = []
         lines = text.split('\n')
-        
-        for line in lines:
-            line = line.strip()
-            # Look for question patterns
-            if ('?' in line and any(word in line.lower() for word in ['what', 'when', 'where', 'how', 'why', 'does', 'did', 'is', 'are', 'can', 'could', 'would', 'should'])):
-                # Clean up the question
-                question = line.strip('- •*').strip()
-                if question and len(question) > 10:  # Filter out very short questions
-                    questions.append(question)
-        
-        # If no structured questions found, look for numbered lists
+
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            # Strip bullets and numbering (e.g., "- ", "• ", "1. ")
+            line = re.sub(r'^\s*[\-\*•]\s*', '', line)
+            line = re.sub(r'^\s*\d+\.\s*', '', line)
+
+            # Consider any sufficiently long line that ends with a question mark as a question
+            if line.endswith('?') and len(line) > 10:
+                questions.append(line)
+
+        # Fallback: extract questions from inline numbered lists if the above missed any
         if not questions:
-            import re
-            question_pattern = r'\d+\.\s*([^?]*\?)'
-            matches = re.findall(question_pattern, text)
-            questions.extend(matches)
-        
-        return questions
+            matches = re.findall(r'\d+\.\s*([^?]*\?)', text)
+            questions.extend([m.strip() for m in matches if len(m.strip()) > 10])
+
+        # Deduplicate while preserving order
+        seen = set()
+        deduped: List[str] = []
+        for q in questions:
+            if q not in seen:
+                seen.add(q)
+                deduped.append(q)
+
+        # Enforce per-round question limit
+        limited = deduped[: self.questions_per_round_limit]
+        if len(deduped) > len(limited):
+            logger.info(
+                f"Limiting questions extracted from {len(deduped)} to {len(limited)} based on per-round cap {self.questions_per_round_limit}"
+            )
+        return limited
     
     def _extract_tests_from_text(self, text: str) -> List[str]:
         """Extract specific test names from panel coordinator's decision text"""
@@ -822,6 +919,7 @@ class MedicalDoctorPanel:
         )
         
         # Follow-up prompt
+        remaining_question_rounds = max(0, self.question_rounds_limit - self.question_rounds_used)
         followup_prompt = f"""
         MEDICAL PANEL FOLLOW-UP CONSULTATION
         
@@ -830,6 +928,12 @@ class MedicalDoctorPanel:
         
         Current Budget Status: ${self.budget_tracker.cumulative_cost:.2f} spent
         {f'Budget Limit: ${self.budget_tracker.budget_limit:.2f}' if self.budget_tracker.budget_limit else 'No budget limit set'}
+        
+        Constraints:
+        - Remaining ASK_QUESTIONS rounds: {remaining_question_rounds}
+        - Maximum questions allowed in this round: {self.questions_per_round_limit}
+        - If no ASK_QUESTIONS rounds remain, you MUST choose to ORDER_TESTS or COMMIT_DIAGNOSIS.
+        - If committing with <80% certainty due to limits, provide best provisional diagnosis with confidence and rationale.
         
         Based on the new information provided, please conduct another Chain of Debate to reach consensus on:
         1. Ask additional follow-up questions
@@ -850,6 +954,29 @@ class MedicalDoctorPanel:
         
         # Extract the final decision from the follow-up conversation
         final_decision = self._extract_final_decision(groupchat.messages)
+        
+        # Enforce per-round cap defensively and apply total-round limits
+        if final_decision.get("action") == "ask_questions":
+            qs = final_decision.get("questions", []) or []
+            if len(qs) > self.questions_per_round_limit:
+                logger.info(
+                    f"Capping coordinator questions from {len(qs)} to {self.questions_per_round_limit} (per-round limit)"
+                )
+                final_decision["questions"] = qs[: self.questions_per_round_limit]
+            if self.question_rounds_used >= self.question_rounds_limit:
+                logger.info("Question limit exhausted during follow-up. Forcing a decision without further questions.")
+                forced = self._conduct_forced_decision(updated_case)
+                forced["is_followup"] = True
+                forced["followup_round"] = len(self.conversation_history) + 1
+                self.conversation_history.append({
+                    "type": "followup",
+                    "messages": groupchat.messages,
+                    "decision": forced,
+                    "timestamp": datetime.now()
+                })
+                return forced
+            else:
+                self.question_rounds_used += 1
         final_decision["is_followup"] = True
         final_decision["followup_round"] = len(self.conversation_history) + 1
         
@@ -862,6 +989,46 @@ class MedicalDoctorPanel:
         })
         
         return final_decision
+
+    def _conduct_forced_decision(self, case_text: str) -> Dict:
+        """Run a short, constrained discussion that forbids further questions and forces a decision."""
+        logger.info("Starting forced-decision round (no further questions allowed)")
+        groupchat = autogen.GroupChat(
+            agents=[
+                self.dr_hypothesis,
+                self.dr_test_chooser,
+                self.dr_challenger,
+                self.dr_stewardship,
+                self.dr_checklist,
+                self.panel_coordinator
+            ],
+            messages=[],
+            max_round=8,
+            speaker_selection_method="round_robin",
+            enable_clear_history=True
+        )
+        manager = autogen.GroupChatManager(
+            groupchat=groupchat,
+            llm_config={"config_list": [{"model": "gpt-4o-mini", "api_key": self.api_key}]},
+            is_termination_msg=self._is_termination_message
+        )
+        forced_prompt = f"""
+        MEDICAL PANEL FORCED-DECISION ROUND
+        
+        Patient Case:
+        {case_text}
+        
+        Constraint: The question limit has been reached. DO NOT ASK ANY FURTHER QUESTIONS.
+        You MUST COMMIT TO A DIAGNOSIS (best or provisional) including:
+        - Top diagnosis and brief reasoning
+        - Confidence level (as a percentage or Low/Medium/High)
+        - 1-2 key next-step actions if applicable
+        
+        End with exactly: "DECISION: COMMIT_DIAGNOSIS".
+        """
+        self.user_proxy.initiate_chat(manager, message=forced_prompt)
+        decision = self._extract_final_decision(groupchat.messages)
+        return decision
     
     def evaluate_information_sufficiency(self, patient_case: str) -> InformationSufficiencyAssessment:
         """
@@ -946,6 +1113,9 @@ class MedicalDoctorPanel:
         """
         if budget_limit:
             self.budget_tracker.budget_limit = budget_limit
+        
+        # Reset question usage for a new case
+        self.question_rounds_used = 0
             
         logger.info(f"Processing patient case with budget limit: ${budget_limit}")
         

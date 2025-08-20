@@ -8,7 +8,7 @@ class NutritionAPIService: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     
-    @AppStorage("apiEndpoint") private var apiEndpoint = "http://192.168.0.105:8000"
+    @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
     
     private var baseURL: String {
         return "\(apiEndpoint)/api/v1/nutrition"

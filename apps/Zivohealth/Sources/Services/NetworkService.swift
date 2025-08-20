@@ -21,9 +21,11 @@ class UploadProgressDelegate: NSObject, URLSessionTaskDelegate {
 public class NetworkService: ObservableObject {
     public static let shared = NetworkService()
 
-    @AppStorage("apiEndpoint") private var apiEndpoint = "http://192.168.0.105:8000"
+    @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
     @AppStorage("patientAuthToken") private var patientAuthToken = ""
     @AppStorage("doctorAuthToken") private var doctorAuthToken = ""
+    @AppStorage("patientRefreshToken") private var patientRefreshToken = ""
+    @AppStorage("doctorRefreshToken") private var doctorRefreshToken = ""
     @AppStorage("userMode") private var userMode: UserMode = .patient
 
     private let apiVersion = "/api/v1"
@@ -220,6 +222,34 @@ public class NetworkService: ObservableObject {
         return Date() >= tokenInfo.expiresAt
     }
 
+    private func tryRefreshAccessTokenIfNeeded() async -> Bool {
+        // If token hasn't expired, no need to refresh
+        guard isTokenExpired() else { return true }
+
+        // Determine which refresh token to use based on role
+        let refresh: String
+        switch userMode {
+        case .patient:
+            refresh = patientRefreshToken
+        case .doctor:
+            refresh = doctorRefreshToken
+        }
+
+        guard !refresh.isEmpty else { return false }
+
+        do {
+            let body: [String: Any] = ["refresh_token": refresh]
+            let data = try await post("/auth/refresh", body: body, requiresAuth: false)
+            let tokenResponse = try decoder.decode(TokenResponse.self, from: data)
+            authToken = tokenResponse.accessToken
+            saveTokenInfo(tokenResponse)
+            return true
+        } catch {
+            print("❌ [NetworkService] Token refresh failed: \(error)")
+            return false
+        }
+    }
+
     private func saveTokenInfo(_ tokenResponse: TokenResponse) {
         let tokenInfo = TokenInfo(from: tokenResponse)
         if let encoded = try? encoder.encode(tokenInfo) {
@@ -241,6 +271,11 @@ public class NetworkService: ObservableObject {
         print("🗑️ [NetworkService] Clearing all stored auth tokens")
         patientAuthToken = ""
         doctorAuthToken = ""
+        patientRefreshToken = ""
+        doctorRefreshToken = ""
+        // Clear token info for both roles
+        UserDefaults.standard.removeObject(forKey: "patient_token_info")
+        UserDefaults.standard.removeObject(forKey: "doctor_token_info")
     }
 
     public func getCurrentToken() -> String {
@@ -455,156 +490,7 @@ public class NetworkService: ObservableObject {
         }
     }
     
-    public func sendChatMessage(sessionId: Int, message: String) async throws -> ChatMessageResponse {
-        print("🌐 [NetworkService] sendChatMessage called for session: \(sessionId)")
-        print("📤 [NetworkService] Message: '\(message)'")
-        
-        let body: [String: Any] = [
-            "content": message
-        ]
-        
-        do {
-            let data = try await post("/chat-sessions/\(sessionId)/messages", body: body, requiresAuth: true)
-            let response = try decoder.decode(ChatMessageResponse.self, from: data)
-            print("✅ [NetworkService] Sent chat message, got AI response")
-            return response
-        } catch {
-            print("❌ [NetworkService] Error sending chat message: \(error)")
-            throw error
-        }
-    }
-    
-    public func sendChatMessageWithFile(sessionId: Int, message: String, fileURL: URL) async throws -> ChatMessageResponse {
-        print("🌐 [NetworkService] sendChatMessageWithFile called for session: \(sessionId)")
-        print("📤 [NetworkService] Message: '\(message)'")
-        print("📎 [NetworkService] File: \(fileURL.lastPathComponent)")
-        
-        // Create multipart form data
-        let boundary = UUID().uuidString
-        var request = try await createAuthenticatedRequest(for: "/chat-sessions/\(sessionId)/messages/upload")
-        request.httpMethod = "POST"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        
-        var body = Data()
-        
-        // Add content field
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"content\"\r\n\r\n".data(using: .utf8)!)
-        body.append("\(message)\r\n".data(using: .utf8)!)
-        
-        // Add file field
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileURL.lastPathComponent)\"\r\n".data(using: .utf8)!)
-        
-        let mimeType = getMimeType(for: fileURL.pathExtension)
-        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
-        
-        // Add file data
-        do {
-            let fileData = try Data(contentsOf: fileURL)
-            body.append(fileData)
-            print("📊 [NetworkService] File size: \(fileData.count) bytes")
-        } catch {
-            print("❌ [NetworkService] Failed to read file: \(error)")
-            throw error
-        }
-        
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            // Set upload progress to start
-            Task { @MainActor in
-                self.isUploading = true
-                self.uploadProgress = 0.0
-            }
-            
-            // Create progress delegate
-            let progressDelegate = UploadProgressDelegate { progress in
-                Task { @MainActor in
-                    self.uploadProgress = progress
-                }
-            }
-            
-            // Create URLSession with delegate for this upload
-            let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = 30.0
-            config.timeoutIntervalForResource = 300.0
-            config.waitsForConnectivity = true
-            config.allowsCellularAccess = true
-            
-            let uploadSession = URLSession(configuration: config, delegate: progressDelegate, delegateQueue: nil)
-            
-            // Create upload task
-            let uploadTask = uploadSession.uploadTask(with: request, from: body) { data, response, error in
-                defer {
-                    uploadSession.invalidateAndCancel()
-                    Task { @MainActor in
-                        self.isUploading = false
-                    }
-                }
-                
-                if let error = error {
-                    print("❌ [NetworkService] Upload task error: \(error)")
-                    Task { @MainActor in
-                        self.uploadProgress = 0.0
-                    }
-                    continuation.resume(throwing: NetworkError.networkError(error))
-                    return
-                }
-                
-                guard let data = data else {
-                    print("❌ [NetworkService] No data received from upload")
-                    Task { @MainActor in
-                        self.uploadProgress = 0.0
-                    }
-                    continuation.resume(throwing: NetworkError.invalidResponse)
-                    return
-                }
-                
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    print("❌ [NetworkService] Invalid response type")
-                    Task { @MainActor in
-                        self.uploadProgress = 0.0
-                    }
-                    continuation.resume(throwing: NetworkError.invalidResponse)
-                    return
-                }
-                
-                guard 200...299 ~= httpResponse.statusCode else {
-                    let errorString = String(data: data, encoding: .utf8) ?? "Unknown error"
-                    print("❌ [NetworkService] File upload error: \(httpResponse.statusCode) - \(errorString)")
-                    Task { @MainActor in
-                        self.uploadProgress = 0.0
-                    }
-                    continuation.resume(throwing: NetworkError.serverError("HTTP \(httpResponse.statusCode): \(errorString)"))
-                    return
-                }
-                
-                do {
-                    let chatResponse = try self.decoder.decode(ChatMessageResponse.self, from: data)
-                    print("✅ [NetworkService] File uploaded successfully, got AI response")
-                    
-                    Task { @MainActor in
-                        self.uploadProgress = 1.0
-                        // Keep progress at 100% for a moment before hiding
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                            self.uploadProgress = 0.0
-                        }
-                    }
-                    
-                    continuation.resume(returning: chatResponse)
-                } catch {
-                    print("❌ [NetworkService] Error decoding response: \(error)")
-                    Task { @MainActor in
-                        self.uploadProgress = 0.0
-                    }
-                    continuation.resume(throwing: NetworkError.decodingError)
-                }
-            }
-            
-            uploadTask.resume()
-        }
-    }
+    // Removed non-streaming chat endpoints: use sendStreamingChatMessage / sendStreamingChatMessageWithFile instead
 
     // Streaming variant with file upload
     public func sendStreamingChatMessageWithFile(sessionId: Int, message: String, fileURL: URL) async throws -> StreamingChatResponse {
@@ -1034,13 +920,23 @@ public extension NetworkService {
         }
 
         if !authToken.isEmpty {
-            print("⚠️ [NetworkService] Auth token expired for \(userMode), refreshing...")
+            print("⚠️ [NetworkService] Auth token expired for \(userMode), attempting refresh...")
+            if await tryRefreshAccessTokenIfNeeded() {
+                print("✅ [NetworkService] Token refreshed for \(userMode)")
+                return
+            }
             clearAuthToken()
         }
 
-        // Require manual login for patient mode
+        // Try refresh even if token is empty but we have a refresh token stored
+        if await tryRefreshAccessTokenIfNeeded() {
+            print("✅ [NetworkService] Token refreshed using stored refresh token for \(userMode)")
+            return
+        }
+
+        // Require manual login for patient mode (no password stored). We keep session via refresh tokens only.
         if userMode == .patient {
-            print("🛑 [NetworkService] Manual login required for patient mode - skipping auto login.")
+            print("🛑 [NetworkService] No valid tokens available for patient mode - user must login once.")
             throw NetworkError.authenticationFailed
         }
 
@@ -1076,6 +972,15 @@ public extension NetworkService {
             // Store the token and its expiration info
             authToken = token
             saveTokenInfo(tokenResponse)
+            // Persist refresh token when provided by backend
+            if let refresh = tokenResponse.refreshToken {
+                switch userMode {
+                case .patient:
+                    patientRefreshToken = refresh
+                case .doctor:
+                    doctorRefreshToken = refresh
+                }
+            }
             print("💾 [NetworkService] Stored token and expiration info for \(userMode)")
 
             return token
@@ -1791,12 +1696,14 @@ struct TokenResponse: Codable {
     let tokenType: String
     let userType: String
     let expiresIn: Int
+    let refreshToken: String?
 
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
         case tokenType = "token_type"
         case userType = "user_type"
         case expiresIn = "expires_in"
+        case refreshToken = "refresh_token"
     }
 }
 

@@ -4,7 +4,7 @@ struct SettingsView: View {
     @AppStorage("userMode") private var userMode: UserMode = .patient
     @AppStorage("patientAuthToken") private var patientAuthToken = ""
     @AppStorage("doctorAuthToken") private var doctorAuthToken = ""
-    @AppStorage("apiEndpoint") private var apiEndpoint = "http://192.168.0.105:8000"
+    @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
     @State private var showingDeleteAlert = false
     @State private var customEndpoint = ""
     @State private var selectedEndpointType: EndpointType = .local
@@ -18,7 +18,7 @@ struct SettingsView: View {
         var defaultURL: String {
             switch self {
             case .local:
-                return "http://192.168.0.105:8000"
+                return AppConfig.defaultAPIEndpoint
             case .ngrok:
                 return "https://your-subdomain.ngrok-free.app"
             case .custom:
