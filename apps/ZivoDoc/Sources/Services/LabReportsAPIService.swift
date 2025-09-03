@@ -5,7 +5,7 @@ import SwiftUI
 class LabReportsAPIService: ObservableObject {
     static let shared = LabReportsAPIService()
     
-    @AppStorage("apiEndpoint") private var apiEndpoint = "http://192.168.0.105:8000"
+    @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
     
     private var baseURL: String {
         return "\(apiEndpoint)/api/v1/lab-reports"
@@ -16,25 +16,7 @@ class LabReportsAPIService: ObservableObject {
     private init() {}
     
     private func getAuthHeaders() -> [String: String] {
-        var headers = [
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        ]
-        
-        // Add authentication token if available
-        let token = NetworkService.shared.getCurrentToken()
-        if !token.isEmpty {
-            headers["Authorization"] = "Bearer \(token)"
-            print("🔍 [LabReportsAPIService] Using auth token (length: \(token.count))")
-        } else {
-            print("⚠️ [LabReportsAPIService] No auth token available!")
-            // Trigger automatic demo authentication
-            Task {
-                await authenticateWithDemoCredentials()
-            }
-        }
-        
-        return headers
+        return NetworkService.shared.authHeaders(requiresAuth: true, body: nil)
     }
     
     // MARK: - Demo Authentication

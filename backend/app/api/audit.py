@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from app.core.agent_logger import agent_logger
 from app.api.dependencies import get_current_user
 from app.models.user import User
+from app.utils.timezone import now_local
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
 
@@ -117,7 +118,7 @@ async def get_agent_performance(
 ) -> Dict[str, Any]:
     """Get performance metrics for all agents"""
     
-    cutoff_time = datetime.now() - timedelta(hours=hours)
+    cutoff_time = now_local() - timedelta(hours=hours)
     recent_logs = [
         log for log in agent_logger.interaction_log
         if datetime.fromisoformat(log.timestamp) >= cutoff_time
@@ -174,7 +175,7 @@ async def get_tool_usage_stats(
 ) -> Dict[str, Any]:
     """Get tool usage statistics"""
     
-    cutoff_time = datetime.now() - timedelta(hours=hours)
+    cutoff_time = now_local() - timedelta(hours=hours)
     tool_logs = [
         log for log in agent_logger.interaction_log
         if (datetime.fromisoformat(log.timestamp) >= cutoff_time and 
@@ -228,7 +229,7 @@ async def get_error_summary(
 ) -> Dict[str, Any]:
     """Get error summary and patterns"""
     
-    cutoff_time = datetime.now() - timedelta(hours=hours)
+    cutoff_time = now_local() - timedelta(hours=hours)
     error_logs = [
         log for log in agent_logger.interaction_log
         if (datetime.fromisoformat(log.timestamp) >= cutoff_time and 
@@ -276,7 +277,7 @@ async def get_system_health(
 ) -> Dict[str, Any]:
     """Get overall system health metrics"""
     
-    last_hour = datetime.now() - timedelta(hours=1)
+    last_hour = now_local() - timedelta(hours=1)
     recent_logs = [
         log for log in agent_logger.interaction_log
         if datetime.fromisoformat(log.timestamp) >= last_hour

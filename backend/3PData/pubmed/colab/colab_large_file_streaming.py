@@ -25,7 +25,7 @@ from langchain.docstore.document import Document
 from sqlalchemy import create_engine, text
 
 # OPTIMIZED CONFIGURATION - SPEED + QUALITY (30GB RAM, 30min for 10GB)
-DATABASE_URL = "postgresql://rajanishsd@localhost:5433/zivohealth"
+DATABASE_URL = "postgresql://rajanishsd@localhost:5432/zivohealth"
 MAX_FILES = 2              # Process 2 files max
 MAX_ARTICLES_PER_FILE = 1000 # Process many articles quickly
 MAX_FILE_SIZE_GB = 10.0    # Support up to 10GB files
@@ -105,7 +105,8 @@ class UltraFastOptimalProcessor:
     def save_processed_files(self):
         """Fast tracking save"""
         try:
-            self.processed_files["last_updated"] = datetime.now().isoformat()
+            from app.utils.timezone import isoformat_now
+            self.processed_files["last_updated"] = isoformat_now()
             self.processed_files["total_chars_processed"] = self.total_chars_processed
             self.processed_files["largest_file_gb"] = self.largest_file_processed
             with open(self.tracking_file, 'w') as f:
@@ -117,8 +118,9 @@ class UltraFastOptimalProcessor:
         return filename in self.processed_files["processed_files"]
     
     def mark_file_processed(self, filename, docs_processed, docs_stored, size_gb, chars_processed, time_taken):
+        from app.utils.timezone import isoformat_now
         self.processed_files["processed_files"][filename] = {
-            "processed_date": datetime.now().isoformat(),
+            "processed_date": isoformat_now(),
             "documents_processed": docs_processed,
             "documents_stored": docs_stored,
             "file_size_gb": size_gb,
@@ -134,8 +136,9 @@ class UltraFastOptimalProcessor:
         self.save_processed_files()
     
     def mark_file_failed(self, filename, error_msg, size_gb=0):
+        from app.utils.timezone import isoformat_now
         self.processed_files["processed_files"][filename] = {
-            "processed_date": datetime.now().isoformat(),
+            "processed_date": isoformat_now(),
             "documents_processed": 0,
             "documents_stored": 0,
             "file_size_gb": size_gb,
@@ -376,7 +379,7 @@ class UltraFastOptimalProcessor:
                                 "chunk_end": chunk_index * CHUNK_SIZE + len(chunk_text),
                                 "file_size_gb": 0,
                                 "optimal_chunk_size": CHUNK_SIZE,
-                                "processed_date": datetime.now().isoformat()
+                                "processed_date": __import__('app.utils.timezone', fromlist=['isoformat_now']).isoformat_now()
                             }
                         )
                         chunks.append(chunk)
@@ -412,7 +415,7 @@ class UltraFastOptimalProcessor:
                     "chunk_end": total_chars_processed,
                     "file_size_gb": 0,
                     "optimal_chunk_size": CHUNK_SIZE,
-                    "processed_date": datetime.now().isoformat()
+                    "processed_date": __import__('app.utils.timezone', fromlist=['isoformat_now']).isoformat_now()
                 }
             )
             chunks.append(chunk)

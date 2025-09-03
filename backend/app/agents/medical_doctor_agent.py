@@ -160,7 +160,7 @@ class MedicalDoctorAgent:
                         data_sources_summary = {
                             "sources_used": list(health_data.keys()),
                             "agent_requirements": agent_requirements,
-                            "data_collection_time": datetime.now().isoformat(),
+                            "data_collection_time": __import__('app.utils.timezone', fromlist=['isoformat_now']).isoformat_now(),
                             "total_sources": len(health_data)
                         }
                         

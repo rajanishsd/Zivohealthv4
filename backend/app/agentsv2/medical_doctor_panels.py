@@ -3,7 +3,13 @@ Medical Doctor Panels - Virtual Diagnostic Team
 Implements five specialized medical personas using autogen for collaborative diagnosis.
 """
 
-import autogen
+from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
+from autogen_agentchat.teams import RoundRobinGroupChat
+from autogen_agentchat.conditions import TextMentionTermination
+from autogen_agentchat.messages import TextMessage
+from autogen_ext.models.openai import OpenAIChatCompletionClient
+from autogen_core import CancellationToken
+import asyncio
 import json
 import os
 from typing import Dict, List, Tuple, Optional
@@ -12,6 +18,7 @@ from datetime import datetime
 import logging
 from dotenv import load_dotenv
 load_dotenv()
+from app.utils.timezone import now_local
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -345,12 +352,11 @@ class MedicalDoctorPanel:
     def setup_agents(self):
         """Initialize the five specialized medical agents"""
         
-        # Common configuration for all agents
-        config_list = [{"model": "gpt-4o-mini", "api_key": self.api_key}]
-        llm_config = {"config_list": config_list, "temperature": 0.7}
+        # Model client (0.7 API)
+        self.model_client = OpenAIChatCompletionClient(model="gpt-4o-mini", api_key=self.api_key)
         
         # Dr. Hypothesis - Maintains probability-ranked differential diagnosis
-        self.dr_hypothesis = autogen.AssistantAgent(
+        self.dr_hypothesis = AssistantAgent(
             name="Dr_Hypothesis",
             system_message="""You are Dr. Hypothesis, a specialist in differential diagnosis.
             
@@ -370,11 +376,11 @@ class MedicalDoctorPanel:
             state "INSUFFICIENT INFORMATION - RECOMMEND ASKING QUESTIONS" and specify what questions are needed.
             
             Be conservative with probabilities when information is limited.""",
-            llm_config=llm_config
+            model_client=self.model_client
         )
         
         # Dr. Test-Chooser - Selects diagnostic tests
-        self.dr_test_chooser = autogen.AssistantAgent(
+        self.dr_test_chooser = AssistantAgent(
             name="Dr_Test_Chooser",
             system_message="""You are Dr. Test-Chooser, an expert in diagnostic test selection.
             
@@ -391,11 +397,11 @@ class MedicalDoctorPanel:
             4. Test characteristics (sensitivity/specificity if known)
             
             Focus on tests with highest diagnostic yield.""",
-            llm_config=llm_config
+            model_client=self.model_client
         )
         
         # Dr. Challenger - Acts as devil's advocate
-        self.dr_challenger = autogen.AssistantAgent(
+        self.dr_challenger = AssistantAgent(
             name="Dr_Challenger",
             system_message="""You are Dr. Challenger, the critical thinking specialist and devil's advocate.
             
@@ -414,11 +420,11 @@ class MedicalDoctorPanel:
             5. Questions/Concerns
             
             Be constructively critical and evidence-based.""",
-            llm_config=llm_config
+            model_client=self.model_client
         )
         
         # Dr. Stewardship - Enforces cost-conscious care
-        self.dr_stewardship = autogen.AssistantAgent(
+        self.dr_stewardship = AssistantAgent(
             name="Dr_Stewardship",
             system_message="""You are Dr. Stewardship, the resource stewardship and cost-effectiveness specialist.
             
@@ -437,11 +443,11 @@ class MedicalDoctorPanel:
             5. High-Value Recommendations
             
             Balance quality care with resource consciousness.""",
-            llm_config=llm_config
+            model_client=self.model_client
         )
         
         # Dr. Checklist - Quality control specialist
-        self.dr_checklist = autogen.AssistantAgent(
+        self.dr_checklist = AssistantAgent(
             name="Dr_Checklist",
             system_message="""You are Dr. Checklist, the quality control and consistency specialist.
             
@@ -460,11 +466,11 @@ class MedicalDoctorPanel:
             5. Quality Score (1-10)
             
             Focus on accuracy and internal consistency.""",
-            llm_config=llm_config
+            model_client=self.model_client
         )
         
         # Panel Coordinator - Orchestrates the discussion
-        self.panel_coordinator = autogen.AssistantAgent(
+        self.panel_coordinator = AssistantAgent(
             name="Panel_Coordinator",
             system_message="""You are the Panel Coordinator, responsible for orchestrating the medical panel discussion.
             
@@ -505,16 +511,27 @@ class MedicalDoctorPanel:
             This signals the end of the panel discussion.
             
             Always conclude with a clear action plan and next steps.""",
-            llm_config=llm_config
+            model_client=self.model_client
         )
         
         # User proxy for interaction
-        self.user_proxy = autogen.UserProxyAgent(
-            name="Medical_Team_Lead",
-            human_input_mode="NEVER",
-            max_consecutive_auto_reply=0,
-            code_execution_config=False
-        )
+        self.user_proxy = UserProxyAgent(name="Medical_Team_Lead")
+
+    def _run_async(self, coroutine):
+        """Run an async coroutine from sync context safely and return its result."""
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        if loop.is_running():
+            new_loop = asyncio.new_event_loop()
+            try:
+                return new_loop.run_until_complete(coroutine)
+            finally:
+                new_loop.close()
+        else:
+            return loop.run_until_complete(coroutine)
     
     def _is_termination_message(self, message: Dict) -> bool:
         """
@@ -609,30 +626,22 @@ class MedicalDoctorPanel:
         logger.info("Starting Chain of Debate for patient case")
         
         # Store patient data
-        self.patient_data = {"case_description": patient_case, "timestamp": datetime.now()}
+        self.patient_data = {"case_description": patient_case, "timestamp": now_local()}
         
-        # Create group chat with all agents
-        groupchat = autogen.GroupChat(
-            agents=[
+        # Create team (0.7 API)
+        team = RoundRobinGroupChat(
+            [
                 self.dr_hypothesis,
-                self.dr_test_chooser, 
+                self.dr_test_chooser,
                 self.dr_challenger,
                 self.dr_stewardship,
                 self.dr_checklist,
-                self.panel_coordinator
+                self.panel_coordinator,
             ],
-            messages=[],
-            max_round=15,
-            speaker_selection_method="round_robin",
-            enable_clear_history=True
+            max_turns=15,
+            termination_condition=TextMentionTermination("DECISION:")
         )
-        
-        manager = autogen.GroupChatManager(
-            groupchat=groupchat, 
-            llm_config={"config_list": [{"model": "gpt-4o-mini", "api_key": self.api_key}]},
-            is_termination_msg=self._is_termination_message
-        )
-        
+
         # Initiate the discussion
         remaining_question_rounds = max(0, self.question_rounds_limit - self.question_rounds_used)
         initial_prompt = f"""
@@ -665,11 +674,10 @@ class MedicalDoctorPanel:
         - Panel Coordinator: Synthesis and action decision
         """
         
-        # Start the group chat
-        self.user_proxy.initiate_chat(manager, message=initial_prompt)
-        
-        # Extract the final decision from the conversation
-        final_decision = self._extract_final_decision(groupchat.messages)
+        # Start the team run (sync wrapper)
+        result = self._run_async(team.run(task=[TextMessage(content=initial_prompt, source="user")]))
+        # Extract the final decision from messages
+        final_decision = self._extract_final_decision([{"name": m.source, "content": getattr(m, 'content', '')} for m in result.messages])
 
         # Enforce per-round cap defensively and apply question-round limits
         if final_decision.get("action") == "ask_questions":
@@ -695,6 +703,61 @@ class MedicalDoctorPanel:
                    f"after {conversation_analysis['total_messages']} messages")
         
         return final_decision
+
+    async def conduct_chain_of_debate_async(self, patient_case: str) -> Dict:
+        """Async variant that awaits the team.run coroutine (AutoGen 0.7)."""
+        logger.info("Starting Chain of Debate for patient case (async)")
+        self.patient_data = {"case_description": patient_case, "timestamp": now_local()}
+
+        team = RoundRobinGroupChat(
+            [
+                self.dr_hypothesis,
+                self.dr_test_chooser,
+                self.dr_challenger,
+                self.dr_stewardship,
+                self.dr_checklist,
+                self.panel_coordinator,
+            ],
+            max_turns=15,
+            termination_condition=TextMentionTermination("DECISION:")
+        )
+
+        remaining_question_rounds = max(0, self.question_rounds_limit - self.question_rounds_used)
+        initial_prompt = f"""
+        MEDICAL PANEL CONSULTATION
+        
+        Patient Case: {patient_case}
+        
+        Current Budget Status: ${self.budget_tracker.cumulative_cost:.2f} spent
+        {f'Budget Limit: ${self.budget_tracker.budget_limit:.2f}' if self.budget_tracker.budget_limit else 'No budget limit set'}
+        
+        Constraints:
+        - Total ASK_QUESTIONS rounds allowed: {self.question_rounds_limit}
+        - ASK_QUESTIONS rounds already used: {self.question_rounds_used}
+        - ASK_QUESTIONS rounds remaining: {remaining_question_rounds}
+        - Maximum questions allowed in any round: {self.questions_per_round_limit}
+        - If no ASK_QUESTIONS rounds remain, you MUST choose to ORDER_TESTS or COMMIT_DIAGNOSIS.
+        - When asking questions, include no more than {self.questions_per_round_limit} concise, high-yield questions.
+        
+        Please conduct a thorough Chain of Debate to reach consensus on one of three actions:
+        1. Ask follow-up questions
+        2. Order diagnostic tests  
+        3. Commit to a diagnosis (if >80% certainty)
+        
+        Each specialist should provide their expertise in order:
+        - Dr. Hypothesis: Differential diagnosis with probabilities
+        - Dr. Test-Chooser: Recommended diagnostic tests
+        - Dr. Challenger: Critical analysis and alternative perspectives
+        - Dr. Stewardship: Cost-effectiveness considerations
+        - Dr. Checklist: Quality control and consistency check
+        - Panel Coordinator: Synthesis and action decision
+        """
+
+        result = await team.run(task=[TextMessage(content=initial_prompt, source="user")])
+        final_decision = self._extract_final_decision([
+            {"name": m.source, "content": getattr(m, 'content', '')} for m in result.messages
+        ])
+        return final_decision
     
     def _extract_final_decision(self, messages: List[Dict]) -> Dict:
         """Extract the final panel decision from the conversation"""
@@ -711,7 +774,7 @@ class MedicalDoctorPanel:
         decision: Dict = {
             "action": "unknown",
             "details": last_decision,
-            "timestamp": datetime.now(),
+            "timestamp": now_local(),
             "conversation_length": len(messages),
             "budget_status": {
                 "spent": self.budget_tracker.cumulative_cost,
@@ -894,28 +957,20 @@ class MedicalDoctorPanel:
         
         # Update patient data
         self.patient_data["updated_case"] = updated_case
-        self.patient_data["followup_timestamp"] = datetime.now()
+        self.patient_data["followup_timestamp"] = now_local()
         
-        # Create new group chat for follow-up discussion
-        groupchat = autogen.GroupChat(
-            agents=[
+        # Create new team for follow-up discussion (0.7 API)
+        team = RoundRobinGroupChat(
+            [
                 self.dr_hypothesis,
-                self.dr_test_chooser, 
+                self.dr_test_chooser,
                 self.dr_challenger,
                 self.dr_stewardship,
                 self.dr_checklist,
-                self.panel_coordinator
+                self.panel_coordinator,
             ],
-            messages=[],
-            max_round=12,  # Shorter discussion for follow-up
-            speaker_selection_method="round_robin",
-            enable_clear_history=True
-        )
-        
-        manager = autogen.GroupChatManager(
-            groupchat=groupchat, 
-            llm_config={"config_list": [{"model": "gpt-4o-mini", "api_key": self.api_key}]},
-            is_termination_msg=self._is_termination_message
+            max_turns=12,
+            termination_condition=TextMentionTermination("DECISION:")
         )
         
         # Follow-up prompt
@@ -950,10 +1005,10 @@ class MedicalDoctorPanel:
         """
         
         # Start the follow-up discussion
-        self.user_proxy.initiate_chat(manager, message=followup_prompt)
+        result = self._run_async(team.run(task=[TextMessage(content=followup_prompt, source="user")]))
         
         # Extract the final decision from the follow-up conversation
-        final_decision = self._extract_final_decision(groupchat.messages)
+        final_decision = self._extract_final_decision([{"name": m.source, "content": getattr(m, 'content', '')} for m in result.messages])
         
         # Enforce per-round cap defensively and apply total-round limits
         if final_decision.get("action") == "ask_questions":
@@ -970,9 +1025,9 @@ class MedicalDoctorPanel:
                 forced["followup_round"] = len(self.conversation_history) + 1
                 self.conversation_history.append({
                     "type": "followup",
-                    "messages": groupchat.messages,
+                    "messages": [m.dict() if hasattr(m, 'dict') else str(m) for m in result.messages],
                     "decision": forced,
-                    "timestamp": datetime.now()
+                    "timestamp": now_local()
                 })
                 return forced
             else:
@@ -985,7 +1040,7 @@ class MedicalDoctorPanel:
             "type": "followup",
             "messages": groupchat.messages,
             "decision": final_decision,
-            "timestamp": datetime.now()
+            "timestamp": now_local()
         })
         
         return final_decision
@@ -993,24 +1048,17 @@ class MedicalDoctorPanel:
     def _conduct_forced_decision(self, case_text: str) -> Dict:
         """Run a short, constrained discussion that forbids further questions and forces a decision."""
         logger.info("Starting forced-decision round (no further questions allowed)")
-        groupchat = autogen.GroupChat(
-            agents=[
+        team = RoundRobinGroupChat(
+            [
                 self.dr_hypothesis,
                 self.dr_test_chooser,
                 self.dr_challenger,
                 self.dr_stewardship,
                 self.dr_checklist,
-                self.panel_coordinator
+                self.panel_coordinator,
             ],
-            messages=[],
-            max_round=8,
-            speaker_selection_method="round_robin",
-            enable_clear_history=True
-        )
-        manager = autogen.GroupChatManager(
-            groupchat=groupchat,
-            llm_config={"config_list": [{"model": "gpt-4o-mini", "api_key": self.api_key}]},
-            is_termination_msg=self._is_termination_message
+            max_turns=8,
+            termination_condition=TextMentionTermination("DECISION:")
         )
         forced_prompt = f"""
         MEDICAL PANEL FORCED-DECISION ROUND
@@ -1026,9 +1074,42 @@ class MedicalDoctorPanel:
         
         End with exactly: "DECISION: COMMIT_DIAGNOSIS".
         """
-        self.user_proxy.initiate_chat(manager, message=forced_prompt)
-        decision = self._extract_final_decision(groupchat.messages)
+        result = self._run_async(team.run(task=[TextMessage(content=forced_prompt, source="user")]))
+        decision = self._extract_final_decision([{"name": m.source, "content": getattr(m, 'content', '')} for m in result.messages])
         return decision
+
+    async def _conduct_forced_decision_async(self, case_text: str) -> Dict:
+        logger.info("Starting forced-decision round (async)")
+        team = RoundRobinGroupChat(
+            [
+                self.dr_hypothesis,
+                self.dr_test_chooser,
+                self.dr_challenger,
+                self.dr_stewardship,
+                self.dr_checklist,
+                self.panel_coordinator,
+            ],
+            max_turns=8,
+            termination_condition=TextMentionTermination("DECISION:")
+        )
+        forced_prompt = f"""
+        MEDICAL PANEL FORCED-DECISION ROUND
+        
+        Patient Case:
+        {case_text}
+        
+        Constraint: The question limit has been reached. DO NOT ASK ANY FURTHER QUESTIONS.
+        You MUST COMMIT TO A DIAGNOSIS (best or provisional) including:
+        - Top diagnosis and brief reasoning
+        - Confidence level (as a percentage or Low/Medium/High)
+        - 1-2 key next-step actions if applicable
+        
+        End with exactly: "DECISION: COMMIT_DIAGNOSIS".
+        """
+        result = await team.run(task=[TextMessage(content=forced_prompt, source="user")])
+        return self._extract_final_decision([
+            {"name": m.source, "content": getattr(m, 'content', '')} for m in result.messages
+        ])
     
     def evaluate_information_sufficiency(self, patient_case: str) -> InformationSufficiencyAssessment:
         """
@@ -1139,7 +1220,26 @@ class MedicalDoctorPanel:
             return {
                 "action": "error",
                 "details": f"Error during panel discussion: {str(e)}",
-                "timestamp": datetime.now()
+                "timestamp": now_local()
+            }
+
+    async def process_patient_case_async(self, patient_case: str, budget_limit: Optional[float] = None) -> Dict:
+        if budget_limit:
+            self.budget_tracker.budget_limit = budget_limit
+        self.question_rounds_used = 0
+        logger.info(f"Processing patient case with budget limit (async): ${budget_limit}")
+        try:
+            decision = await self.conduct_chain_of_debate_async(patient_case)
+            if decision.get("action") == "ask_questions":
+                if self.question_rounds_used >= self.question_rounds_limit:
+                    decision = await self._conduct_forced_decision_async(patient_case)
+            return decision
+        except Exception as e:
+            logger.error(f"Error processing patient case (async): {str(e)}")
+            return {
+                "action": "error",
+                "details": f"Error during panel discussion: {str(e)}",
+                "timestamp": now_local()
             }
 
 def demonstrate_information_sufficiency():

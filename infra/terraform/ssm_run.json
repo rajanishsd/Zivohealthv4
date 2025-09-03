@@ -1,0 +1,5 @@
+{
+  "commands": [
+    "bash -lc 'set -e; export AWS_DEFAULT_REGION=us-east-1; PROJECT=zivohealth; ENV=dev; ECR=474221740916.dkr.ecr.us-east-1.amazonaws.com/zivohealth-dev-backend; TAG=$(aws --region us-east-1 ssm get-parameter --name /$PROJECT/$ENV/deploy/image_tag --query "Parameter.Value" --output text); echo Using $ECR:$TAG; aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $(echo $ECR | cut -d"/" -f1); ECR_REPO_URL=$ECR IMAGE_TAG=$TAG docker compose -f /opt/zivohealth/docker-compose.yml pull; ECR_REPO_URL=$ECR IMAGE_TAG=$TAG docker compose -f /opt/zivohealth/docker-compose.yml up -d; docker compose -f /opt/zivohealth/docker-compose.yml ps; curl -sS -m 5 http://127.0.0.1/health || true'"
+  ]
+}

@@ -1,0 +1,149 @@
+from fastapi import Request, HTTPException, status
+from fastapi.responses import JSONResponse
+from app.core.config import settings
+from app.core.security import verify_api_key, verify_app_signature
+import time
+import json
+from typing import Optional
+
+class APIKeyMiddleware:
+    """
+    Middleware to verify API keys and app signatures for mobile app requests
+    """
+    
+    def __init__(self, app):
+        self.app = app
+    
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            request = Request(scope, receive)
+            
+            # Skip authentication for certain endpoints
+            if self._should_skip_auth(request.url.path):
+                await self.app(scope, receive, send)
+                return
+            
+            # Verify API key
+            if settings.REQUIRE_API_KEY:
+                api_key = self._extract_api_key(request)
+                if not api_key or not verify_api_key(api_key):
+                    response = JSONResponse(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        content={
+                            "error": True,
+                            "message": "Invalid or missing API key",
+                            "code": "INVALID_API_KEY"
+                        }
+                    )
+                    await response(scope, receive, send)
+                    return
+            
+            # Verify app signature if required (only for GET requests for now)
+            if settings.REQUIRE_APP_SIGNATURE and settings.APP_SECRET_KEY and request.method == "GET":
+                if request.url.path.startswith("/api/v1/files/s3presign"):
+                    # Support URL-based signature for image loaders (signature over s3_uri)
+                    ts = request.query_params.get("ts")
+                    sig = request.query_params.get("sig")
+                    payload = request.query_params.get("s3_uri", "")
+                    try:
+                        if not ts or not sig or not payload:
+                            raise ValueError("missing ts/sig/payload")
+                        current_time = int(time.time())
+                        request_time = int(ts)
+                        if abs(current_time - request_time) > 300:
+                            raise ValueError("timestamp out of window")
+                        if not verify_app_signature(payload, ts, sig, settings.APP_SECRET_KEY):
+                            raise ValueError("bad signature")
+                    except Exception:
+                        response = JSONResponse(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            content={
+                                "error": True,
+                                "message": "Invalid URL signature",
+                                "code": "INVALID_SIGNATURE"
+                            }
+                        )
+                        await response(scope, receive, send)
+                        return
+                else:
+                    if not self._verify_app_signature(request):
+                        response = JSONResponse(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            content={
+                                "error": True,
+                                "message": "Invalid app signature",
+                                "code": "INVALID_SIGNATURE"
+                            }
+                        )
+                        await response(scope, receive, send)
+                        return
+        
+        await self.app(scope, receive, send)
+    
+    def _should_skip_auth(self, path: str) -> bool:
+        """
+        Determine if authentication should be skipped for this path
+        """
+        # Skip auth for health checks and documentation
+        skip_paths = [
+            "/health",
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            "/api/v1/docs",
+            "/api/v1/redoc",
+            "/api/v1/openapi.json"
+        ]
+        
+        return any(path.startswith(skip_path) for skip_path in skip_paths)
+    
+    def _extract_api_key(self, request: Request) -> Optional[str]:
+        """
+        Extract API key from request headers or query parameters
+        """
+        # Prefer explicit X-API-Key header (do NOT treat JWT Authorization as API key)
+        api_key = request.headers.get("X-API-Key")
+        if api_key:
+            return api_key
+        
+        # Check query parameter
+        api_key = request.query_params.get("api_key")
+        if api_key:
+            return api_key
+        
+        return None
+    
+    def _verify_app_signature(self, request: Request) -> bool:
+        """
+        Verify app signature for request authenticity
+        """
+        try:
+            # Get signature from headers
+            signature = request.headers.get("X-App-Signature")
+            timestamp = request.headers.get("X-Timestamp")
+            
+            if not signature or not timestamp:
+                return False
+            
+            # Check timestamp (prevent replay attacks)
+            current_time = int(time.time())
+            request_time = int(timestamp)
+            
+            # Allow 5-minute window for timestamp
+            if abs(current_time - request_time) > 300:
+                return False
+            
+            # For now, skip body verification in middleware
+            # The body will be verified at the endpoint level if needed
+            # This is a limitation of FastAPI middleware - body is not easily accessible
+            payload = ""
+            
+            return verify_app_signature(
+                payload, 
+                timestamp, 
+                signature, 
+                settings.APP_SECRET_KEY
+            )
+            
+        except Exception:
+            return False

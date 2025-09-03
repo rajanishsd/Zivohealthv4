@@ -979,6 +979,11 @@ class ChatViewModel: ObservableObject {
             for await statusMessage in statusStream {
                 await MainActor.run {
                     let statusText = statusMessage.status
+                    let lowerStatus = statusText.lowercased()
+                    // Ignore noisy connection status updates – we'll show a small indicator in header instead
+                    if lowerStatus.contains("connected") && !lowerStatus.contains("disconnected") {
+                        return
+                    }
                     
                     // Handle enriched status types that include a new message payload
                     if statusText == "message_added" || statusText == "complete" {
@@ -1026,6 +1031,16 @@ class ChatViewModel: ObservableObject {
                                             let enhanced = self.createEnhancedMessage(from: chatMsg, content: chatMsg.content)
                                             self.enhancedMessages.append(enhanced)
                                         }
+
+                                        // If an assistant message arrived, we are likely waiting for user input.
+                                        if messageRole == .assistant {
+                                            self.isAnalyzingFile = false
+                                            self.isLoading = false
+                                            self.isTyping = false
+                                            self.lastInteractionWasFileUpload = false
+                                            self.currentUploadFilename = ""
+                                            self.currentStatus = ""
+                                        }
                                     }
                                 }
                             } catch {
@@ -1058,6 +1073,14 @@ class ChatViewModel: ObservableObject {
                         print("🏁 [ChatViewModel] Received complete status - keeping analysis state visible")
                         // Don't clear analysis state immediately - let the UI show the status first
                         // The state will be cleared when AI response is fully processed
+                    } else if statusText.lowercased().contains("waiting for user") || statusText.lowercased().contains("awaiting_user") || statusText.lowercased().contains("awaiting user") {
+                        // Backend indicates it needs user input now
+                        self.isAnalyzingFile = false
+                        self.isLoading = false
+                        self.isTyping = false
+                        self.lastInteractionWasFileUpload = false
+                        self.currentUploadFilename = ""
+                        self.currentStatus = ""
                     } else {
                         self.currentStatus = statusText
                         self.isTyping = statusText != "error"

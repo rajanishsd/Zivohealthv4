@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Database configuration - use environment variables or defaults
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://rajanishsd@localhost:5433/zivohealth')
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://rajanishsd@localhost:5432/zivohealth')
 
 Base = declarative_base()
 

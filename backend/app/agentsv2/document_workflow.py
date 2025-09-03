@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 import base64
 from datetime import datetime
+from app.utils.timezone import now_local
 import shutil
 import json
 
@@ -54,6 +55,7 @@ class FileState(TypedDict):
     error: str
     analysis_only: bool
     processing_result: str
+    image_base64: Optional[str]
     analysis_result: DocumentAnalysisResult
     ocr_result: str
     lab_agent_result: Union[str, dict]  # Optional, result from lab agent if applicable
@@ -92,14 +94,23 @@ def store_file_locally(file_path: str) -> str:
         file_name = original_path.stem
         
         # Create timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = now_local().strftime("%Y%m%d_%H%M%S")
         
         # Create new filename with timestamp
         new_filename = f"{file_name}_{timestamp}{file_extension}"
         new_file_path = os.path.join(unprocessed_dir, new_filename)
         
-        # Copy the file to the new location
-        shutil.copy2(file_path, new_file_path)
+        # If source is an S3 URI, download to temp first
+        try:
+            from app.services.s3_service import is_s3_uri, download_to_temp
+            if is_s3_uri(file_path):
+                temp_download = download_to_temp(file_path)
+                shutil.copy2(temp_download, new_file_path)
+            else:
+                shutil.copy2(file_path, new_file_path)
+        except Exception:
+            # Fallback to regular copy if S3 helpers fail
+            shutil.copy2(file_path, new_file_path)
         
         print(f"📁 [DEBUG] File stored locally: {new_file_path}")
         return new_file_path
@@ -114,26 +125,23 @@ def detect_file_type(state: FileState) -> FileState:
     try:
         file_path = state["file_path"]
         
-        # Preserve original file path before storing
-        state["original_file_path"] = file_path
+        # Check if file exists locally unless it's an S3 URI
+        try:
+            from app.services.s3_service import is_s3_uri
+            is_remote = is_s3_uri(file_path)
+        except Exception:
+            is_remote = False
         
-        # Store file locally with timestamp
-        stored_file_path = store_file_locally(file_path)
-        
-        # Update the file path in state to use the stored file
-        state["file_path"] = stored_file_path
-        
-        # Check if file exists
-        if not os.path.exists(stored_file_path):
-            state["error"] = f"File not found: {stored_file_path}"
+        if not is_remote and not os.path.exists(file_path):
+            state["error"] = f"File not found: {file_path}"
             return state
         
         # Get file extension
-        path_obj = Path(stored_file_path)
+        path_obj = Path(file_path)
         file_extension = path_obj.suffix.lower()
         
 
-        print(f"file_extension-------: {stored_file_path}, {file_extension}")
+        print(f"file_extension-------: {file_path}, {file_extension}")
         # Determine file type based on supported extensions
         if file_extension in ['.pdf']:
             file_type = "PDF Document"
@@ -180,7 +188,7 @@ async def handle_pdf(state: FileState) -> FileState:
         # ocr_text = ocr_toolkit._extract_text_from_pdf(Path(file_path), "first")  # Extract first page only
         # ocr_text = ocr_toolkit._extract_text_from_pdf(Path(file_path), "last")   # Extract last page only
         # ocr_text = ocr_toolkit._extract_text_from_pdf(Path(file_path), [1, 2, 3])  # Extract pages 1, 2, and 3
-        ocr_text = ocr_toolkit._extract_text_from_pdf(Path(file_path))
+        ocr_text = ocr_toolkit._extract_text_from_pdf_s3_uri(file_path)
         analysis_result = analyze_document_type(ocr_text)
         analysis_result.extracted_text = ocr_text
         if analysis_result.document_type != "Other":
@@ -203,7 +211,7 @@ async def handle_image(state: FileState) -> FileState:
         file_path = state["file_path"]
         
         # Analyze image using GPT-4V
-        analysis_result = analyze_image_with_gpt4v(file_path)
+        analysis_result = analyze_image_with_gpt4v(file_path, state.get("image_base64"))
         
         # Store the analysis result
         state["analysis_result"] = analysis_result
@@ -262,12 +270,12 @@ async def handle_result(state: FileState) -> FileState:
             """
             Simple rule: if extracted_text exists, use it and don't pass image_path.
             Always pass source_file_path for storage/record-keeping.
-            Use stored_file_path for image processing to ensure correct file access.
+            Use original_file_path for image processing as we no longer re-store the file.
             """
             return {
                 "extracted_text": extracted_text if extracted_text else None,
-                "image_path": stored_file_path if not extracted_text else None,
-                "source_file_path": original_file_path  # Always pass original path for storage
+                "image_path": original_file_path if not extracted_text else None,
+                "source_file_path": original_file_path  # Always pass original path
             }
         
         # Create a comprehensive result summary
@@ -277,8 +285,8 @@ async def handle_result(state: FileState) -> FileState:
 
             if state["analysis_only"] == False:
             # Prepare common agent parameters
-                # Use stored file path for image processing, original file path for storage
-                agent_params = prepare_agent_params(analysis_result.extracted_text, state["original_file_path"], state["file_path"])
+                # Use original file path for both processing and storage
+                agent_params = prepare_agent_params(analysis_result.extracted_text, state["file_path"], state["file_path"])
                 
                 
                 # Route to appropriate agent based on document type
@@ -499,7 +507,7 @@ async def handle_result(state: FileState) -> FileState:
         return state
 
 
-def analyze_image_with_gpt4v(file_path: str) -> DocumentAnalysisResult:
+def analyze_image_with_gpt4v(file_path: str, image_base64: Optional[str] = None) -> DocumentAnalysisResult:
     """
     Analyze image using GPT-4V to identify document type and extract relevant information.
     
@@ -512,19 +520,12 @@ def analyze_image_with_gpt4v(file_path: str) -> DocumentAnalysisResult:
     try:
         from langchain_core.messages import SystemMessage, HumanMessage
         
-        # Check if file exists
-        if not Path(file_path).exists():
-            return DocumentAnalysisResult(
-                document_type="Unknown",
-                confidence=0.0,
-                sub_category=None,
-                key_indicators=[],
-                description="Image file not found"
-            )
-        
-        # Read and encode image
-        with open(file_path, "rb") as image_file:
-            image_data = base64.b64encode(image_file.read()).decode('utf-8')
+        # Prefer provided base64; otherwise load from local file
+        if image_base64:
+            image_data = image_base64
+        else:
+            with open(file_path, "rb") as image_file:
+                image_data = base64.b64encode(image_file.read()).decode('utf-8')
         
         # Create GPT-4V client
         vision_llm = ChatOpenAI(
@@ -868,7 +869,7 @@ def create_file_type_workflow():
     return workflow.compile(checkpointer=MemorySaver())
 
 
-async def process_file_async(user_id: str, file_path: str, analysis_only: bool = False) -> dict:
+async def process_file_async(user_id: str, file_name: str = None, file_type: str = None, image_path: str = None, image_base64: str = None, source_file_path: str = None, analysis_only: bool = False) -> dict:
     """
     Process a file and return its type (async version).
     
@@ -882,17 +883,14 @@ async def process_file_async(user_id: str, file_path: str, analysis_only: bool =
     # Create the workflow
     workflow = create_file_type_workflow()
     
-    # Extract file name from file_path
-    import os
-    file_name = os.path.basename(file_path)
-    
     # Initialize the state with all required fields
     initial_state = FileState(
         user_id=user_id,
         analysis_only=analysis_only,
-        file_path=file_path,
+        file_path=source_file_path,
         file_name=file_name,
-        file_type="",
+        file_type=file_type,
+        image_base64=image_base64,
         error="",
         processing_result="",
         analysis_result=DocumentAnalysisResult(
@@ -946,32 +944,6 @@ async def process_file_async(user_id: str, file_path: str, analysis_only: bool =
         "individual_record_results": result.get("individual_record_results", []),
         "error_details": result.get("error_details", {})
     }
-
-
-def process_file(user_id: str, file_path: str) -> dict:
-    """
-    Process a file and return its type (sync wrapper).
-    
-    Args:
-        user_id (str): The user ID associated with the file
-        file_path (str): Path to the file to analyze
-        
-    Returns:
-        dict: Dictionary containing file_type and error information
-    """
-    import asyncio
-    
-    # Check if there's already an event loop running
-    try:
-        loop = asyncio.get_running_loop()
-        # If we're in an async context, we need to run in a new thread
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(asyncio.run, process_file_async(user_id, file_path))
-            return future.result()
-    except RuntimeError:
-        # No event loop running, we can use asyncio.run directly
-        return asyncio.run(process_file_async(user_id, file_path))
 
 
 

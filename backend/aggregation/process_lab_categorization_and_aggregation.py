@@ -264,7 +264,8 @@ def main():
     """Main entry point"""
     try:
         logger.info("🏥 ZivoHealth Lab Categorization and Aggregation Processor")
-        logger.info(f"⏰ Started at: {datetime.now()}")
+        from app.utils.timezone import now_local
+        logger.info(f"⏰ Started at: {now_local()}")
 
         # Run the processing function
         result = process_lab_categorization_and_aggregation()

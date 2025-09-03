@@ -24,6 +24,7 @@ sys.path.insert(0, str(backend_path))
 from langgraph.graph import StateGraph, END, START
 from langchain_openai import ChatOpenAI
 from app.core.config import settings
+from app.utils.timezone import now_local, isoformat_now
 from configurations.vitals_config import VITALS_TABLES, PRIMARY_VITALS_TABLE
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -66,6 +67,7 @@ class VitalsAnalyzeWorkflowState:
     
     # Visualization
     plots: List[str] = field(default_factory=list)  # Base64 encoded images
+    saved_plots: List[Dict[str, Any]] = field(default_factory=list)  # Saved plot metadata (S3 URIs)
     
     # Response formatting
     formatted_results: Dict[str, Any] = field(default_factory=dict)
@@ -214,7 +216,6 @@ class VitalsAnalyzeWorkflow:
             This tool allows the agent to:
             - Run vitals data analysis and visualization code
             - Access pandas, numpy, matplotlib, seaborn
-            - Save plots directly to data/plots/ folder using save_plot()
             - Handle errors gracefully
             
             Args:
@@ -247,19 +248,19 @@ class VitalsAnalyzeWorkflow:
                 saved_plot_files = []
                 
                 def save_plot(filename=None, plt_figure=None, format='png', dpi=100):
-                    """Save matplotlib plot directly to data/plots folder"""
+                    """Save matplotlib plot to local folder and upload to S3 when enabled"""
                     try:
                         if plt_figure is None:
                             plt_figure = plt.gcf()
                         
                         # Generate filename if not provided
                         if filename is None:
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            timestamp = now_local().strftime("%Y%m%d_%H%M%S")
                             filename = f"vitals_plot_{timestamp}.png"
                         elif not filename.endswith('.png'):
                             filename = filename + ".png"
                         
-                        # Save directly to data/plots folder
+                        # Save to local folder
                         local_path = os.path.join(plots_dir, filename)
                         plt_figure.savefig(local_path, format=format, dpi=dpi, bbox_inches='tight')
                         
@@ -271,18 +272,40 @@ class VitalsAnalyzeWorkflow:
                         plot_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
                         plot_buffers.append(plot_base64)
                         
+                        # Upload to S3 if enabled (single saved path)
+                        saved_path = local_path
+                        try:
+                            from app.core.config import settings as _settings
+                            if bool(getattr(_settings, 'USE_S3_UPLOADS', False)):
+                                from app.services.s3_service import upload_bytes_and_get_uri
+                                s3_prefix = getattr(_settings, 'UPLOADS_S3_PREFIX', 'uploads') or 'uploads'
+                                s3_key = f"{s3_prefix.rstrip('/')}/plots/{filename}"
+                                s3_uri = upload_bytes_and_get_uri(
+                                    bucket=_settings.AWS_S3_BUCKET,
+                                    key=s3_key,
+                                    data=buffer.getvalue(),
+                                    content_type='image/png'
+                                )
+                                print(f"  [save_plot] S3 upload: {s3_uri}")
+                                saved_path = s3_uri
+                        except Exception as upload_exc:
+                            # Non-fatal: keep local save and proceed
+                            print(f"⚠️  [save_plot] S3 upload failed, using local file only: {str(upload_exc)}")
+                            saved_path = local_path
+                        
                         buffer.close()
                         plt.close(plt_figure)
                         
                         # Track saved files
                         saved_plot_files.append({
                             "filename": filename,
-                            "local_path": local_path,
+                            "local_path": saved_path,
                             "base64": plot_base64,
                             "size_bytes": os.path.getsize(local_path)
                         })
                         
-                        return f"Plot saved as {filename} in {plots_dir}! Total plots: {len(plot_buffers)}"
+                        location_msg = saved_path
+                        return f"Plot saved as {filename} to {location_msg}! Total plots: {len(plot_buffers)}"
                     except Exception as e:
                         return f"Error saving plot: {str(e)}"
                 
@@ -438,7 +461,6 @@ class VitalsAnalyzeWorkflow:
                 ],
                 "data_requirements": {{
                     "vitals": ["vital sign categories", "measurement logs", "dates", "device types", "etc."],
-                    "demographics": ["age", "sex", "weight", "health goals", "activity level"],
                     "external_sources": ["yes|no|optional", "e.g., YouTube, health research, exercise DB"],
                     "health_targets": "yes|no|optional"
                 }},
@@ -523,7 +545,7 @@ class VitalsAnalyzeWorkflow:
             self.current_data = {}
             self.current_results = {}
             self.current_plots = []
-            current_date = datetime.now().strftime('%Y_%m_%d')
+            current_date = now_local().strftime('%Y_%m_%d')
             # If this is the first time (no messages), set up the conversation
             if not state.messages:
                 system_prompt = f"""
@@ -550,7 +572,6 @@ class VitalsAnalyzeWorkflow:
                 
                 Data Requirements:
                 - Vitals Data: {json.dumps(state.data_requirements.get('vitals', []), indent=2) if isinstance(state.data_requirements, dict) else state.data_requirements}
-                - Demographics: {json.dumps(state.data_requirements.get('demographics', []), indent=2) if isinstance(state.data_requirements, dict) and 'demographics' in state.data_requirements else 'Not specified'}
                 - External Sources: {state.data_requirements.get('external_sources', 'Not specified') if isinstance(state.data_requirements, dict) else 'Not specified'}
                 
                 Time Period: {state.analysis_plan.get('time_period', 'Not specified')}
@@ -687,7 +708,6 @@ class VitalsAnalyzeWorkflow:
                 - Store your final results in a 'results' dictionary when using execute_python_code
                 - CRITICAL: To save plots, you MUST use save_plot() function, NOT plt.savefig()
                 - Use save_plot('filename') after creating each visualization
-                - save_plot() saves files directly to data/plots/ folder
                 
                 WORKFLOW ENFORCEMENT:
                 - Start immediately with tool usage - no explanations or requests for more info
@@ -727,7 +747,7 @@ class VitalsAnalyzeWorkflow:
                 plt.tight_layout()
                 
                 # Add date postfix to filename for uniqueness (datetime is globally available)
-                current_date = datetime.now().strftime('%Y_%m_%d')
+                current_date = now_local().strftime('%Y_%m_%d')
                 save_plot(f'blood_pressure_trend_chart_{current_date}')  # ← Use this, NOT plt.savefig()
                 plt.close()
                 ```
@@ -827,6 +847,10 @@ class VitalsAnalyzeWorkflow:
             print(f"🔍 [DEBUG] agent_code_analysis - Total messages: {len(state.messages)}")
             print(f"🔍 [DEBUG] agent_code_analysis - ReAct agent completed with {len(result['messages'])} messages")
             
+            # If we have saved plots, persist them in state (single source of truth for visuals)
+            if getattr(self, 'downloaded_plot_files', None):
+                state.saved_plots = list(self.downloaded_plot_files)
+            
             # The agent will now use tools iteratively through the workflow
             self.log_execution_step(state, "agent_code_analysis", "setup_complete")
             
@@ -885,27 +909,41 @@ class VitalsAnalyzeWorkflow:
                     "execution_log": state.execution_log
                 }
             else:
-                # After ReAct agent execution, get results directly from instance variables
+                # After ReAct agent execution, get results and build visualizations from downloaded files
                 final_results = self._convert_to_json_serializable(self.current_results)
-                final_plots = self.current_plots
-                downloaded_files = getattr(self, 'downloaded_plot_files', [])
+                direct_visualizations = []
+                for p in state.saved_plots or []:
+                    if isinstance(p, dict):
+                        s3_uri = p.get("local_path") or p.get("s3_uri") or p.get("file_path")
+                        filename = p.get("filename", "")
+                        title = filename or "Analysis Chart"
+                        direct_visualizations.append({
+                            "id": f"viz_{hash(filename) & 0xffff:04x}",
+                            "type": "chart",
+                            "title": title,
+                            "description": p.get("description", "Generated visualization"),
+                            "filename": filename,
+                            "s3_uri": s3_uri,
+                            "plot_path": s3_uri,
+                            "file_path": s3_uri,
+                        })
                 
                 # Check if we have any results from the analysis
                 final_response = "Vitals analysis completed successfully."
-                if final_results or final_plots or downloaded_files:
+                if final_results or direct_visualizations or state.saved_plots:
                     final_response = "Vitals analysis completed with data processing and visualization generation."
                 
                 state.formatted_results = {
                     "success": True,
                     "analysis": final_response,
                     "results": final_results,
-                    "visualizations": final_plots,
-                    "downloaded_plots": [{"filename": f["filename"], "local_path": f["local_path"], "size_bytes": f["size_bytes"]} for f in downloaded_files],
+                    "visualizations": direct_visualizations,
+                    "downloaded_plots": [{"filename": f["filename"], "local_path": f["local_path"], "size_bytes": f["size_bytes"]} for f in state.saved_plots or []],
                     "data_summary": {
                         "datasets_retrieved": len(self.current_data),
                         "results_keys": list(final_results.keys()) if final_results else [],
-                        "plots_generated": len(final_plots),
-                        "files_downloaded": len(downloaded_files)
+                        "plots_generated": len(direct_visualizations),
+                        "files_downloaded": len(state.saved_plots or [])
                     },
                     "execution_log": state.execution_log
                 }
@@ -988,7 +1026,7 @@ class VitalsAnalyzeWorkflow:
     def log_execution_step(self, state: VitalsAnalyzeWorkflowState, step_name: str, status: str, details: Dict = None):
         """Log execution step with context"""
         log_entry = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": isoformat_now(),
             "step": step_name,
             "status": status,
             "details": details or {}

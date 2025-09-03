@@ -7,6 +7,7 @@ from app.db.session import SessionLocal
 from app.crud.healthkit import HealthKitCRUD
 from app.models.healthkit_data import HealthKitMetricType, HealthKitRawData
 from app.schemas.healthkit import HealthKitDataSubmission
+from app.utils.timezone import now_local
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ class HealthKitBackendManager:
         while True:
             try:
                 # Run cleanup once per day at 2 AM
-                now = datetime.now()
+                now = now_local()
                 next_cleanup = now.replace(hour=2, minute=0, second=0, microsecond=0)
                 if next_cleanup <= now:
                     next_cleanup += timedelta(days=1)
@@ -82,7 +83,7 @@ class HealthKitBackendManager:
         with SessionLocal() as db:
             # Get all users with recent sync activity
             recent_syncs = db.query(HealthKitRawData.user_id).filter(
-                HealthKitRawData.created_at >= datetime.utcnow() - timedelta(hours=1)
+                HealthKitRawData.created_at >= now_local() - timedelta(hours=1)
             ).distinct().all()
             
             for (user_id,) in recent_syncs:
@@ -235,7 +236,7 @@ class HealthKitBackendManager:
             existing.max_value = max(max_values) if max_values else None
             existing.days_with_data = len(daily_data)
             existing.total_duration_minutes = sum(durations) if durations else None
-            existing.updated_at = datetime.utcnow()
+            existing.updated_at = now_local()
         else:
             # Create new
             weekly_aggregate = HealthKitWeeklyAggregate(
@@ -300,7 +301,7 @@ class HealthKitBackendManager:
             existing.max_value = max(max_values) if max_values else None
             existing.days_with_data = len(daily_data)
             existing.total_duration_minutes = sum(durations) if durations else None
-            existing.updated_at = datetime.utcnow()
+            existing.updated_at = now_local()
         else:
             # Create new
             monthly_aggregate = HealthKitMonthlyAggregate(
@@ -326,7 +327,7 @@ class HealthKitBackendManager:
         
         with SessionLocal() as db:
             # Delete raw data older than 90 days
-            cutoff_date = datetime.utcnow() - timedelta(days=90)
+            cutoff_date = now_local() - timedelta(days=90)
             
             deleted_count = db.query(HealthKitRawData).filter(
                 HealthKitRawData.created_at < cutoff_date

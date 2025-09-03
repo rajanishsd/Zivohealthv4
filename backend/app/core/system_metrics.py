@@ -16,6 +16,7 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 import logging
 import threading
+from app.utils.timezone import isoformat_now
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ class SystemMetricsCollector:
             
     async def _collect_system_metrics(self):
         """Collect all system metrics"""
-        timestamp = datetime.now().isoformat()
+        timestamp = isoformat_now()
         
         try:
             # CPU Metrics
@@ -243,10 +244,15 @@ class SystemMetricsCollector:
                 process_cpu = self._process.cpu_percent()
                 process_memory = self._process.memory_info()
                 
-                # Try to get connections and open files, fall back to 0 if access denied
+                # Try to get connections and open files, fall back safely if unsupported/denied
                 try:
-                    process_connections = len(self._process.net_connections())
-                except (psutil.AccessDenied, PermissionError):
+                    if hasattr(self._process, "connections"):
+                        # Use supported API for process connections
+                        process_connections = len(self._process.connections(kind="inet"))
+                    else:
+                        # Fallback to system-level connections if per-process not available
+                        process_connections = len(psutil.net_connections(kind="inet"))
+                except (psutil.AccessDenied, PermissionError, AttributeError):
                     process_connections = 0
                     
                 try:

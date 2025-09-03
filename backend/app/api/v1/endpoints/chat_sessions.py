@@ -10,6 +10,7 @@ import traceback
 import asyncio
 import threading
 import json
+from app.utils.timezone import now_local
 
 from app import crud, models, schemas
 from app.api import deps
@@ -27,6 +28,42 @@ from app.schemas.chat_session import (
 )
 
 router = APIRouter()
+
+
+# Helper to enrich visualization metadata with S3 presigned URLs for display
+def _enrich_visualizations_with_presigned_urls(visualizations):
+    """
+    If any visualization references an S3 object via fields like "file_path"/"path"/"s3_uri",
+    attach a short-lived presigned URL under key "presigned_url" for client display.
+    Leaves non-S3 references unchanged.
+    """
+    if not visualizations or not isinstance(visualizations, list):
+        return visualizations
+    try:
+        from app.services.s3_service import is_s3_uri, generate_presigned_get_url
+    except Exception:
+        is_s3_uri = None
+        generate_presigned_get_url = None
+
+    enriched_list = []
+    for viz in visualizations:
+        if not isinstance(viz, dict):
+            enriched_list.append(viz)
+            continue
+        s3_path = viz.get("file_path") or viz.get("path") or viz.get("s3_uri")
+        presigned_url = None
+        if s3_path and is_s3_uri and is_s3_uri(s3_path):
+            try:
+                presigned_url = generate_presigned_get_url(s3_path, expires_in=3600)
+            except Exception:
+                presigned_url = None
+        if presigned_url:
+            updated = dict(viz)
+            updated["presigned_url"] = presigned_url
+            enriched_list.append(updated)
+        else:
+            enriched_list.append(viz)
+    return enriched_list
 
 
 # WebSocket Connection Manager for real-time chat status
@@ -372,7 +409,7 @@ def get_chat_session_statistics(
         total_messages = 0
         
         # Get message count for each session and check activity
-        yesterday = datetime.now() - timedelta(hours=24)
+        yesterday = now_local() - timedelta(hours=24)
         
         formatted_sessions = []
         for session in sessions[:20]:  # Limit to 20 for display
@@ -435,6 +472,13 @@ def get_chat_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Chat session not found",
         )
+    # Enrich visualizations with presigned URLs for any S3-backed images
+    try:
+        for msg in getattr(session, "messages", []) or []:
+            if getattr(msg, "visualizations", None):
+                msg.visualizations = _enrich_visualizations_with_presigned_urls(msg.visualizations)
+    except Exception:
+        pass
     return session
 
 
@@ -541,6 +585,13 @@ def get_session_messages(
     messages = crud.chat_message.get_session_messages(
         db=db, session_id=session_id, skip=skip, limit=limit
     )
+    # Enrich visualizations with presigned URLs for any S3-backed images
+    try:
+        for msg in messages or []:
+            if getattr(msg, "visualizations", None):
+                msg.visualizations = _enrich_visualizations_with_presigned_urls(msg.visualizations)
+    except Exception:
+        pass
     return messages
 
 
@@ -794,19 +845,32 @@ async def stream_message_with_file_to_session(
         ext = file.filename.split(".")[-1].lower() if file.filename else ""
         if ext not in allowed_types:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"File type {ext} not supported. Allowed types: {', '.join(allowed_types)}")
-        upload_dir = "data/uploads/chat"
-        os.makedirs(upload_dir, exist_ok=True)
-        file_id = str(uuid.uuid4())
-        filename = f"{file_id}_{current_user.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
-        file_path = os.path.join(upload_dir, filename)
-        with open(file_path, "wb") as buffer:
-            content_bytes = await file.read()
-            buffer.write(content_bytes)
+        
+        # Read uploaded content into memory once
+        content_bytes = await file.read()
+        
+        # Use unified storage helper (writes temp and durable storage)
+        try:
+            from app.services.file_storage import store_file
+            stored_meta = store_file(content_bytes, file.filename or f"upload.{ext}", current_user.id, session_id)
+            stored_file_path = stored_meta.get("stored_url")
+            temp_path = stored_meta.get("temp_path")
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"File storage failed: {str(e)}")
+            upload_dir = "data/uploads/chat"
+            os.makedirs(upload_dir, exist_ok=True)
+            stored_file_path = os.path.join(upload_dir, filename)
+            with open(stored_file_path, "wb") as f_out:
+                f_out.write(content_bytes)
+        
         file_info = {
-            "file_path": file_path,
+            # DB should hold S3 URI when enabled, else local path
+            "file_path": stored_file_path,
             "file_type": ext,
             "original_name": file.filename,
             "size": len(content_bytes),
+            # Include temp path for local processing
+            "temp_path": temp_path
         }
 
     # Store user message (empty string allowed)
@@ -1130,10 +1194,15 @@ async def process_streaming_response(
             )
         )
         
-        # Get existing messages for context
-        existing_messages = crud.chat_message.get_session_messages(
-            db=db, session_id=session_id, skip=0, limit=50
-        )
+        # Get existing messages for context (open a fresh short-lived session to avoid long-held connections)
+        try:
+            from app.db.session import SessionLocal as _SessionLocal
+            with _SessionLocal() as _db_ctx:
+                existing_messages = crud.chat_message.get_session_messages(
+                    db=_db_ctx, session_id=session_id, skip=0, limit=50
+                )
+        except Exception:
+            existing_messages = []
         
         # Prepare conversation history for context
         messages = [{"role": msg.role, "content": msg.content} for msg in existing_messages]
@@ -1150,6 +1219,39 @@ async def process_streaming_response(
             )
         )
         
+        # Normalize uploaded file to S3 URI if S3 mode is enabled but path is local
+        try:
+            if uploaded_file and settings.USE_S3_UPLOADS:
+                from app.services.s3_service import is_s3_uri, upload_bytes_and_get_uri
+                path_value = uploaded_file.get("file_path") or ""
+                if path_value and not is_s3_uri(path_value):
+                    # Read bytes directly from stored file path
+                    source_path = path_value
+                    try:
+                        with open(source_path, "rb") as f_in:
+                            data_bytes = f_in.read()
+                        ext = uploaded_file.get("file_type") or os.path.splitext(source_path)[1].lstrip('.') or "bin"
+                        s3_prefix = "uploads/chat"
+                        filename = f"reupload_{uuid.uuid4().hex}_{user_id}_{session_id}.{ext}"
+                        s3_key = f"{s3_prefix}/{filename}"
+                        s3_uri = upload_bytes_and_get_uri(
+                            bucket=settings.AWS_S3_BUCKET,
+                            key=s3_key,
+                            data=data_bytes,
+                            content_type={
+                                "jpg": "image/jpeg",
+                                "jpeg": "image/jpeg",
+                                "png": "image/png",
+                                "pdf": "application/pdf",
+                            }.get(ext.lower(), "application/octet-stream"),
+                        )
+                        uploaded_file["file_path"] = s3_uri
+                        print(f"ℹ️ [Process] Normalized uploaded_file to S3 URI: {s3_uri}")
+                    except Exception as norm_e:
+                        print(f"⚠️ [Process] Failed to normalize uploaded_file to S3: {norm_e}")
+        except Exception:
+            pass
+
         # Choose between enhanced customer agent and new customer workflow
         if settings.USE_CUSTOMER_WORKFLOW:
             # Use new customer workflow
@@ -1191,9 +1293,21 @@ async def process_streaming_response(
             # Extract title from standardized location
             ai_title = agent_result.get("title", "Chat")
             
-            # Extract visualizations from standardized location
+            # Extract visualizations from standardized location (top-level after format_agent_response)
             visualizations = agent_result.get("visualizations", [])
-            print(f"🔍 [DEBUG] [Streaming] Found {len(visualizations)} visualizations in response")
+            print(f"🔍 [DEBUG] [Streaming] Top-level visualizations: {len(visualizations)} items")
+            
+            # If not found at top level, check nested in results (fallback for different response formats)
+            if not visualizations and isinstance(agent_result.get("results"), dict):
+                visualizations = agent_result["results"].get("visualizations", [])
+                print(f"🔍 [DEBUG] [Streaming] Found {len(visualizations)} visualizations in nested results")
+            
+            print(f"🔍 [DEBUG] [Streaming] Final visualizations to store: {len(visualizations)} items")
+            if visualizations:
+                for i, viz in enumerate(visualizations):
+                    print(f"🔍 [DEBUG] [Streaming] Viz {i}: {viz.get('title', 'No title')} - {viz.get('filename', 'No filename')}")
+            
+            print(f"🔍 [DEBUG] [Streaming] Agent result keys: {list(agent_result.keys())}")
         
         # Generate interactive components based on response content
         interactive_components = generate_interactive_components(ai_response)
@@ -1207,40 +1321,94 @@ async def process_streaming_response(
             visualizations=visualizations
         )
         
-        ai_message = crud.chat_message.create_with_session(
-            db=db, obj_in=ai_message_create, session_id=session_id
-        )
+        # Persist AI message using a short-lived session to reduce pool pressure
+        from app.db.session import SessionLocal as _SessionLocal
+        with _SessionLocal() as _db_write:
+            ai_message = crud.chat_message.create_with_session(
+                db=_db_write, obj_in=ai_message_create, session_id=session_id
+            )
+            _db_write.commit()
+            # Snapshot fields to avoid accessing detached objects after session closes
+            ai_msg_payload = {
+                "id": ai_message.id,
+                "role": ai_message.role,
+                "content": ai_message.content,
+                "session_id": session_id,
+                "user_id": ai_message.user_id,
+                "created_at": ai_message.created_at,
+                "file_path": ai_message.file_path,
+                "file_type": ai_message.file_type,
+                # Avoid accessing lazy attributes on detached instances; use the computed list instead
+                "visualizations": visualizations,
+            }
         
         # Send WebSocket notification for the new AI message
         try:
             from app.schemas.chat_session import ChatMessage as ChatMessageSchema
             message_schema = ChatMessageSchema(
-                id=ai_message.id,
-                role=ai_message.role,
-                content=ai_message.content,
-                session_id=session_id,
-                user_id=ai_message.user_id,
-                created_at=ai_message.created_at,
-                file_path=ai_message.file_path,
-                file_type=ai_message.file_type,
-                visualizations=ai_message.visualizations
+                id=ai_msg_payload["id"],
+                role=ai_msg_payload["role"],
+                content=ai_msg_payload["content"],
+                session_id=ai_msg_payload["session_id"],
+                user_id=ai_msg_payload["user_id"],
+                created_at=ai_msg_payload["created_at"],
+                file_path=ai_msg_payload["file_path"],
+                file_type=ai_msg_payload["file_type"],
+                visualizations=ai_msg_payload["visualizations"],
             )
             
             # Get current message count
-            total_count = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
+            # Use fresh read session for count to avoid long-lived session
+            from app.db.session import SessionLocal as _SessionLocal
+            with _SessionLocal() as _db_read:
+                total_count = _db_read.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
             
-            # Note: WebSocket notification handled by status updates below
-            print(f"📨 [Streaming] AI message stored in session {session_id} (notification via status updates)")
+            # Get current message count using a fresh session
+            from app.db.session import SessionLocal as _SessionLocal
+            with _SessionLocal() as _db_read:
+                total_count = _db_read.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
+
+            # Proactively notify message added so UIs append without waiting for final status
+            try:
+                await connection_manager.notify_message_added(session_id, message_schema, total_count)
+            except Exception:
+                pass
+
+            print(f"📨 [Streaming] AI message stored in session {session_id} (notified message_added)")
             
         except Exception as e:
+            # If we hit a detached instance error, fall back to schema from payload
             print(f"⚠️ [Streaming] Failed to store AI message: {e}")
+            try:
+                from app.schemas.chat_session import ChatMessage as ChatMessageSchema
+                message_schema = ChatMessageSchema(
+                    id=ai_msg_payload["id"],
+                    role=ai_msg_payload["role"],
+                    content=ai_msg_payload["content"],
+                    session_id=ai_msg_payload["session_id"],
+                    user_id=ai_msg_payload["user_id"],
+                    created_at=ai_msg_payload["created_at"],
+                    file_path=ai_msg_payload["file_path"],
+                    file_type=ai_msg_payload["file_type"],
+                    visualizations=ai_msg_payload["visualizations"],
+                )
+                # Use a short-lived read session to compute count
+                from app.db.session import SessionLocal as _SessionLocal
+                with _SessionLocal() as _db_read:
+                    total_count = _db_read.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
+                await connection_manager.notify_message_added(session_id, message_schema, total_count)
+            except Exception as _e:
+                print(f"⚠️ [Streaming] Fallback notification failed: {_e}")
         
         # Update session title if available
         if ai_title and len(ai_title) > 3:
-            session = crud.chat_session.get(db=db, id=session_id)
-            if session:
-                session.title = ai_title
-                db.commit()
+            # Update title using short-lived session
+            from app.db.session import SessionLocal as _SessionLocal
+            with _SessionLocal() as _db_update:
+                _session = crud.chat_session.get(db=_db_update, id=session_id)
+                if _session:
+                    _session.title = ai_title
+                    _db_update.commit()
         
         # Send completion status with the actual AI message content
         import json as _json
@@ -1248,16 +1416,23 @@ async def process_streaming_response(
         message_data = {
             "message_type": "new_message",
             "new_message": {
-                "id": ai_message.id,
-                "role": ai_message.role,
-                "content": ai_message.content,
-                "timestamp": ai_message.created_at.isoformat() if ai_message.created_at else None,
-                "filePath": ai_message.file_path,
-                "fileType": ai_message.file_type,
+                "id": ai_msg_payload["id"],
+                "role": ai_msg_payload["role"],
+                "content": ai_msg_payload["content"],
+                "timestamp": ai_msg_payload["created_at"].isoformat() if ai_msg_payload["created_at"] else None,
+                "filePath": ai_msg_payload["file_path"],
+                "fileType": ai_msg_payload["file_type"],
                 "fileName": None,
-                "visualizations": ai_message.visualizations,
+                # Attach presigned URLs for any S3-backed visualizations
+                "visualizations": _enrich_visualizations_with_presigned_urls(ai_msg_payload["visualizations"]),
             }
         }
+        # If the client temporarily disconnected, wait briefly for WS to reattach before sending final status
+        try:
+            await _wait_for_ws_connection(session_id, 10.0)
+        except Exception:
+            pass
+
         await connection_manager.send_status_update(
             session_id,
             ChatStatusMessage(
@@ -1269,11 +1444,12 @@ async def process_streaming_response(
         )
         
         # Store the processed message for the streaming endpoint to retrieve
+        # Store only serializable payloads to avoid detached-instance access
         message_cache[request_id] = {
-            "ai_message": ai_message,
+            "ai_message": ai_msg_payload,
             "ai_response": ai_response,
             "status": "complete",
-            "interactive_components": interactive_components
+            "interactive_components": interactive_components,
         }
         
         # Note: WebSocket notification already sent above via notify_message_added

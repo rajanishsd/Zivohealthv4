@@ -18,6 +18,7 @@ def register(
     *,
     db: Session = Depends(deps.get_db),
     user_in: UserCreate,
+    _: bool = Depends(deps.verify_api_key_dependency),
 ) -> Any:
     """
     Create new user.
@@ -34,7 +35,8 @@ def register(
 @router.post("/login", response_model=dict)
 async def login(
     db: Session = Depends(deps.get_db),
-    form_data: OAuth2PasswordRequestForm = Depends()
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    _: bool = Depends(deps.verify_api_key_dependency),
 ) -> Any:
     """
     OAuth2 compatible token login, get an access token for future requests.

@@ -1,0 +1,9 @@
+{
+  "commands": [
+    "aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin 474221740916.dkr.ecr.us-east-1.amazonaws.com",
+    "sudo docker compose -f /opt/zivohealth/docker-compose.yml pull",
+    "sudo docker compose -f /opt/zivohealth/docker-compose.yml up -d",
+    "sudo docker ps",
+    "curl -sS -m 10 http://127.0.0.1/health || true"
+  ]
+}

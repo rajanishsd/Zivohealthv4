@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from sqlalchemy import Column, Integer, String, DateTime, Float, Date, Text, ForeignKey, Enum as SQLEnum, Index, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, Float, Date, Text, ForeignKey, Enum as SQLEnum, Index, UniqueConstraint, text
 from sqlalchemy.orm import relationship
 from enum import Enum
 from app.db.base import Base
@@ -80,6 +80,9 @@ class VitalsRawData(Base):
         Index('idx_metric_date_range', 'metric_type', 'start_date', 'end_date'),
         Index('idx_user_source_date', 'user_id', 'data_source', 'start_date'),
         Index('idx_aggregation_status', 'aggregation_status', 'user_id', 'start_date'),
+        # Functional unique index that treats NULL notes as empty string to prevent duplicates
+        Index('ux_vitals_raw_data_nodups', 'user_id', 'metric_type', 'unit', 'start_date', 'data_source', 
+              text("COALESCE(notes, '')"), unique=True),
     )
 
 class VitalsRawCategorized(Base):

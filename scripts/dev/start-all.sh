@@ -58,7 +58,7 @@ check_service() {
 start_postgresql() {
     print_status "Starting PostgreSQL database..."
     
-    if check_service "PostgreSQL" "5433"; then
+    if check_service "PostgreSQL" "5432"; then
         return 0
     fi
     
@@ -81,7 +81,7 @@ start_postgresql() {
     fi
     
     # Start PostgreSQL with local data directory
-    postgres -D "$POSTGRES_DATA_DIR" -p 5433 > backend/data/postgres.log 2>&1 &
+    postgres -D "$POSTGRES_DATA_DIR" -p 5432 > backend/data/postgres.log 2>&1 &
     POSTGRES_PID=$!
     
     # Save PID for cleanup
@@ -91,7 +91,7 @@ start_postgresql() {
     print_status "Waiting for PostgreSQL to start..."
     local attempts=0
     while [ $attempts -lt 30 ]; do
-        if pg_isready -h localhost -p 5433 >/dev/null 2>&1; then
+        if pg_isready -h localhost -p 5432 >/dev/null 2>&1; then
             print_success "PostgreSQL started successfully (PID: $POSTGRES_PID)"
             return 0
         fi
@@ -242,7 +242,7 @@ main() {
             # Show service-specific info
             case $1 in
                 "postgresql"|"postgres")
-                    echo "🌐 PostgreSQL: localhost:5433"
+                    echo "🌐 PostgreSQL: localhost:5432"
                     ;;
                 "redis")
                     echo "🌐 Redis: localhost:6379"
@@ -301,8 +301,8 @@ main() {
     echo "==============="
     
     # Check all services
-    if check_service "PostgreSQL" "5433"; then
-        echo "✅ PostgreSQL: Running on port 5433"
+    if check_service "PostgreSQL" "5432"; then
+        echo "✅ PostgreSQL: Running on port 5432"
     else
         echo "❌ PostgreSQL: Not running"
     fi

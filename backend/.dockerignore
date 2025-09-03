@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv
+venv
+.env
+.git
+.gitignore
+# large/unneeded
+logs/
+server.log
+.data/
+data/
+3PData/data/
+model/
+notebooks/
+node_modules/
+dist/
+build/
+.mypy_cache/
+.pyright/
+coverage/
+**/*.csv
+**/*.json
+**/*.md

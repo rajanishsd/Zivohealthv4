@@ -22,6 +22,10 @@ from app.db.session import engine, SessionLocal
 from app.db.base import Base
 from app.core.security import get_password_hash
 
+# Import all models to ensure they are registered with Base.metadata
+# This import loads `app/models/__init__.py`, which imports all model modules
+from app import models  # noqa: F401
+
 # Import all models to ensure they're registered
 from app.models.user import User
 from app.models.doctor import Doctor, ConsultationRequest

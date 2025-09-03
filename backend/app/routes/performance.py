@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 from ..core.system_metrics import system_metrics, MetricType
 from ..core.database_metrics import db_monitor
+from app.utils.timezone import isoformat_now
 
 router = APIRouter(prefix="/performance", tags=["Performance Monitoring"])
 
@@ -477,7 +478,7 @@ async def get_performance_alerts(
                 })
         
         return {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": isoformat_now(),
             "hours_checked": hours,
             "alert_count": len(alerts),
             "warning_count": len(warnings),

@@ -49,7 +49,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Database configuration
-DATABASE_URL = "postgresql://rajanishsd@localhost:5433/zivohealth"
+DATABASE_URL = "postgresql://rajanishsd@localhost:5432/zivohealth"
 COLLECTION_NAME = "medical_documents"
 
 # Performance optimizations

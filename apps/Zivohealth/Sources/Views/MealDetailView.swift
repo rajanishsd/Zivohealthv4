@@ -4,6 +4,8 @@ struct MealDetailView: View {
     let meal: NutritionDataResponse
     @Environment(\.presentationMode) var presentationMode
     @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
+    @State private var presignTs: String? = nil
+    @State private var resolvedURL: URL? = nil
     
     var body: some View {
         NavigationView {
@@ -118,34 +120,51 @@ struct MealDetailView: View {
                 .font(.headline)
                 .fontWeight(.semibold)
             
-            if let imageUrl = meal.imageUrl, !imageUrl.isEmpty, let fullURL = fullImageURL(from: imageUrl) {
-                AsyncImage(url: fullURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 250)
-                            .cornerRadius(12)
-                    case .failure(let error):
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.red.opacity(0.1))
-                            .frame(height: 200)
-                            .overlay(
-                                VStack(spacing: 8) {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .font(.title2)
-                                        .foregroundColor(.red)
-                                    Text("Failed to load image")
-                                        .font(.caption)
-                                        .foregroundColor(.red)
-                                    Text(error.localizedDescription)
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                        .multilineTextAlignment(.center)
-                                }
-                            )
-                    case .empty:
+            if let imageUrl = meal.imageUrl, !imageUrl.isEmpty {
+                if imageUrl.hasPrefix("s3://") {
+                    if let finalURL = resolvedURL {
+                        AsyncImage(url: finalURL) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxHeight: 250)
+                                    .cornerRadius(12)
+                            case .failure:
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.red.opacity(0.1))
+                                    .frame(height: 200)
+                                    .overlay(
+                                        VStack(spacing: 8) {
+                                            Image(systemName: "exclamationmark.triangle.fill")
+                                                .font(.title2)
+                                                .foregroundColor(.red)
+                                            Text("Failed to load image")
+                                                .font(.caption)
+                                                .foregroundColor(.red)
+                                        }
+                                    )
+                            case .empty:
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.gray.opacity(0.2))
+                                    .frame(height: 200)
+                                    .overlay(
+                                        VStack(spacing: 8) {
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle())
+                                            Text("Loading image...")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    )
+                            @unknown default:
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.gray.opacity(0.2))
+                                    .frame(height: 200)
+                            }
+                        }
+                    } else {
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color.gray.opacity(0.2))
                             .frame(height: 200)
@@ -153,15 +172,53 @@ struct MealDetailView: View {
                                 VStack(spacing: 8) {
                                     ProgressView()
                                         .progressViewStyle(CircularProgressViewStyle())
-                                    Text("Loading image...")
+                                    Text("Preparing image...")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                 }
                             )
-                    @unknown default:
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.gray.opacity(0.2))
-                            .frame(height: 200)
+                    }
+                } else if let fullURL = fullImageURL(from: imageUrl, ts: presignTs) {
+                    AsyncImage(url: fullURL) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxHeight: 250)
+                                .cornerRadius(12)
+                        case .failure:
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.red.opacity(0.1))
+                                .frame(height: 200)
+                                .overlay(
+                                    VStack(spacing: 8) {
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                            .font(.title2)
+                                            .foregroundColor(.red)
+                                        Text("Failed to load image")
+                                            .font(.caption)
+                                            .foregroundColor(.red)
+                                    }
+                                )
+                        case .empty:
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.gray.opacity(0.2))
+                                .frame(height: 200)
+                                .overlay(
+                                    VStack(spacing: 8) {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle())
+                                        Text("Loading image...")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                )
+                        @unknown default:
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.gray.opacity(0.2))
+                                .frame(height: 200)
+                        }
                     }
                 }
                 
@@ -203,6 +260,16 @@ struct MealDetailView: View {
         .padding()
         .background(Color(.systemGray6))
         .cornerRadius(12)
+        .onAppear {
+            if presignTs == nil {
+                presignTs = String(Int(Date().timeIntervalSince1970))
+            }
+            Task { @MainActor in
+                if resolvedURL == nil, let urlStr = meal.imageUrl, urlStr.hasPrefix("s3://"), let u = await resolveSignedURL(from: urlStr) {
+                    resolvedURL = u
+                }
+            }
+        }
     }
     
     // MARK: - Macronutrients Section
@@ -471,6 +538,16 @@ struct MealDetailView: View {
                 .font(.subheadline)
                 .fontWeight(.medium)
         }
+        .onAppear {
+            if presignTs == nil {
+                presignTs = String(Int(Date().timeIntervalSince1970))
+            }
+            Task { @MainActor in
+                if resolvedURL == nil, let urlStr = meal.imageUrl, let u = await resolveSignedURL(from: urlStr) {
+                    resolvedURL = u
+                }
+            }
+        }
     }
     
     // MARK: - Helper Properties
@@ -504,35 +581,60 @@ struct MealDetailView: View {
     }
     
     // Helper function to construct full image URL
-    private func fullImageURL(from imageUrl: String?) -> URL? {
-        guard let imageUrl = imageUrl, !imageUrl.isEmpty else { 
-            print("🖼️ [MealDetailView] No image URL provided")
-            return nil 
+    private func fullImageURL(from imageUrl: String?, ts: String?) -> URL? {
+        guard let imageUrl = imageUrl, !imageUrl.isEmpty else {
+            return nil
         }
         
-        print("🖼️ [MealDetailView] Original image URL: \(imageUrl)")
+        // If it's an S3 URI, use backend presign redirect endpoint for secure access.
+        // Include api_key query for auth since AsyncImage cannot attach headers.
+        if imageUrl.hasPrefix("s3://") {
+            let encoded = imageUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? imageUrl
+            let apiKey = NetworkService.shared.authHeaders(requiresAuth: false)["X-API-Key"] ?? ""
+            let keyParam = apiKey.isEmpty ? "" : "&api_key=\(apiKey)"
+            let tsVal = ts ?? String(Int(Date().timeIntervalSince1970))
+            let message = imageUrl + "." + tsVal
+            let secret = NetworkService.shared.appSecretForSigning()
+            let sig = NetworkService.shared.hmacSHA256Hex(message: message, secret: secret)
+            return URL(string: "\(apiEndpoint)/api/v1/files/s3presign?s3_uri=\(encoded)\(keyParam)&ts=\(tsVal)&sig=\(sig)")
+        }
         
         // If it's already a full URL, return it as is
         if imageUrl.hasPrefix("http://") || imageUrl.hasPrefix("https://") {
-            print("🖼️ [MealDetailView] Using full URL as-is: \(imageUrl)")
             return URL(string: imageUrl)
         }
         
         // If it's a relative path, construct full URL
-        // Use the configurable API endpoint
         let baseURL = apiEndpoint
-        
-        // Clean up the path - remove leading slash if present to avoid double slashes
         let cleanPath = imageUrl.hasPrefix("/") ? String(imageUrl.dropFirst()) : imageUrl
         let fullURL = "\(baseURL)/\(cleanPath)"
         
-        print("🖼️ [MealDetailView] Constructed full URL: \(fullURL)")
-        
-        guard let url = URL(string: fullURL) else {
-            print("❌ [MealDetailView] Failed to create URL from: \(fullURL)")
+        return URL(string: fullURL)
+    }
+
+    private func resolveSignedURL(from imageUrl: String) async -> URL? {
+        guard imageUrl.hasPrefix("s3://") else { return URL(string: imageUrl) }
+        let encoded = imageUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? imageUrl
+        let apiKey = NetworkService.shared.authHeaders(requiresAuth: false)["X-API-Key"] ?? ""
+        let keyParam = apiKey.isEmpty ? "" : "&api_key=\(apiKey)"
+        let tsVal = presignTs ?? String(Int(Date().timeIntervalSince1970))
+        let message = imageUrl + "." + tsVal
+        let secret = NetworkService.shared.appSecretForSigning()
+        let sig = NetworkService.shared.hmacSHA256Hex(message: message, secret: secret)
+        let urlStr = "\(apiEndpoint)/api/v1/files/s3presign?s3_uri=\(encoded)\(keyParam)&ts=\(tsVal)&sig=\(sig)&format=url"
+        guard let url = URL(string: urlStr) else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let final = json["url"] as? String {
+                return URL(string: final)
+            }
+        } catch {
             return nil
         }
-        
-        return url
+        return nil
     }
 } 

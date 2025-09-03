@@ -341,11 +341,24 @@ struct VitalsCardContentView: View {
     
     private var latestTemperature: String {
         if let dashboardData = healthKitManager.dashboardData,
-           let tempMetric = dashboardData.metrics.first(where: { $0.metricType == .bodyTemperature }),
-           let latestValue = tempMetric.latestValue {
-            return String(format: "%.1f°F", latestValue)
+           let tempMetric = dashboardData.metrics.first(where: { $0.metricType == .bodyTemperature }) {
+            let normalizedUnit = tempMetric.unit.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let symbol: String
+            if ["°f", "f", "degf", "fahrenheit"].contains(normalizedUnit) {
+                symbol = "°F"
+            } else if ["°c", "c", "degc", "celsius"].contains(normalizedUnit) {
+                symbol = "°C"
+            } else {
+                symbol = tempMetric.unit
+            }
+            if let latestValue = tempMetric.latestValue {
+                let valueString = String(format: "%.1f", latestValue)
+                return "\(valueString)\(symbol)"
+            } else {
+                return "--\(symbol)"
+            }
         }
-        return "--°F"
+        return "--"
     }
     
     private var latestDataDate: String {

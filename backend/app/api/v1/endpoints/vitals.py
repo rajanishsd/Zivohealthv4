@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta
+from app.utils.timezone import now_local, today_local
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -29,6 +30,8 @@ from app.models.vitals_data import VitalsRawData, VitalsSyncStatus, VitalsDailyA
 import logging
 import uuid
 from app.core.sync_state import sync_state_manager
+from app.core.background_worker import trigger_smart_aggregation
+import asyncio
 
 router = APIRouter()
 
@@ -101,28 +104,13 @@ async def submit_vital_data(
             db=db,
             user_id=current_user.id,
             data_source=data.data_source,
-            last_sync_date=datetime.utcnow(),
+            last_sync_date=now_local(),
             success=True,
             error_message=None
         )
         
-        # Trigger separate worker process for true isolation
-        logger.info(f"🚀 [SingleSubmit] Triggering separate worker process for true isolation (1 data point)")
-        import subprocess
-        import os
-        
-        try:
-            worker_script = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", "aggregation", "worker_process.py")
-            subprocess.Popen(
-                ["python", worker_script],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=os.path.dirname(worker_script)
-            )
-            logger.info(f"✅ [SingleSubmit] Separate worker process triggered successfully")
-        except Exception as e:
-            logger.error(f"❌ [SingleSubmit] Failed to trigger separate worker process: {e}")
-            # Note: No fallback to background task - separate process is required
+        # Coalesced, domain-specific aggregation trigger (vitals only) - fire and forget
+        asyncio.create_task(trigger_smart_aggregation(user_id=current_user.id, domains=["vitals"]))
         
         return VitalSubmissionResponse(
             success=True,
@@ -140,7 +128,7 @@ async def submit_vital_data(
                 db=db,
                 user_id=current_user.id,
                 data_source=data.data_source,
-                last_sync_date=datetime.utcnow(),
+                last_sync_date=now_local(),
                 success=False,
                 error_message=str(e)
             )
@@ -189,7 +177,7 @@ async def bulk_submit_vital_data(
                 db=db,
                 user_id=current_user.id,
                 data_source=data_source,
-                last_sync_date=datetime.utcnow(),
+                last_sync_date=now_local(),
                 success=True,
                 error_message=None
             )
@@ -203,25 +191,9 @@ async def bulk_submit_vital_data(
         should_trigger_aggregation = is_final_chunk
         
         if should_trigger_aggregation:
-            logger.info(f"🚀 [BulkSubmit] Final chunk received - triggering aggregation for session {session_id}")
-            
-            # Always use separate worker process for true isolation
-            logger.info(f"🚀 [BulkSubmit] Triggering separate worker process for true isolation ({batch_size} points)")
-            import subprocess
-            import os
-            
-            try:
-                worker_script = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", "aggregation", "worker_process.py")
-                subprocess.Popen(
-                    ["python", worker_script],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    cwd=os.path.dirname(worker_script)
-                )
-                logger.info(f"✅ [BulkSubmit] Separate worker process triggered successfully")
-            except Exception as e:
-                logger.error(f"❌ [BulkSubmit] Failed to trigger separate worker process: {e}")
-                # Note: No fallback to background task - separate process is required
+            logger.info(f"🚀 [BulkSubmit] Final chunk received - triggering coalesced vitals aggregation for session {session_id}")
+            # Fire and forget to avoid blocking the response
+            asyncio.create_task(trigger_smart_aggregation(user_id=current_user.id, domains=["vitals"])) 
         else:
             logger.info(f"⏳ [BulkSubmit] Intermediate chunk {chunk_number}/{total_chunks} - aggregation deferred until final chunk")
         
@@ -252,7 +224,7 @@ async def bulk_submit_vital_data(
                     db=db,
                     user_id=current_user.id,
                     data_source=data_source,
-                    last_sync_date=datetime.utcnow(),
+                    last_sync_date=now_local(),
                     success=False,
                     error_message=str(e)
                 )
@@ -292,7 +264,7 @@ async def get_vitals_charts(
 ):
     """Get chart data for vital metrics"""
     try:
-        end_date = date.today()
+        end_date = today_local()
         start_date = end_date - timedelta(days=days)
         
         # If no metric types specified, get all available for user
@@ -364,7 +336,7 @@ async def get_vitals_data_count(
 ):
     """Get count of vitals data by metric type for checking sync status"""
     try:
-        end_date = datetime.now()
+        end_date = now_local()
         start_date = end_date - timedelta(days=days)
         
         # If no metric types specified, get counts for all available metrics
@@ -472,7 +444,7 @@ async def update_weight(
 ):
     """Update weight - backward compatibility endpoint"""
     try:
-        measurement_date = weight_data.measurement_date or datetime.now()
+        measurement_date = weight_data.measurement_date or now_local()
         
         vital_data = VitalDataSubmission(
             metric_type=VitalMetricType.BODY_MASS,
@@ -486,8 +458,8 @@ async def update_weight(
         
         db_data = VitalsCRUD.create_raw_data(db, current_user.id, vital_data)
         
-        # Trigger aggregation
-        await trigger_aggregation(db, current_user.id, measurement_date.date())
+        # Coalesced, domain-specific aggregation trigger (vitals only) - fire and forget
+        asyncio.create_task(trigger_smart_aggregation(user_id=current_user.id, domains=["vitals"])) 
         
         return WeightUpdateResponse(
             success=True,

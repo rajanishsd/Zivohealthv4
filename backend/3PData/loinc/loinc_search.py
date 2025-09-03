@@ -200,12 +200,13 @@ class LOINCSearchTool:
             Path to exported file
         """
         if not filename:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            from app.utils.timezone import now_local
+            timestamp = now_local().strftime("%Y%m%d_%H%M%S")
             filename = f"loinc_search_results_{timestamp}.json"
         
         export_data = {
             "query": query,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": __import__('app.utils.timezone', fromlist=['isoformat_now']).isoformat_now(),
             "num_results": len(results),
             "results": []
         }

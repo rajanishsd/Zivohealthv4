@@ -32,6 +32,9 @@ from app.agentsv2.response_utils import format_agent_response, format_error_resp
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from app.core.config import settings
+from app.agentsv2.tools.nutrition_tools import internet_search_tool
+from app.utils.timezone import now_local, isoformat_now
+from app.core.background_worker import trigger_smart_aggregation
 
 # Import nutrition configuration
 from configurations.nutrition_config import NUTRITION_TABLES, PRIMARY_NUTRITION_TABLE
@@ -92,6 +95,7 @@ RETRIEVAL DATA IMPORTANT:
 - Dont use symbols like * or % or - in the query results, instead use numbers or dots for bullet points
 - Based on the query, summarize the data in crisp and concise manner
 - Dont add any commentary or explanation in the query results, just return the data in a structured format.
+- while calculating average values skip the days where the data is not logged for the day
 
 REASONING EXAMPLES:
 - "I'm selecting the main nutrition table because the user asked for 'recent' food intake without specifying a time period, suggesting they want recent results from the detailed table."
@@ -141,6 +145,8 @@ class NutritionAgentState:
     # Response data
     response_data: Optional[Dict] = None
     execution_log: List[Dict] = field(default_factory=list)
+    # Capture raw intermediate tool outputs to avoid truncation when formatting
+    intermediate_outputs: Optional[Dict[str, Any]] = None
     
     # Workflow control
     next_step: Optional[str] = None
@@ -351,7 +357,7 @@ class NutritionAgentLangGraph:
             except Exception as e:
                 return f"Schema Query Error for table '{table_name}': {e}"
         
-        return [query_nutrition_db, describe_nutrition_table_schema]
+        return [query_nutrition_db, describe_nutrition_table_schema, internet_search_tool]
 
     def get_postgres_connection(self):
         """Get PostgreSQL connection using settings"""
@@ -366,7 +372,7 @@ class NutritionAgentLangGraph:
     def log_execution_step(self, state: NutritionAgentState, step_name: str, status: str, details: Dict = None):
         """Log execution step with context"""
         log_entry = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": isoformat_now(),
             "step": step_name,
             "status": status,
             "details": details or {}
@@ -546,8 +552,6 @@ class NutritionAgentLangGraph:
         **Response Format**: Respond with a valid JSON object containing all the above information. Use 0.0 for nutrients that are not significantly present or cannot be estimated.
 
 {{
-    "meal_date": "{current_date}",
-    "meal_time": "{current_datetime}",
     "meal_type": Based on the time of the day and not based on the food items,
     "food_entries": [
         {{
@@ -630,8 +634,8 @@ IMPORTANT:
 - Use consistent units (grams for macronutrients, mg for micronutrients)""".format(
                 original_prompt=state.original_prompt,
                 user_id=state.user_id,
-                current_date=datetime.now().strftime("%Y-%m-%d"),
-                current_datetime=datetime.now().isoformat()
+                current_date=now_local().strftime("%Y-%m-%d"),
+                current_datetime=isoformat_now()
             )
             
             # Analyze image
@@ -657,6 +661,10 @@ IMPORTANT:
                     content = content[3:-3].strip()
                 
                 nutrition_data = json.loads(content)
+                # Use configured timezone for timestamps to avoid server-region dependence
+                now = now_local()
+                nutrition_data["meal_date"] = now.strftime("%Y-%m-%d")
+                nutrition_data["meal_time"] = now.strftime("%Y-%m-%d %H:%M:%S")
                 print(f"🔍 [DEBUG] Successfully extracted nutrition from image: {len(nutrition_data.get('food_entries', []))} foods")
                 return nutrition_data
                 
@@ -727,8 +735,6 @@ IMPORTANT:
         **Response Format**: Respond with a valid JSON object containing all the above information. Use 0.0 for nutrients that are not significantly present or cannot be estimated.
 
 {{
-    "meal_date": "{current_date}",
-    "meal_time": "{current_datetime}",
     "meal_type": "lunch, dinner, breakfast, snack, etc",
     "food_entries": [
         {{
@@ -805,14 +811,13 @@ IMPORTANT:
 }}
 
 IMPORTANT:
-- Extract ALL food items visible in the image
 - Use realistic nutritional estimates for the portions shown
 - Estimate values based on visual serving sizes
 - Use consistent units (grams for macronutrients, mg for micronutrients)""".format(
     original_prompt=state.original_prompt,
     user_id=state.user_id,
-    current_date=datetime.now().strftime("%Y-%m-%d"),
-    current_datetime=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_date=now_local().strftime("%Y-%m-%d"),
+    current_datetime=now_local().strftime("%Y-%m-%d %H:%M:%S")
 )
 
             
@@ -824,7 +829,7 @@ IMPORTANT:
             if state.extracted_text:
                 user_content_parts.append(f"DOCUMENT TO ANALYZE:\n---START DOCUMENT---\n{state.extracted_text}\n---END DOCUMENT---\n")
             else:
-                user_content_parts.append("ERROR: No document content provided for analysis.")
+                user_content_parts.append(" No document content provided for analysis.")
             
             user_content = "\n".join(user_content_parts)
             
@@ -853,6 +858,10 @@ IMPORTANT:
                 cleaned_content = cleaned_content.strip()
                 
                 nutrition_data = json.loads(cleaned_content)
+                # Override timestamps for text-only inputs using runtime variables
+                now = now_local()
+                nutrition_data["meal_date"] = now.strftime("%Y-%m-%d")
+                nutrition_data["meal_time"] = now.strftime("%Y-%m-%d %H:%M:%S")
                 print(f"🔍 [DEBUG] Successfully extracted nutrition from text: {len(nutrition_data.get('food_entries', []))} foods")
                 return nutrition_data
                 
@@ -904,6 +913,15 @@ IMPORTANT:
 
             # Prepare all nutrition records for batch processing
             for food_entry in food_entries:
+                # Prefer durable persisted path (S3 URI) over temp path for image_url
+                persisted_image_url = ""
+                try:
+                    if state.source_file_path and str(state.source_file_path).strip():
+                        persisted_image_url = state.source_file_path
+                    elif state.image_path and str(state.image_path).strip():
+                        persisted_image_url = state.image_path
+                except Exception:
+                    persisted_image_url = state.image_path or ""
                 nutrition_record = {
                     "user_id": user_id,
                     "dish_name": food_entry.get("dish_name"),
@@ -939,11 +957,11 @@ IMPORTANT:
                     "manganese_mg": food_entry.get("manganese_mg"),
                     "selenium_mcg": food_entry.get("selenium_mcg"),
                     "confidence_score": food_entry.get("confidence_score") or 0.8,
-                    "image_url": state.image_path or "",
+                    "image_url": persisted_image_url,
                     "meal_date": nutrition_data.get("meal_date"),
                     "meal_time": nutrition_data.get("meal_time"),
                     "meal_type": nutrition_data.get("meal_type"),
-                    "data_source": "photo_analysis" if state.image_path else "manual_entry",
+                    "data_source": "photo_analysis" if (state.image_path or state.image_base64 or state.source_file_path) else "manual_entry",
                     "aggregation_status": "pending",
                 }
                 nutrition_records.append(nutrition_record)
@@ -982,6 +1000,15 @@ IMPORTANT:
             
             # Store only the `output` section (which is either a JSON list or a raw string)
             state.query_results = result.get("output")
+            # Store raw intermediate output for final response
+            raw_payload = result.get("intermediate", {}).get("raw_full_payload")
+            try:
+                if raw_payload is not None:
+                    if state.intermediate_outputs is None:
+                        state.intermediate_outputs = {}
+                    state.intermediate_outputs["query_nutrition_db"] = raw_payload
+            except Exception:
+                pass
             self.log_execution_step(state, "retrieve_nutrition_data", "completed", {"results": result})
         except Exception as e:
             print(f"DEBUG: Exception in retrieve_nutrition_data: {str(e)}")
@@ -1089,6 +1116,9 @@ IMPORTANT:
                     results["extracted_data"] = state.extracted_nutrition_data
                 if state.query_results:
                     results["query_results"] = state.query_results
+                # Include intermediate tool outputs if captured (prevents truncation issues)
+                if state.intermediate_outputs:
+                    results["intermediate_tool_outputs"] = state.intermediate_outputs
                 if state.update_results:
                     results["update_results"] = state.update_results
                 if state.nutrition_analysis:
@@ -1097,8 +1127,9 @@ IMPORTANT:
                         # Use the workflow's results directly without the wrapper
                         results = state.nutrition_analysis.get("results", {})
                         
-                        # Don't separately copy visualizations - let response_utils handle extraction
-                        # from the structured analysis to avoid duplication
+                        # Ensure visualizations are included at the top level
+                        if "visualizations" in state.nutrition_analysis:
+                            results["visualizations"] = state.nutrition_analysis["visualizations"]
                         
                     else:
                         results["analysis_error"] = "Nutrition analysis workflow failed"
@@ -1251,6 +1282,18 @@ IMPORTANT:
             elif res.get("action") == "failed" or res.get("action") == "error":
                 stats["failed"] += 1
         stats["results"] = results
+        # Fire-and-forget coalesced aggregation for nutrition domain
+        try:
+            import asyncio
+            user_id = None
+            if isinstance(nutrition_result, dict):
+                user_id = nutrition_result.get("user_id") or nutrition_result.get("userId")
+            elif isinstance(nutrition_result, list) and nutrition_result and isinstance(nutrition_result[0], dict):
+                user_id = nutrition_result[0].get("user_id") or nutrition_result[0].get("userId")
+            asyncio.create_task(trigger_smart_aggregation(user_id=user_id, domains=["nutrition"]))
+        except Exception:
+            pass
+
         return stats
 
     def _update_nutrition_db_single(self, nutrition_data: dict) -> dict:
@@ -1260,6 +1303,9 @@ IMPORTANT:
                 return None if value == "" else value
 
             cleaned = {key: clean_value(value) for key, value in nutrition_data.items()}
+            # Ensure aggregation status is set to pending by default
+            if not cleaned.get('aggregation_status'):
+                cleaned['aggregation_status'] = 'pending'
 
             conn = self.get_postgres_connection()
             cursor = conn.cursor()
@@ -1282,10 +1328,21 @@ IMPORTANT:
             update_query = f"""
                 UPDATE {self.table_name}
                 SET {', '.join(update_fields)}, updated_at = NOW()
-                WHERE user_id = %s AND meal_date = %s AND meal_time = %s
+                WHERE user_id = %s 
+                  AND meal_date = %s 
+                  AND meal_time = %s
+                  AND dish_name IS NOT DISTINCT FROM %s
                 RETURNING id
             """
-            cursor.execute(update_query, values[1:] + [values[0], values[fields.index('meal_date')], values[fields.index('meal_time')]])
+            cursor.execute(
+                update_query,
+                values[1:] + [
+                    values[0],
+                    values[fields.index('meal_date')],
+                    values[fields.index('meal_time')],
+                    values[fields.index('dish_name')]
+                ]
+            )
             result = cursor.fetchone()
             if result:
                 conn.commit()
@@ -1301,6 +1358,7 @@ IMPORTANT:
             cursor.execute(insert_query, values)
             new_id = cursor.fetchone()[0]
             conn.commit()
+           
             return {"action": "inserted", "record_id": new_id}
         except Exception as e:
             if conn:
@@ -1361,7 +1419,11 @@ IMPORTANT:
 
             return {
                 "input": user_request,
-                "output": parsed_output
+                "output": parsed_output,
+                "intermediate": {
+                    "raw_full_payload": full_payload,
+                    "intermediate_steps_count": len(intermediate_steps)
+                }
             }
 
         except Exception as e:

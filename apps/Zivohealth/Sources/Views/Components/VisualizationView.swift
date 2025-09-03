@@ -150,24 +150,62 @@ struct VisualizationView: View {
     }
     
     private func loadVisualization() {
-        guard !visualization.relativeUrl.isEmpty else {
-            hasError = true
-            isLoading = false
-            return
+        // Prefer direct paths from top-level fields or metadata (presigned_url, file_path, s3_uri, plot_path)
+        var preferredUrl: URL? = nil
+        if let presigned = visualization.presignedUrl, !presigned.isEmpty {
+            preferredUrl = URL(string: presigned)
+        } else if let direct = visualization.filePath ?? visualization.s3Uri ?? visualization.plotPath ?? visualization.path, !direct.isEmpty {
+            if direct.hasPrefix("s3://") {
+                preferredUrl = buildPresignRedirectURL(for: direct)
+            } else if direct.hasPrefix("http://") || direct.hasPrefix("https://") {
+                preferredUrl = URL(string: direct)
+            }
+        } else if let metadata = visualization.metadata {
+            if let path = (metadata["file_path"]?.value as? String)
+                ?? (metadata["s3_uri"]?.value as? String)
+                ?? (metadata["plot_path"]?.value as? String) {
+                if path.hasPrefix("s3://") {
+                    preferredUrl = buildPresignRedirectURL(for: path)
+                } else if path.hasPrefix("http://") || path.hasPrefix("https://") {
+                    preferredUrl = URL(string: path)
+                }
+            }
         }
-        
-        // Construct full URL
-        let fullURL = networkService.fullURL(for: visualization.relativeUrl)
-        
-        guard let url = URL(string: fullURL) else {
+
+        // Fallback to backend-served relative URL
+        let resolvedURLString: String
+        if let url = preferredUrl?.absoluteString {
+            resolvedURLString = url
+        } else {
+            if let rel = visualization.relativeUrl, !rel.isEmpty {
+                resolvedURLString = networkService.fullURL(for: rel)
+            } else {
+                hasError = true
+                isLoading = false
+                return
+            }
+        }
+
+        guard let url = URL(string: resolvedURLString) else {
             hasError = true
             isLoading = false
             return
         }
 
         
+        // Build request - only add auth headers for backend requests, not presigned URLs
+        var request = URLRequest(url: url)
+        
+        // Don't add auth headers for S3 presigned URLs
+        if !resolvedURLString.contains("amazonaws.com") && !resolvedURLString.contains("s3.") {
+            let headers = networkService.authHeaders(requiresAuth: false, body: nil)
+            for (k, v) in headers {
+                request.setValue(v, forHTTPHeaderField: k)
+            }
+        }
+
         // Load image asynchronously
-        URLSession.shared.dataTask(with: url) { data, response, error in
+        URLSession.shared.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
                 isLoading = false
                 
@@ -177,16 +215,66 @@ struct VisualizationView: View {
                     return
                 }
                 
-                guard let data = data, let loadedImage = UIImage(data: data) else {
-                    print("❌ [VisualizationView] Failed to create image from data")
+                guard let data = data else {
+                    print("❌ [VisualizationView] No data returned for image request")
                     hasError = true
                     return
                 }
                 
-                print("✅ [VisualizationView] Successfully loaded image: \(visualization.title)")
-                image = loadedImage
+                // Try to decode image first
+                if let loadedImage = UIImage(data: data) {
+                    print("✅ [VisualizationView] Successfully loaded image: \(visualization.title)")
+                    image = loadedImage
+                    return
+                }
+                
+                // If not an image, try to parse presign JSON { "url": "https://..." }
+                if let presign = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let urlString = presign["url"] as? String,
+                   let s3Url = URL(string: urlString) {
+                    var s3Req = URLRequest(url: s3Url)
+                    // No headers needed for presigned URL
+                    URLSession.shared.dataTask(with: s3Req) { s3Data, _, s3Err in
+                        DispatchQueue.main.async {
+                            if let s3Err = s3Err {
+                                print("❌ [VisualizationView] S3 fetch error: \(s3Err)")
+                                hasError = true
+                                return
+                            }
+                            guard let s3Data = s3Data, let s3Image = UIImage(data: s3Data) else {
+                                print("❌ [VisualizationView] Failed to create image from S3 data")
+                                hasError = true
+                                return
+                            }
+                            print("✅ [VisualizationView] Loaded image from presigned URL")
+                            image = s3Image
+                        }
+                    }.resume()
+                    return
+                }
+                
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+                let bodyPreview = String(data: data.prefix(200), encoding: .utf8) ?? "binary data"
+                print("❌ [VisualizationView] Failed to create image from data. Status: \(statusCode), Body preview: \(bodyPreview)")
+                hasError = true
             }
         }.resume()
+    }
+
+    // MARK: - Helpers
+    private func buildPresignRedirectURL(for imageUrl: String, ts: String? = nil) -> URL? {
+        // Use backend presign redirect endpoint and include api_key query (image loaders may ignore headers)
+        let encoded = imageUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? imageUrl
+        let apiKey = NetworkService.shared.authHeaders(requiresAuth: false)["X-API-Key"] ?? ""
+        let keyParam = apiKey.isEmpty ? "" : "&api_key=\(apiKey)"
+        let tsVal = ts ?? String(Int(Date().timeIntervalSince1970))
+        // URL-based signature: sig = HMAC_SHA256(s3_uri + "." + ts, appSecret)
+        let message = "\(imageUrl).\(tsVal)"
+        let secret = NetworkService.shared.appSecretForSigning()
+        let sig = NetworkService.shared.hmacSHA256Hex(message: message, secret: secret)
+        let pathWithQuery = "/files/s3presign?s3_uri=\(encoded)\(keyParam)&ts=\(tsVal)&sig=\(sig)&format=url"
+        let urlStr = NetworkService.shared.fullURL(for: pathWithQuery)
+        return URL(string: urlStr)
     }
     
     private func formatMetadataValue(_ value: AnyCodable) -> String {
@@ -345,21 +433,16 @@ struct VisualizationsContainerView: View {
     }
 }
 
-#Preview {
-    VisualizationView(
-        visualization: Visualization(
-            id: "sample-viz",
-            type: "chart",
-            title: "Lab Results Trend",
-            description: "Trend analysis of liver function tests over the past 6 months",
-            relativeUrl: "/api/v1/files/plots/sample_chart.png",
-            metadata: [
-                "format": AnyCodable("png"),
-                "data_points": AnyCodable(15),
-                "size_bytes": AnyCodable(25600)
-            ]
-        ),
-        networkService: NetworkService.shared
-    )
-    .padding()
-}
+//#Preview {
+//    VisualizationView(
+//        visualization: Visualization(
+//            id: "sample-viz",
+//            type: "chart",
+//            title: "Lab Results Trend",
+//            description: "Trend analysis of liver function tests over the past 6 months",
+//            presignedUrl: "https://example.com/presigned.png"
+//        ),
+//        networkService: NetworkService.shared
+//    )
+//    .padding()
+//}

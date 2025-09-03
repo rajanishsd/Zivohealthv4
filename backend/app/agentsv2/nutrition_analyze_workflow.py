@@ -3,6 +3,7 @@ import sys
 from typing import List, Optional, Dict, Any, Literal
 from dataclasses import dataclass, field
 from datetime import datetime
+from app.utils.timezone import now_local, isoformat_now
 import json
 import pandas as pd
 import traceback
@@ -40,7 +41,7 @@ from langchain.callbacks.manager import CallbackManager
 
 # Import create_react_agent for simplified tool handling
 from langgraph.prebuilt import create_react_agent
-from app.agentsv2.tools.nutrition_tools import nutrition_recipe_search_tool
+from app.agentsv2.tools.nutrition_tools import nutrition_recipe_search_tool, internet_search_tool
 
 @dataclass
 class NutritionAnalyzeWorkflowState:
@@ -66,6 +67,7 @@ class NutritionAnalyzeWorkflowState:
     
     # Visualization
     plots: List[str] = field(default_factory=list)  # Base64 encoded images
+    saved_plots: List[Dict[str, Any]] = field(default_factory=list)  # Saved plot metadata (S3 URIs)
     
     # Response formatting
     formatted_results: Dict[str, Any] = field(default_factory=dict)
@@ -109,6 +111,8 @@ class NutritionAnalyzeWorkflow:
         self.current_results = {}
         self.current_plots = []
         self.downloaded_plot_files = []
+        # Capture raw intermediate tool outputs to avoid LLM truncation issues
+        self.intermediate_tool_outputs = {}
         
         # Create tools and workflow
         self.tools = self._create_tools()
@@ -119,6 +123,8 @@ class NutritionAnalyzeWorkflow:
         
         # Use the new nutrition_recipe_search_tool
         recipe_search_tool = nutrition_recipe_search_tool
+        # Use the new internet_search_tool
+        web_search_tool = internet_search_tool
         
         @tool
         async def retrieve_nutrition_data(request: str) -> str:
@@ -130,6 +136,8 @@ class NutritionAnalyzeWorkflow:
             - Verify retrieved data matches the request
             - Query additional data if needed
             - Refine queries based on analysis requirements
+            - dont ask for raw data, ask for insights like daily, weekly, monthly, aggregates or complex insights like compute deficiencies by providing details like protein, carbohydrate, fat, calories, vitamins, minerals requirements and ask to compute the difference between the actual intake and the daily/weekly/monthly requirements.
+            - retrival agent has access to internet search tool, so dont ask for any external information, use internet search tool to get the information.
             
             Args:
                 request: Natural language description of what nutrition data is needed
@@ -150,61 +158,69 @@ class NutritionAnalyzeWorkflow:
                 
                 # Use the nutrition agent's retrieval method (now properly awaited)
                 result_state = await self.nutrition_agent.retrieve_nutrition_data(nutrition_state)
+
+                # Normalize result_state access (it may be a dataclass or a dict-like)
+                def _get(attr, default=None):
+                    try:
+                        return getattr(result_state, attr)
+                    except Exception:
+                        try:
+                            return result_state.get(attr, default)  # type: ignore[attr-defined]
+                        except Exception:
+                            return default
+
+                if _get('has_error'):
+                    ec = _get('error_context') or {}
+                    msg = ec.get('message') if isinstance(ec, dict) else None
+                    return f"Data retrieval failed: {msg or 'Unknown error'}"
+
+                # Prefer the raw intermediate DB tool payload when available
+                intermediate_outputs = _get('intermediate_outputs')
+                if isinstance(intermediate_outputs, dict) and 'query_nutrition_db' in intermediate_outputs:
+                    db_payload = intermediate_outputs.get('query_nutrition_db')
+                    try:
+                        self.intermediate_tool_outputs["retrieve_nutrition_data"] = db_payload
+                    except Exception:
+                        pass
+                    # If it's a list/dict, set current_data and return JSON string
+                    if isinstance(db_payload, list):
+                        self.current_data = db_payload
+                        return json.dumps(db_payload)
+                    if isinstance(db_payload, dict):
+                        return json.dumps(db_payload)
+                    # If it's already a string, return as-is
+                    if isinstance(db_payload, str):
+                        return db_payload
                 
-                if result_state.has_error:
-                    return f"Data retrieval failed: {result_state.error_context.get('message', 'Unknown error')}"
+                # Fallback to query_results
+                # The nutrition agent uses tools that return raw JSON data, but the final output can include commentary
+                query_results = _get('query_results')
+                if isinstance(query_results, list):
+                    if not query_results:
+                        return "No data found for the request"
+                    self.current_data = query_results
+                    try:
+                        self.intermediate_tool_outputs["retrieve_nutrition_data"] = query_results
+                    except Exception:
+                        pass
+                    return json.dumps(query_results)
                 
-                # Extract raw data from the agent's execution
-                # The nutrition agent uses tools that return raw JSON data, but the final output mixes it with commentary
-                # Let's try to extract just the JSON data part
-                query_results = result_state.query_results
-                if query_results and "output" in query_results:
+                output_content = None
+                if isinstance(query_results, dict) and "output" in query_results:
                     output_content = query_results["output"]
-                    
-                    # Try to extract JSON arrays in the output (nutrition data is typically returned as JSON arrays)
-                    json_pattern = r'\[\s*\{.*?\}\s*\]'
-                    json_matches = re.findall(json_pattern, output_content, re.DOTALL)
-                    
-                    if json_matches:
-                        # Use the last/largest JSON match (most likely to be the complete data)
-                        json_data = json_matches[-1]
-                        try:
-                            parsed_data = json.loads(json_data)
-                            if isinstance(parsed_data, list) and parsed_data:
-                                self.retrieved_data_json = json_data
-                                self.current_data = parsed_data  # Fix: Set current_data for execute_python_code tool
-                                return f"Retrieved {len(parsed_data)} nutrition records.\n\nComplete nutrition data:\n{json.dumps(parsed_data, indent=2)}\n\nThis data is now available for analysis. Use execute_python_code to analyze it - it will be available as 'nutrition_data' DataFrame."
-                        except json.JSONDecodeError:
-                            pass
-                    
-                    # If no JSON found, try to extract any structured data patterns
-                    # Look for lines that might contain structured data
-                    lines = output_content.split('\n')
-                    data_lines = []
-                    for line in lines:
-                        line = line.strip()
-                        if line.startswith('{') and line.endswith('}'):
-                            data_lines.append(line)
-                        elif '"' in line and ':' in line:  # Looks like JSON-ish content
-                            data_lines.append(line)
-                    
-                    if data_lines:
-                        try:
-                            # Try to reconstruct as JSON array
-                            reconstructed = '[' + ','.join(data_lines) + ']'
-                            parsed_data = json.loads(reconstructed)
-                            if isinstance(parsed_data, list) and parsed_data:
-                                self.retrieved_data_json = reconstructed
-                                self.current_data = parsed_data  # Fix: Set current_data for execute_python_code tool
-                                return f"Retrieved {len(parsed_data)} nutrition records (reconstructed).\n\nComplete nutrition data:\n{json.dumps(parsed_data, indent=2)}\n\nThis data is now available for analysis. Use execute_python_code to analyze it."
-                        except:
-                            pass
-                    
-                    # If we can't extract structured data, return the full raw response
-                    return f"Data retrieved but could not extract structured format. Full raw response:\n{output_content}\n\nNote: The nutrition agent returned commentary instead of raw data. You may need to refine the request."
-                
+                elif isinstance(query_results, str):
+                    output_content = query_results
                 else:
+                    output_content = None
+                if output_content is None:
                     return "No data found for the request"
+                # Capture raw tool output for inclusion in final response
+                try:
+                    self.intermediate_tool_outputs["retrieve_nutrition_data"] = output_content
+                except Exception:
+                    pass
+                # Return the raw tool output; avoid additional commentary
+                return output_content
                     
             except Exception as e:
                 return f"Error retrieving nutrition data: {str(e)}"
@@ -217,7 +233,7 @@ class NutritionAnalyzeWorkflow:
             This tool allows the agent to:
             - Run nutrition data analysis and visualization code
             - Access pandas, numpy, matplotlib, seaborn
-            - Save plots directly to data/plots/ folder using save_plot()
+            - Save plots to S3
             - Handle errors gracefully
             
             Args:
@@ -238,11 +254,10 @@ class NutritionAnalyzeWorkflow:
                 matplotlib.use('Agg')  # Use non-interactive backend
                 import matplotlib.pyplot as plt
                 import seaborn as sns
-                from datetime import datetime
+                from app.utils.timezone import now_local
                 
-                # Create plots directory if it doesn't exist
-                plots_dir = "data/plots"
-                os.makedirs(plots_dir, exist_ok=True)
+                # S3-only storage for plots (no local persistence)
+                plots_dir = None  # Deprecated local dir; retained variable for compatibility
                 
                 # Results container
                 results = {}
@@ -250,42 +265,49 @@ class NutritionAnalyzeWorkflow:
                 saved_plot_files = []
                 
                 def save_plot(filename=None, plt_figure=None, format='png', dpi=100):
-                    """Save matplotlib plot directly to data/plots folder"""
+                    """Save current matplotlib figure to S3 and record metadata (simple, reliable)."""
                     try:
-                        if plt_figure is None:
-                            plt_figure = plt.gcf()
-                        
-                        # Generate filename if not provided
-                        if filename is None:
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            filename = f"nutrition_plot_{timestamp}.png"
+                        fig = plt_figure or plt.gcf()
+                        # Ensure filename
+                        if not filename:
+                            filename = now_local().strftime("nutrition_plot_%Y%m%d_%H%M%S.png")
                         elif not filename.endswith('.png'):
-                            filename = filename + ".png"
-                        
-                        # Save directly to data/plots folder
-                        local_path = os.path.join(plots_dir, filename)
-                        plt_figure.savefig(local_path, format=format, dpi=dpi, bbox_inches='tight')
-                        
-                        # Also save to base64 buffer for response
+                            filename = f"{filename}.png"
+
+                        # Render to memory
                         buffer = io.BytesIO()
-                        plt_figure.savefig(buffer, format=format, dpi=dpi, bbox_inches='tight')
+                        fig.savefig(buffer, format=format, dpi=dpi, bbox_inches='tight')
                         buffer.seek(0)
-                        
-                        plot_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                        data_bytes = buffer.getvalue()
+
+                        # Track base64 preview for inline use
+                        plot_base64 = base64.b64encode(data_bytes).decode('utf-8')
                         plot_buffers.append(plot_base64)
-                        
-                        buffer.close()
-                        plt.close(plt_figure)
-                        
-                        # Track saved files
+
+                        # Upload to S3
+                        from app.core.config import settings as _settings
+                        from app.services.s3_service import upload_bytes_and_get_uri
+                        s3_prefix = (getattr(_settings, 'UPLOADS_S3_PREFIX', 'uploads') or 'uploads').rstrip('/')
+                        s3_key = f"{s3_prefix}/plots/{filename}"
+                        s3_uri = upload_bytes_and_get_uri(
+                            bucket=_settings.AWS_S3_BUCKET,
+                            key=s3_key,
+                            data=data_bytes,
+                            content_type='image/png'
+                        )
+
+                        # Record metadata (preserve key names) [[memory:7484670]]
                         saved_plot_files.append({
                             "filename": filename,
-                            "local_path": local_path,
+                            "local_path": s3_uri,
                             "base64": plot_base64,
-                            "size_bytes": os.path.getsize(local_path)
+                            "size_bytes": len(data_bytes)
                         })
-                        
-                        return f"Plot saved as {filename} in {plots_dir}! Total plots: {len(plot_buffers)}"
+
+                        # Cleanup and return
+                        buffer.close()
+                        plt.close(fig)
+                        return f"Plot saved as {filename} to {s3_uri}! Total plots: {len(plot_buffers)}"
                     except Exception as e:
                         return f"Error saving plot: {str(e)}"
                 
@@ -332,9 +354,9 @@ class NutritionAnalyzeWorkflow:
                     if plot_buffers:
                         response += f"Generated {len(plot_buffers)} visualization(s)\n"
                     if saved_plot_files:
-                        response += f"Saved {len(saved_plot_files)} plot(s) to {plots_dir}/\n"
+                        response += f"Saved {len(saved_plot_files)} plot(s) to S3\n"
                         for plot in saved_plot_files:
-                            response += f"  - {plot['filename']}\n"
+                            response += f"  - {plot['filename']} -> {plot['local_path']}\n"
                     
                     return response
                     
@@ -348,7 +370,7 @@ class NutritionAnalyzeWorkflow:
             except Exception as e:
                 return f"Failed to execute code: {str(e)}"
         
-        return [recipe_search_tool, retrieve_nutrition_data, execute_python_code]
+        return [recipe_search_tool, retrieve_nutrition_data, execute_python_code, web_search_tool]
     
     def get_tools(self):
         """Get the list of available tools."""
@@ -441,7 +463,7 @@ class NutritionAnalyzeWorkflow:
                 ],
                 "data_requirements": {{
                     "nutrition": ["nutrient categories", "food logs", "dates", "portion sizes", "etc."],
-                    "demographics": ["age", "sex", "weight", "goals", "activity level"],
+                 
                     "external_sources": ["yes|no|optional", "e.g., YouTube, USDA API, recipe DB"],
                     "nutrient_targets": "yes|no|optional"
                 }},
@@ -526,7 +548,9 @@ class NutritionAnalyzeWorkflow:
             self.current_data = {}
             self.current_results = {}
             self.current_plots = []
-            current_date = datetime.now().strftime('%Y_%m_%d')
+            # Reset saved plots before executing any code to avoid stale entries
+            self.downloaded_plot_files = []
+            current_date = now_local().strftime('%Y_%m_%d')
             # If this is the first time (no messages), set up the conversation
             if not state.messages:
                 system_prompt = f"""
@@ -570,6 +594,8 @@ A. **retrieve_nutrition_data**:
    - Use JSON format, broad requests to minimize calls
    - Include synonyms and variations of nutrient names
    - Specify time granularity and aggregation requirements
+   - use only daily, weekly, monthly data for the analysis.
+   - you can also ask complex insights like compute deficiencies by providing details like protein, carbohydrate, fat, calories, vitamins, minerals, daily requirements and ask to compute the difference between the actual intake and the daily/weekly/monthly requirements.
 
 B. **nutrition_recipe_search_tool** (when external info needed):
    - Recipe searches: "high protein recipes for 150g daily protein"
@@ -583,6 +609,7 @@ Use **execute_python_code** for:
 - Statistical calculations and metrics
 - Visualization creation
 - Results storage in 'results' dictionary
+- Execute the analysis and visualization code in a single function call as context will be lost if split into multiple function calls.
 
 ### STEP 4: CONTENT EXTRACTION & MEAL PLANNING
 When nutrition_recipe_search_tool returns results, extract rich content:
@@ -596,14 +623,16 @@ When nutrition_recipe_search_tool returns results, extract rich content:
 ## AVAILABLE TOOLS
 
 1. **nutrition_recipe_search_tool**: External information (recipes, research, YouTube videos)
-2. **retrieve_nutrition_data**: User's nutrition data with natural language requests
+2. **retrieve_nutrition_data**: extracts only nutrition insights like daily, weekly, monthly, aggregates or complex insights like compute deficiencies by providing details like protein, carbohydrate, fat, calories, vitamins, minerals requirements and ask to compute the difference between the actual intake and the daily/weekly/monthly requirements.
 3. **execute_python_code**: Analysis, calculations, visualizations (pandas, numpy, matplotlib, seaborn)
+4. **internet_search_tool**: Search the web for ANY external information including: general information, research, studies, guidelines, recommendations, like get the recommended daily protein, carbohydrate, fat, calories, vitamins, minerals requirements etc.
 
 ## CRITICAL RULES
 
 ### MANDATORY BEHAVIORS:
 - 🚨 NEVER ask user for information - use tools
 - Start immediately with tool usage
+- dont call the tools simultaneously, call the tools based on the requirements like calling internet_search_tool when external information is needed to understand the user's requirements and use the same in retrieval_nutrition_data tool call.
 - Work with available data only
 - Complete full analysis pipeline before responding
 
@@ -617,7 +646,7 @@ When nutrition_recipe_search_tool returns results, extract rich content:
 
 ### VISUALIZATION REQUIREMENTS:
 - Use `save_plot('filename')` function (NOT plt.savefig())
-- Save to data/plots/ folder automatically
+- Save plots to S3 location automatically
 - Close plots with plt.close() after saving
 
 ## EXECUTION ORDER:
@@ -645,7 +674,6 @@ After completing your analysis and tools execution, provide your response in thi
             "title": "Descriptive title of the plot",
             "description": "Detailed description of what this visualization shows",
             "key_findings": "Specific insights and trends visible in this chart",
-            "plot_path": "data/plots/plot_filename.png",
             "chart_type": "Type of chart created (line, bar, scatter, etc.)"
         }}
     ]
@@ -702,7 +730,7 @@ After completing your analysis and tools execution, provide your response in thi
                 plt.tight_layout()
                 
                 # Add date postfix to filename for uniqueness (datetime is globally available)
-                current_date = datetime.now().strftime('%Y_%m_%d')
+                current_date = now_local().strftime('%Y_%m_%d')
                 save_plot(f'my_nutrition_chart_name_{current_date}')  # ← Use this, NOT plt.savefig()
                 plt.close()
                 ```
@@ -739,7 +767,11 @@ Start execution immediately following this workflow!
             )
             
             # Use the ReAct agent to process the request with tool execution
-            result = await react_agent.ainvoke({"messages": state.messages})
+            # Request intermediate steps to avoid truncation of tool outputs
+            result = await react_agent.ainvoke(
+                {"messages": state.messages},
+                {"return_intermediate_steps": True}
+            )
             
             # Update state with all messages from the agent conversation
             state.messages = result["messages"]
@@ -750,6 +782,11 @@ Start execution immediately following this workflow!
                 # Use the GPT message content directly
                 state.agent_response = final_message.content
                 print(f"🔍 [DEBUG] agent_code_analysis - GPT Response: {final_message.content[:200]}...")
+
+            # If we have saved plots, persist them in state (single source of truth for visuals)
+            if getattr(self, 'downloaded_plot_files', None):
+                state.saved_plots = list(self.downloaded_plot_files)
+            
             
             print(f"🔍 [DEBUG] agent_code_analysis - Result type: {type(result)}")
             print(f"🔍 [DEBUG] agent_code_analysis - Last message type: {type(final_message)}")
@@ -800,7 +837,7 @@ Start execution immediately following this workflow!
             print(f"🔍 [DEBUG] format_results - Has error: {state.has_error}")
             print(f"🔍 [DEBUG] format_results - Current results: {self.current_results}")
             print(f"🔍 [DEBUG] format_results - Current plots: {len(self.current_plots)} plots")
-            print(f"🔍 [DEBUG] format_results - Downloaded files: {len(getattr(self, 'downloaded_plot_files', []))}")
+            print(f"🔍 [DEBUG] format_results - Downloaded files: {len(state.saved_plots or [])}")
             
             if state.has_error:
                 error_msg = "Unknown error"
@@ -820,21 +857,58 @@ Start execution immediately following this workflow!
                 # Try to extract structured JSON response from agent response
                 structured_analysis = self._extract_json_from_response(final_response)
                 
-                # The agent already returns structured analysis with visualizations
+                # Build definitive visualizations array from downloaded_plot_files (single source of truth)
+                direct_visualizations = []
+                try:
+                    # Optional: load titles/descriptions from LLM JSON visualizations_created by filename
+                    meta_by_filename: Dict[str, Dict[str, Any]] = {}
+                    if isinstance(structured_analysis, dict):
+                        meta_list = structured_analysis.get("visualizations_created")
+                        if isinstance(meta_list, list):
+                            for mv in meta_list:
+                                if isinstance(mv, dict) and mv.get("filename"):
+                                    meta_by_filename[mv.get("filename")] = mv
+
+                    for p in state.saved_plots or []:
+                        if isinstance(p, dict):
+                            s3_uri = p.get("local_path") or p.get("s3_uri") or p.get("file_path")
+                            filename = p.get("filename", "")
+                            meta = meta_by_filename.get(filename, {})
+                            title = meta.get("title") or filename or "Analysis Chart"
+                            description = meta.get("description") or p.get("description", "Generated visualization")
+                            key_findings = meta.get("key_findings", "")
+                            viz = {
+                                "id": f"viz_{hash(filename) & 0xffff:04x}",
+                                "type": "chart",
+                                "title": title,
+                                "description": description,
+                                "filename": filename,
+                                "key_findings": key_findings,
+                                # Provide unified path fields derived from S3 URI
+                                "s3_uri": s3_uri,
+                                "plot_path": s3_uri,
+                                "file_path": s3_uri,
+                            }
+                            direct_visualizations.append(viz)
+                except Exception:
+                    pass
+
+                # Compose final formatted results with visualizations only from the source of truth
                 state.formatted_results = {
                     "success": True,
                     "task_types": ["nutrition_analysis"],
                     "results": {
                         "analysis": structured_analysis if structured_analysis else final_response,
-                        "original_request": state.original_request
+                        "original_request": state.original_request,
+                        # Include captured tool outputs so callers can access full, untruncated data
+                        "intermediate_tool_outputs": self.intermediate_tool_outputs if getattr(self, 'intermediate_tool_outputs', None) else {},
+                        # Expose saved plots directly regardless of agent JSON
+                        "visualizations": direct_visualizations
                     },
                     "execution_log": state.execution_log,
                     "message": "Nutrition analysis completed successfully"
                 }
-                
-                # Don't separately extract visualizations - they're already in the structured analysis
-                # The response_utils.py will handle visualization extraction from the structured analysis
-                print(f"🔍 [DEBUG] format_results - Structured analysis contains visualizations: {bool(structured_analysis and 'visualizations_created' in structured_analysis)}")
+                print(f"🔍 [DEBUG] format_results - Visualizations built from downloaded_plot_files: {len(direct_visualizations)}")
             
             print(f"🔍 [DEBUG] format_results - Formatted results success: {state.formatted_results.get('success')}")
             self.log_execution_step(state, "format_results", "completed")
@@ -968,7 +1042,7 @@ Start execution immediately following this workflow!
     def log_execution_step(self, state: NutritionAnalyzeWorkflowState, step_name: str, status: str, details: Dict = None):
         """Log execution step with context"""
         log_entry = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": isoformat_now(),
             "step": step_name,
             "status": status,
             "details": details or {}

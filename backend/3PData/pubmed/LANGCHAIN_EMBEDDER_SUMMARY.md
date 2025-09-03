@@ -136,7 +136,7 @@ psycopg2-binary>=2.9.0
 
 ## Database Configuration
 
-**Database URL**: `postgresql://rajanishsd@localhost:5433/zivohealth`  
+**Database URL**: `postgresql://rajanishsd@localhost:5432/zivohealth`  
 **Collection Name**: `medical_documents`  
 **Vector Extension**: `pgvector`
 

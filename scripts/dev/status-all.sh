@@ -63,10 +63,10 @@ check_postgresql() {
     echo "🐘 PostgreSQL Database"
     echo "====================="
     
-    if check_service "PostgreSQL" "5433"; then
-        local pid=$(get_port_info "5433")
+    if check_service "PostgreSQL" "5432"; then
+        local pid=$(get_port_info "5432")
         echo "✅ Status: Running"
-        echo "📍 Port: 5433"
+        echo "📍 Port: 5432"
         echo "🔢 PID: $pid"
         
         # Show data directory info (consistent with infrastructure script)
@@ -87,19 +87,19 @@ check_postgresql() {
         
         # Try to connect and get version
         if command -v psql &> /dev/null; then
-            local version=$(psql -h localhost -p 5433 -U rajanishsd -d zivohealth -t -c "SELECT version();" 2>/dev/null | head -1 | xargs || echo "Unable to connect")
+            local version=$(psql -h localhost -p 5432 -U rajanishsd -d zivohealth -t -c "SELECT version();" 2>/dev/null | head -1 | xargs || echo "Unable to connect")
             echo "📋 Version: $version"
             
             # Get database info
-            local db_size=$(psql -h localhost -p 5433 -U rajanishsd -d zivohealth -t -c "SELECT pg_size_pretty(pg_database_size('zivohealth'));" 2>/dev/null | xargs || echo "Unknown")
+            local db_size=$(psql -h localhost -p 5432 -U rajanishsd -d zivohealth -t -c "SELECT pg_size_pretty(pg_database_size('zivohealth'));" 2>/dev/null | xargs || echo "Unknown")
             echo "💾 Database Size: $db_size"
             
-            local connections=$(psql -h localhost -p 5433 -U rajanishsd -d zivohealth -t -c "SELECT count(*) FROM pg_stat_activity;" 2>/dev/null | xargs || echo "Unknown")
+            local connections=$(psql -h localhost -p 5432 -U rajanishsd -d zivohealth -t -c "SELECT count(*) FROM pg_stat_activity;" 2>/dev/null | xargs || echo "Unknown")
             echo "🔗 Active Connections: $connections"
         fi
     else
         echo "❌ Status: Not Running"
-        echo "📍 Port: 5433 (not in use)"
+        echo "📍 Port: 5432 (not in use)"
         
         # Check if data directory exists
         if [ -d "backend/data/postgres" ]; then
@@ -231,7 +231,7 @@ show_overall_status() {
     local services_running=0
     local total_services=4
     
-    if check_service "PostgreSQL" "5433"; then
+    if check_service "PostgreSQL" "5432"; then
         echo "✅ PostgreSQL"
         services_running=$((services_running + 1))
     else

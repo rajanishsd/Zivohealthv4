@@ -92,11 +92,9 @@ struct ChatView: View {
                             if (viewModel.isTyping || viewModel.isLoading || viewModel.isAnalyzingFile || networkService.isUploading) && 
                                !viewModel.lastInteractionWasFileUpload {
                                 StatusMessageView(
-                                    status: networkService.isUploading ? 
+                                    status: (networkService.isUploading || viewModel.isAnalyzingFile) ?
                                         (viewModel.currentUploadFilename.isEmpty ? "Analyzing file..." : "Analyzing \(viewModel.currentUploadFilename)...") :
-                                        (viewModel.isAnalyzingFile && !viewModel.currentUploadFilename.isEmpty ? 
-                                            (viewModel.currentStatus.contains("Analyzing") ? viewModel.currentStatus : "Analyzing \(viewModel.currentUploadFilename)...") :
-                                            (viewModel.currentStatus.isEmpty ? (viewModel.isLoading ? "Sending message..." : "Processing...") : viewModel.currentStatus)),
+                                        (viewModel.currentStatus.isEmpty ? (viewModel.isLoading ? "Sending message..." : "Processing...") : viewModel.currentStatus),
                                     progress: networkService.isUploading && !viewModel.isAnalyzingFile ? networkService.uploadProgress : viewModel.currentProgress,
                                     agentName: viewModel.currentAgent,
                                     isAnalyzing: viewModel.isAnalyzingFile
@@ -114,11 +112,9 @@ struct ChatView: View {
                             if (viewModel.isTyping || viewModel.isLoading || viewModel.isAnalyzingFile || networkService.isUploading) && 
                                !viewModel.lastInteractionWasFileUpload {
                                 StatusMessageView(
-                                    status: networkService.isUploading ? 
+                                    status: (networkService.isUploading || viewModel.isAnalyzingFile) ?
                                         (viewModel.currentUploadFilename.isEmpty ? "Analyzing file..." : "Analyzing \(viewModel.currentUploadFilename)...") :
-                                        (viewModel.isAnalyzingFile && !viewModel.currentUploadFilename.isEmpty ? 
-                                            (viewModel.currentStatus.contains("Analyzing") ? viewModel.currentStatus : "Analyzing \(viewModel.currentUploadFilename)...") :
-                                            (viewModel.currentStatus.isEmpty ? (viewModel.isLoading ? "Sending message..." : "Processing...") : viewModel.currentStatus)),
+                                        (viewModel.currentStatus.isEmpty ? (viewModel.isLoading ? "Sending message..." : "Processing...") : viewModel.currentStatus),
                                     progress: networkService.isUploading && !viewModel.isAnalyzingFile ? networkService.uploadProgress : viewModel.currentProgress,
                                     agentName: viewModel.currentAgent,
                                     isAnalyzing: viewModel.isAnalyzingFile
@@ -862,7 +858,8 @@ struct FileAttachmentView: View {
     private func isCurrentlyAnalyzingThisFile() -> Bool {
         let isProcessing = networkService.isUploading || viewModel.isAnalyzingFile || viewModel.isLoading
         let isFileUpload = viewModel.lastInteractionWasFileUpload
-        let result = isProcessing && isFileUpload
+        let isCurrentFile = viewModel.currentUploadFilename == fileName
+        let result = isProcessing && isFileUpload && isCurrentFile
         
         print("🔍 [FileAttachmentView] Analysis check for '\(fileName)':")
         print("   isUploading: \(networkService.isUploading)")
@@ -1256,15 +1253,21 @@ struct ChatSessionHeaderView: View {
     @State private var showingChatHistory = false
     @State private var showingPrescriptions = false
     @ObservedObject private var viewModel = ChatViewModel.shared
+    @ObservedObject private var networkService = NetworkService.shared
     
     var body: some View {
         VStack(spacing: 8) {
             // Session title and message count
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(viewModel.currentSessionTitle)
-                        .font(.headline)
-                        .fontWeight(.semibold)
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(networkIndicatorColor)
+                            .frame(width: 8, height: 8)
+                        Text(viewModel.currentSessionTitle)
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                    }
                         .lineLimit(1) // Prevent text wrapping causing height changes
                         .truncationMode(.tail) // Truncate long titles
                          // Consistent width
@@ -1324,6 +1327,14 @@ struct ChatSessionHeaderView: View {
         .sheet(isPresented: $showingPrescriptions) {
             PrescriptionsView()
         }
+    }
+}
+
+private extension ChatSessionHeaderView {
+    var networkIndicatorColor: Color {
+        if !networkService.isNetworkAvailable { return .red }
+        if networkService.isReconnecting { return .orange }
+        return .green
     }
 }
 
@@ -1570,7 +1581,8 @@ struct EnhancedFileAttachmentView: View {
     private func isCurrentlyAnalyzingThisFile() -> Bool {
         let isProcessing = networkService.isUploading || viewModel.isAnalyzingFile || viewModel.isLoading
         let isFileUpload = viewModel.lastInteractionWasFileUpload
-        let result = isProcessing && isFileUpload
+        let isCurrentFile = viewModel.currentUploadFilename == fileName
+        let result = isProcessing && isFileUpload && isCurrentFile
         
         print("🔍 [EnhancedFileAttachmentView] Analysis check for '\(fileName)':")
         print("   isUploading: \(networkService.isUploading)")
@@ -1725,9 +1737,8 @@ struct StatusMessageView: View {
                     
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(status)
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.medium))
                             .foregroundColor(isAnalyzing ? .orange : .blue)
-                            .fontWeight(.medium)
                         
                         // Removed agent name display to keep only processing text
                         

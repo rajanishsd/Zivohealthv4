@@ -39,6 +39,11 @@ struct ZivoHealthApp: App {
                     if apiEndpoint.isEmpty {
                         apiEndpoint = AppConfig.defaultAPIEndpoint
                     }
+                    // One-time migration: force HTTPS domain if an old http/IP endpoint is detected
+                    if apiEndpoint.hasPrefix("http://3.208.12.170") || (apiEndpoint.hasPrefix("http://") && !apiEndpoint.contains("zivohealth.ai")) {
+                        apiEndpoint = "https://api.zivohealth.ai"
+                        NetworkService.shared.handleEndpointChange()
+                    }
                 }
         }
     }

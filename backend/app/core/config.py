@@ -1,7 +1,9 @@
 from typing import List, Optional
-from pydantic_settings import BaseSettings
-from pydantic import validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator, model_validator
 import os
+from urllib.parse import quote_plus
+from pathlib import Path
 
 class Settings(BaseSettings):
     # Project Information
@@ -21,16 +23,6 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str
     POSTGRES_DB: str
     SQLALCHEMY_DATABASE_URI: Optional[str] = None
-
-    @validator("SQLALCHEMY_DATABASE_URI", pre=True)
-    def assemble_db_connection(cls, v: Optional[str], values: dict) -> str:
-        if v:
-            return v
-        user = values.get("POSTGRES_USER")
-        server = values.get("POSTGRES_SERVER")
-        port = values.get("POSTGRES_PORT")
-        db = values.get("POSTGRES_DB")
-        return f"postgresql://{user}@{server}:{port}/{db}"
 
     # Security
     SECRET_KEY: str
@@ -53,7 +45,87 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: Optional[str] = None
     AWS_DEFAULT_REGION: str
     AWS_REGION: str
-    AWS_S3_BUCKET: str
+    AWS_S3_BUCKET: str 
+    
+    # Timezone configuration (used for user-facing timestamps)
+    DEFAULT_TIMEZONE: str = "Asia/Kolkata"
+    
+    # File Uploads
+    USE_S3_UPLOADS: bool = True  # Toggle: False for local dev, True for cloud/S3
+    UPLOADS_S3_PREFIX: Optional[str] = "uploads"  # Optional S3 key prefix, e.g., "uploads"
+    UPLOADS_TMP_DIR: Optional[str] = None  # Local temp directory for processing (derived if not set)
+    UPLOADS_LOCAL_DIR: Optional[str] = None  # Local durable storage when S3 disabled (derived if not set)
+
+    # --- Validators & Derived Settings ---
+    @field_validator("AWS_S3_BUCKET", mode="before")
+    @classmethod
+    def default_bucket_when_blank(cls, v: Optional[str]) -> str:
+        # Normalize blank/None to a sensible default so downstream code doesn't see empty string
+        if v is None:
+            return "zivohealth-data"
+        if isinstance(v, str) and v.strip() == "":
+            return ""
+        return v
+
+    @model_validator(mode="after")
+    def _finalize_and_validate(self) -> "Settings":
+        # Derive SQLALCHEMY_DATABASE_URI if not provided
+        if not self.SQLALCHEMY_DATABASE_URI:
+            user = getattr(self, "POSTGRES_USER", None)
+            password = getattr(self, "POSTGRES_PASSWORD", None)
+            server = getattr(self, "POSTGRES_SERVER", None)
+            port = getattr(self, "POSTGRES_PORT", None)
+            db = getattr(self, "POSTGRES_DB", None)
+            if user and server and port and db:
+                safe_user = quote_plus(user)
+                if password:
+                    safe_password = quote_plus(password)
+                    self.SQLALCHEMY_DATABASE_URI = (
+                        f"postgresql://{safe_user}:{safe_password}@{server}:{port}/{db}"
+                    )
+                else:
+                    self.SQLALCHEMY_DATABASE_URI = (
+                        f"postgresql://{safe_user}@{server}:{port}/{db}"
+                    )
+
+        # If S3 is enabled but bucket is missing/blank, auto-disable to avoid runtime 500s
+        if self.USE_S3_UPLOADS and (self.AWS_S3_BUCKET is None or str(self.AWS_S3_BUCKET).strip() == ""):
+            self.USE_S3_UPLOADS = False
+            try:
+                print("⚠️ [Config] USE_S3_UPLOADS is True but AWS_S3_BUCKET is blank. Disabling S3 uploads.")
+            except Exception:
+                pass
+
+        # Parse API keys from environment variable if provided
+        if not self.VALID_API_KEYS:
+            import os
+            api_keys_env = os.getenv("VALID_API_KEYS")
+            if api_keys_env:
+                try:
+                    import json
+                    self.VALID_API_KEYS = json.loads(api_keys_env)
+                except (json.JSONDecodeError, TypeError):
+                    # Fallback: treat as comma-separated string
+                    self.VALID_API_KEYS = [key.strip() for key in api_keys_env.split(",") if key.strip()]
+
+        # Derive upload directories if not explicitly provided
+        try:
+            project_root = Path(__file__).resolve().parents[3]
+        except Exception:
+            project_root = Path(os.getcwd())
+
+        # UPLOADS_TMP_DIR: default based on environment mode
+        if not getattr(self, "UPLOADS_TMP_DIR", None):
+            if self.USE_S3_UPLOADS:
+                self.UPLOADS_TMP_DIR = "/tmp/zivo"
+            else:
+                self.UPLOADS_TMP_DIR = str(project_root / "data" / "tmp")
+
+        # UPLOADS_LOCAL_DIR: used when S3 is disabled
+        if not getattr(self, "UPLOADS_LOCAL_DIR", None):
+            self.UPLOADS_LOCAL_DIR = str(project_root / "data" / "uploads" / "chat")
+
+        return self
     
     # OCR Configuration
     OCR_PROVIDER: str
@@ -62,6 +134,12 @@ class Settings(BaseSettings):
     
     # CORS
     CORS_ORIGINS: List[str]
+    
+    # API Security
+    VALID_API_KEYS: List[str] = []
+    APP_SECRET_KEY: Optional[str] = None
+    REQUIRE_API_KEY: bool = True
+    REQUIRE_APP_SIGNATURE: bool = True
     
     # WebSocket
     WS_MESSAGE_QUEUE: str
@@ -139,8 +217,6 @@ class Settings(BaseSettings):
     YOUTUBE_BACKOFF_DELAY_MIN: float = 30.0  # Minimum backoff delay on rate limit
     YOUTUBE_BACKOFF_DELAY_MAX: float = 60.0  # Maximum backoff delay on rate limit
 
-    class Config:
-        case_sensitive = True
-        env_file = ".env"
+    model_config = SettingsConfigDict(case_sensitive=True, env_file=".env")
 
 settings = Settings() 

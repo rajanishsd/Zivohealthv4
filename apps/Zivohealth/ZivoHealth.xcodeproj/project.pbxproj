@@ -109,6 +109,7 @@
 		32BA03E3702F3149E66543D2 /* KidneyFunctionTestsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KidneyFunctionTestsView.swift; sourceTree = "<group>"; };
 		35024D5191AEBE316AA7D0E2 /* PatientDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatientDetailView.swift; sourceTree = "<group>"; };
 		39352E7610A18558ABDA4343 /* RoleSelectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoleSelectionView.swift; sourceTree = "<group>"; };
+		3B8671A32E583A3400B3FFC2 /* ZivoHealth.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZivoHealth.entitlements; sourceTree = "<group>"; };
 		3BA8111F228B9DA9D1CB848E /* CardiacMarkersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardiacMarkersView.swift; sourceTree = "<group>"; };
 		430DEE78B83DA8E378F15D54 /* ImagePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePickerView.swift; sourceTree = "<group>"; };
 		4740BB412B3880168CEB48EB /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -321,6 +322,7 @@
 		7DD21C2CADE5B80EC28AF8EC = {
 			isa = PBXGroup;
 			children = (
+				3B8671A32E583A3400B3FFC2 /* ZivoHealth.entitlements */,
 				1BF1C218BE662A5E20E976FF /* Sources */,
 				F9AA7CB0EF09E0E307D34269 /* Products */,
 			);
@@ -578,6 +580,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ZivoHealth.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -739,6 +742,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ZivoHealth.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;

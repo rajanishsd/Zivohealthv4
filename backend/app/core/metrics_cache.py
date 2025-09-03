@@ -14,6 +14,7 @@ from enum import Enum
 import logging
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from app.utils.timezone import now_local, isoformat_now
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ class RedisMetricsCache:
                                response_time_ms: float, **kwargs) -> None:
         """Store HTTP request metric"""
         try:
-            timestamp = datetime.now().isoformat()
+            timestamp = isoformat_now()
             
             metric_data = {
                 'timestamp': timestamp,
@@ -121,7 +122,7 @@ class RedisMetricsCache:
             }
             
             # Store in time series
-            ts_timestamp = datetime.now()
+            ts_timestamp = now_local()
             minute_key = ts_timestamp.strftime('%Y-%m-%d:%H:%M')
             ts_key = f"{self.TIMESERIES_PREFIX}{self.HTTP_METRICS_KEY}:{minute_key}"
             
@@ -147,7 +148,7 @@ class RedisMetricsCache:
                                    table_name: Optional[str] = None, **kwargs) -> None:
         """Store database operation metric"""
         try:
-            timestamp = datetime.now().isoformat()
+            timestamp = isoformat_now()
             
             metric_data = {
                 'timestamp': timestamp,
@@ -158,7 +159,7 @@ class RedisMetricsCache:
             }
             
             # Store in time series
-            ts_timestamp = datetime.now()
+            ts_timestamp = now_local()
             minute_key = ts_timestamp.strftime('%Y-%m-%d:%H:%M')
             ts_key = f"{self.TIMESERIES_PREFIX}{self.DB_METRICS_KEY}:{minute_key}"
             
@@ -175,7 +176,7 @@ class RedisMetricsCache:
                                 hours_back: int = 24, limit: int = 1000) -> List[Dict[str, Any]]:
         """Retrieve system metrics"""
         try:
-            end_time = datetime.now()
+            end_time = now_local()
             start_time = end_time - timedelta(hours=hours_back)
             
             pattern = f"{self.TIMESERIES_PREFIX}{self.SYSTEM_METRICS_KEY}"
@@ -217,7 +218,7 @@ class RedisMetricsCache:
     async def get_http_metrics(self, hours_back: int = 24, limit: int = 1000) -> List[Dict[str, Any]]:
         """Retrieve HTTP request metrics"""
         try:
-            end_time = datetime.now()
+            end_time = now_local()
             start_time = end_time - timedelta(hours=hours_back)
             
             pattern = f"{self.TIMESERIES_PREFIX}{self.HTTP_METRICS_KEY}:*"
@@ -250,7 +251,7 @@ class RedisMetricsCache:
     async def get_database_metrics(self, hours_back: int = 24, limit: int = 1000) -> List[Dict[str, Any]]:
         """Retrieve database operation metrics"""
         try:
-            end_time = datetime.now()
+            end_time = now_local()
             start_time = end_time - timedelta(hours=hours_back)
             
             pattern = f"{self.TIMESERIES_PREFIX}{self.DB_METRICS_KEY}:*"
@@ -372,7 +373,7 @@ class RedisMetricsCache:
                 "status_color": "#2e7d32" if status == "healthy" else "#f57c00" if status == "warning" else "#d32f2f",
                 "health_score": health_score,
                 "issues": issues,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": isoformat_now(),
                 "current_metrics": {
                     "cpu_percent": cpu_value,
                     "memory_percent": memory_value,
@@ -461,7 +462,7 @@ class RedisMetricsCache:
     async def cleanup_old_metrics(self) -> Dict[str, int]:
         """Clean up old metrics beyond retention period"""
         try:
-            cutoff_time = datetime.now() - timedelta(hours=self.retention_hours)
+            cutoff_time = now_local() - timedelta(hours=self.retention_hours)
             cutoff_score = cutoff_time.timestamp()
             
             # Find all time series keys

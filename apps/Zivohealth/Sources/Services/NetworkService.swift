@@ -1,6 +1,15 @@
 import Foundation
 import SwiftUI
 import Combine
+import CryptoKit
+
+// MARK: - HMAC Extension
+extension Data {
+    func hmacSHA256(key: Data) -> String {
+        let signature = HMAC<SHA256>.authenticationCode(for: self, using: SymmetricKey(data: key))
+        return Data(signature).map { String(format: "%02hhx", $0) }.joined()
+    }
+}
 
 // MARK: - Upload Progress Delegate
 class UploadProgressDelegate: NSObject, URLSessionTaskDelegate {
@@ -27,6 +36,15 @@ public class NetworkService: ObservableObject {
     @AppStorage("patientRefreshToken") private var patientRefreshToken = ""
     @AppStorage("doctorRefreshToken") private var doctorRefreshToken = ""
     @AppStorage("userMode") private var userMode: UserMode = .patient
+    
+    // API Key for ZivoHealth iOS app
+    private let apiKey = "UMYpN67NeR0W13cP13O62Mn04yG3tpEx" // Replace with actual key from generate_api_keys.py
+    
+    // App Secret for HMAC signature (optional - set to nil to disable)
+    private let appSecret = "c7357b83f692134381cbd7cadcd34be9c6150121aa274599317b5a1283c0205f" // Replace with actual secret from generate_api_keys.py
+    
+    // HMAC signature configuration
+    private let enableHMAC = true // Set to false to disable HMAC signatures
 
     private let apiVersion = "/api/v1"
     private let maxRetries = 3
@@ -151,7 +169,8 @@ public class NetworkService: ObservableObject {
         }
     }
 
-    private lazy var baseURL: String = "\(apiEndpoint)\(apiVersion)"
+    // Compute baseURL dynamically so endpoint changes take effect immediately
+    private var baseURL: String { "\(apiEndpoint)\(apiVersion)" }
 
     private init() {
         // Initialization complete - baseURL will be computed lazily when first accessed
@@ -166,17 +185,70 @@ public class NetworkService: ObservableObject {
         return baseURL + path
     }
 
-    private func headers(requiresAuth: Bool = true) -> [String: String] {
+    private func headers(requiresAuth: Bool = true, requestBody: Data? = nil) -> [String: String] {
         var headers = [
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "X-API-Key": apiKey, // API key for all requests
         ]
 
         if requiresAuth {
             headers["Authorization"] = "Bearer \(authToken)"
         }
+        
+        // Add HMAC signature if enabled and app secret is available
+        if enableHMAC && !appSecret.isEmpty && appSecret != "ZIVOHEALTH_APP_SECRET_HERE" {
+            let timestamp = String(Int(Date().timeIntervalSince1970))
+            headers["X-Timestamp"] = timestamp
+            
+            if let signature = generateHMACSignature(payload: requestBody, timestamp: timestamp) {
+                headers["X-App-Signature"] = signature
+            }
+        }
 
         return headers
+    }
+
+    // Expose headers for other services (includes X-API-Key, Authorization, and HMAC)
+    public func authHeaders(requiresAuth: Bool = true, body: Data? = nil) -> [String: String] {
+        return headers(requiresAuth: requiresAuth, requestBody: body)
+    }
+
+    // Expose a safe accessor for app secret used for URL-based signatures
+    public func appSecretForSigning() -> String {
+        return appSecret
+    }
+
+    // Utility: HMAC-SHA256 in hex for URL-based signatures
+    public func hmacSHA256Hex(message: String, secret: String) -> String {
+        let keyData = Data(secret.utf8)
+        let msgData = Data(message.utf8)
+        let signature = HMAC<SHA256>.authenticationCode(for: msgData, using: SymmetricKey(data: keyData))
+        return Data(signature).map { String(format: "%02hhx", $0) }.joined()
+    }
+    
+    // MARK: - HMAC Signature Generation
+    
+    private func generateHMACSignature(payload: Data?, timestamp: String) -> String? {
+        guard !appSecret.isEmpty, appSecret != "ZIVOHEALTH_APP_SECRET_HERE" else {
+            return nil
+        }
+        
+        // Create message: payload.timestamp
+        var message = ""
+        if let payload = payload, let payloadString = String(data: payload, encoding: .utf8) {
+            message = payloadString
+        }
+        message += "." + timestamp
+        
+        // Generate HMAC-SHA256 signature
+        guard let secretData = appSecret.data(using: .utf8),
+              let messageData = message.data(using: .utf8) else {
+            return nil
+        }
+        
+        let signature = messageData.hmacSHA256(key: secretData)
+        return signature
     }
 
     // Get the appropriate token for current role
@@ -518,6 +590,14 @@ public class NetworkService: ObservableObject {
         body.append(fileData)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
 
+        // Attach API key + HMAC headers using the actual multipart body for signature
+        let headerMap = headers(requiresAuth: true, requestBody: body)
+        for (key, value) in headerMap {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        // Ensure multipart content type is preserved after setting generic headers
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
         // Upload and decode streaming response
         let (data, response) = try await urlSession.upload(for: request, from: body)
         guard let httpResponse = response as? HTTPURLResponse, 200..<400 ~= httpResponse.statusCode else {
@@ -548,9 +628,12 @@ public class NetworkService: ObservableObject {
         
         var request = URLRequest(url: url)
         
-        // Ensure we're authenticated and get the token
+        // Ensure we're authenticated and attach all required headers (API key, JWT, HMAC)
         try await ensureAuthentication()
-        request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+        let headerMap = headers(requiresAuth: true, requestBody: nil)
+        for (key, value) in headerMap {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
         
         return request
     }
@@ -623,7 +706,9 @@ public class NetworkService: ObservableObject {
                     }
                     
                     var request = URLRequest(url: url)
-                    request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+                    // Include API key + JWT + HMAC on streaming request
+                    let headerMap = headers(requiresAuth: true, requestBody: nil)
+                    for (k, v) in headerMap { request.setValue(v, forHTTPHeaderField: k) }
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
                     
@@ -1531,16 +1616,27 @@ extension NetworkService {
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = method
 
-        // Set headers
-        var headers: [String: String] = [
-            "Accept": "application/json",
-            "Content-Type": contentType,
-        ]
-
-        if requiresAuth && !authToken.isEmpty {
-            headers["Authorization"] = "Bearer \(authToken)"
+        // Prepare body data for HMAC signature
+        var bodyDataForSignature: Data?
+        if let bodyData = bodyData {
+            bodyDataForSignature = bodyData
+        } else if let body = body {
+            do {
+                bodyDataForSignature = try JSONSerialization.data(withJSONObject: body)
+            } catch {
+                print("❌ [NetworkService] Failed to serialize JSON body for signature: \(error)")
+                throw NetworkError.invalidRequest
+            }
         }
 
+        // Set headers with HMAC signature support
+        var headers = self.headers(requiresAuth: requiresAuth, requestBody: bodyDataForSignature)
+        
+        // Honor caller-provided content type (e.g., form-urlencoded for login)
+        if contentType != "application/json" {
+            headers["Content-Type"] = contentType
+        }
+        
         for (key, value) in headers {
             urlRequest.setValue(value, forHTTPHeaderField: key)
         }

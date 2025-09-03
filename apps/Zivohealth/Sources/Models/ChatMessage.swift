@@ -47,19 +47,37 @@ public struct Visualization: Codable, Sendable {
     public let type: String  // "chart", "plot", "image"
     public let title: String
     public let description: String?
-    public let relativeUrl: String
+    public let filename: String?
+    // Backend may provide direct paths at the top level
+    public let filePath: String?
+    public let s3Uri: String?
+    public let plotPath: String?
+    public let path: String?
+    public let presignedUrl: String?
+    public let relativeUrl: String?
     public let metadata: [String: AnyCodable]?
     
     enum CodingKeys: String, CodingKey {
-        case id, type, title, description, metadata
+        case id, type, title, description, filename, metadata
         case relativeUrl = "relative_url"
+        case filePath = "file_path"
+        case s3Uri = "s3_uri"
+        case plotPath = "plot_path"
+        case path
+        case presignedUrl = "presigned_url"
     }
     
-    public init(id: String, type: String, title: String, description: String? = nil, relativeUrl: String, metadata: [String: AnyCodable]? = nil) {
+    public init(id: String, type: String, title: String, description: String? = nil, filename: String? = nil, filePath: String? = nil, s3Uri: String? = nil, plotPath: String? = nil, path: String? = nil, presignedUrl: String? = nil, relativeUrl: String? = nil, metadata: [String: AnyCodable]? = nil) {
         self.id = id
         self.type = type
         self.title = title
         self.description = description
+        self.filename = filename
+        self.filePath = filePath
+        self.s3Uri = s3Uri
+        self.plotPath = plotPath
+        self.path = path
+        self.presignedUrl = presignedUrl
         self.relativeUrl = relativeUrl
         self.metadata = metadata
     }

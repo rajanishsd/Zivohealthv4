@@ -16,6 +16,7 @@ from app.models.vitals_data import (
     VitalsRawCategorized
 )
 from app.schemas.vitals import VitalDataSubmission
+from app.utils.timezone import now_local
 import calendar
 import json
 import logging

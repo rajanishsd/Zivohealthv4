@@ -2,6 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from datetime import date, datetime, timedelta
+from app.utils.timezone import now_local, today_local
 
 from app.api import deps
 from app.crud import nutrition as crud_nutrition
@@ -17,6 +18,7 @@ from app.schemas.nutrition import (
 )
 from app.models.user import User
 from app.models.nutrition_data import NutritionSyncStatus
+from app.core.background_worker import trigger_smart_aggregation
 
 router = APIRouter()
 
@@ -38,11 +40,20 @@ def create_nutrition_data(
             db=db,
             user_id=current_user.id,
             data_source=nutrition_in.data_source,
-            last_sync_date=datetime.utcnow(),
+            last_sync_date=now_local(),
             success=True,
             error_message=None
         )
         
+        # Trigger coalesced aggregation for nutrition only (post-commit)
+        try:
+            # Use a short debounce via the smart worker; domains limited to nutrition
+            import asyncio
+            # If this endpoint is sync, fire-and-forget the coroutine
+            asyncio.create_task(trigger_smart_aggregation(user_id=current_user.id, domains=["nutrition"]))
+        except Exception:
+            # Non-fatal if background trigger fails
+            pass
         return nutrition_data
         
     except Exception as e:
@@ -52,7 +63,7 @@ def create_nutrition_data(
                 db=db,
                 user_id=current_user.id,
                 data_source=nutrition_in.data_source,
-                last_sync_date=datetime.utcnow(),
+                last_sync_date=now_local(),
                 success=False,
                 error_message=str(e)
             )
@@ -104,7 +115,7 @@ def get_nutrition_chart_data(
     """Get nutrition data formatted for charts"""
     # Default to last 30 days if no dates provided
     if not end_date:
-        end_date = date.today()
+        end_date = today_local()
     if not start_date:
         start_date = end_date - timedelta(days=30)
     

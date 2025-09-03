@@ -173,7 +173,8 @@ def cleanup_old_spans_only(redis_client: redis.Redis, keep_recent_hours: int = 1
     import json
     from datetime import datetime, timedelta
     
-    cutoff_time = datetime.now() - timedelta(hours=keep_recent_hours)
+    from app.utils.timezone import now_local
+    cutoff_time = now_local() - timedelta(hours=keep_recent_hours)
     
     # Get all span keys
     span_keys = redis_client.keys('telemetry:span:*')

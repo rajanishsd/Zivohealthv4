@@ -357,7 +357,8 @@ class NutritionAgent:
         ):
             try:
                 nutrition_data = request_data.get("nutrition_data", {})
-                meal_time = request_data.get("meal_time", datetime.now())
+                from app.utils.timezone import now_local
+                meal_time = request_data.get("meal_time", now_local())
                 meal_type = request_data.get("meal_type", MealType.OTHER.value)
 
                 # Create nutrition record

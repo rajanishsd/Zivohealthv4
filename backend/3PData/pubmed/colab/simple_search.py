@@ -15,7 +15,7 @@ from datetime import datetime
 from sqlalchemy import create_engine, text
 
 # Configuration
-DATABASE_URL = "postgresql://rajanishsd@localhost:5433/zivohealth"
+DATABASE_URL = "postgresql://rajanishsd@localhost:5432/zivohealth"
 COLLECTION_NAME = "pmc_tracked_docs"
 
 class SimplePMCSearcher:

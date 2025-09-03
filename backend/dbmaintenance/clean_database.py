@@ -16,7 +16,7 @@ def get_database_config() -> Dict[str, str]:
     """Get database configuration from environment or defaults"""
     return {
         'host': os.getenv('DATABASE_HOST', 'localhost'),
-        'port': os.getenv('DATABASE_PORT', '5433'),
+        'port': os.getenv('DATABASE_PORT', '5432'),
         'database': os.getenv('DATABASE_NAME', 'zivohealth'),
         'user': os.getenv('DATABASE_USER', 'rajanishsd'),
         'password': os.getenv('DATABASE_PASSWORD', '')

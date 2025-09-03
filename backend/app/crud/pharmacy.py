@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime
+from app.utils.timezone import now_local
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc, func
 
@@ -127,7 +128,7 @@ class CRUDPharmacyData(CRUDBase[PharmacyRawData, PharmacyDataCreate, PharmacyDat
     ) -> List[PharmacyRawData]:
         """Get recent pharmacy purchases"""
         from datetime import timedelta
-        cutoff_date = datetime.now().date() - timedelta(days=days)
+        cutoff_date = now_local().date() - timedelta(days=days)
         
         return db.query(self.model).filter(
             and_(

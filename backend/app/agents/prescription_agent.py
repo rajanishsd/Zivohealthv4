@@ -263,7 +263,8 @@ class PrescriptionAgent(BaseHealthAgent):
                 
                 # Calculate date range - use timezone-naive datetime to match database
                 from datetime import timezone
-                end_date = datetime.now()
+                from app.utils.timezone import now_local
+                end_date = now_local()
                 start_date = end_date - timedelta(days=days_back)
                 
                 # Query prescriptions - need to join with chat_sessions to get user_id
@@ -398,7 +399,8 @@ class PrescriptionAgent(BaseHealthAgent):
         top_prescribers = sorted(prescriber_counts.items(), key=lambda x: x[1], reverse=True)[:3]
         
         # Identify potentially active prescriptions (last 30 days)
-        recent_date = datetime.now() - timedelta(days=30)
+        from app.utils.timezone import now_local
+        recent_date = now_local() - timedelta(days=30)
         recent_prescriptions = [
             p for p in prescriptions 
             if p.prescribed_at and p.prescribed_at.replace(tzinfo=None) >= recent_date

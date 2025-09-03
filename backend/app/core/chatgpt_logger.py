@@ -10,6 +10,7 @@ import json
 import os
 import uuid
 from datetime import datetime
+from app.utils.timezone import now_local, isoformat_now
 from typing import Dict, Any, List, Optional, Union
 from pathlib import Path
 
@@ -42,7 +43,7 @@ class ChatGPTLogger:
     
     def _generate_interaction_id(self, user_id: Optional[int] = None, session_id: Optional[int] = None) -> str:
         """Generate unique interaction ID"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = now_local().strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
         
         if user_id and session_id:
@@ -77,7 +78,7 @@ class ChatGPTLogger:
                 "interaction_id": interaction_id,
                 "agent_name": agent_name,
                 "operation": operation,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": isoformat_now(),
                 "user_id": user_id,
                 "session_id": session_id,
                 "request_id": request_id,
@@ -146,7 +147,7 @@ class ChatGPTLogger:
                 "request": {
                     "messages": request_data if isinstance(request_data, list) else [request_data],
                     "model": model_name,
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": isoformat_now()
                 }
             }
             
@@ -157,7 +158,7 @@ class ChatGPTLogger:
                 "response": {
                     **response_content,
                     "full_response": response_data.dict() if hasattr(response_data, 'dict') else str(response_data),
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": isoformat_now()
                 }
             }
             
@@ -175,7 +176,7 @@ class ChatGPTLogger:
             
         except Exception as e:
             print(f"❌ [ChatGPT Logger] Failed to log interaction: {e}")
-            return f"error_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            return f"error_{now_local().strftime('%Y%m%d_%H%M%S')}"
 
 
 # Global logger instance

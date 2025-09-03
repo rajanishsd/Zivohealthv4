@@ -63,9 +63,9 @@ class VitalsAgent(BaseHealthAgent):
                 Convert units to standard format (kg for weight, cm for height, Celsius for temperature).
                 
                 For measurement_date:
-                - If text mentions "today", "as of today", or similar, use: "{datetime.now().isoformat()}"
+                - If text mentions "today", "as of today", or similar, use: "{__import__('app.utils.timezone', fromlist=['isoformat_now']).isoformat_now()}"
                 - If a specific date is mentioned, parse and use that date
-                - If no date is mentioned, use: "{datetime.now().isoformat()}"
+                - If no date is mentioned, use: "{__import__('app.utils.timezone', fromlist=['isoformat_now']).isoformat_now()}"
                 
                 Example format:
                 {{
@@ -78,7 +78,7 @@ class VitalsAgent(BaseHealthAgent):
                     "blood_sugar": 95.0,
                     "oxygen_saturation": 98.0,
                     "bmi": 23.1,
-                    "measurement_date": "{datetime.now().isoformat()}",
+                    "measurement_date": "{__import__('app.utils.timezone', fromlist=['isoformat_now']).isoformat_now()}",
                     "device_used": "Digital BP Monitor",
                     "notes": "Patient resting, no medication taken"
                 }}

@@ -25,6 +25,7 @@ else:
 
 # Now import app modules after environment is loaded
 from app.core.background_worker import run_worker_process
+from app.utils.timezone import now_local
 
 # Configure logging for separate process
 logging.basicConfig(
@@ -41,10 +42,10 @@ logger = logging.getLogger(__name__)
 def main():
     """Main entry point for worker process"""
     logger.info("🚀 Starting ZivoHealth Background Worker Process")
-    logger.info(f"📅 Started at: {datetime.now()}")
+    logger.info(f"📅 Started at: {now_local()}")
     
     try:
-        # Run the async worker process
+        # Run the async worker process (process all domains by default)
         asyncio.run(run_worker_process())
     except KeyboardInterrupt:
         logger.info("🛑 Worker process shutdown requested")

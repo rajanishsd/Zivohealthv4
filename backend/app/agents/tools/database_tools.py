@@ -2,6 +2,7 @@ from typing import List, Dict, Any
 from langchain.tools import Tool
 import json
 from datetime import datetime
+from app.utils.timezone import now_local
 
 
 class DatabaseToolkit:
@@ -64,19 +65,19 @@ class DatabaseToolkit:
             "blood_pressure_systolic": 120,
             "blood_pressure_diastolic": 80,
             "heart_rate": 72,
-            "date": datetime.now().strftime("%Y-%m-%d")
+            "date": now_local().strftime("%Y-%m-%d")
         }
     
     def _parse_prescription(self, text: str) -> Dict[str, Any]:
         return {
             "medications": [{"name": "Sample Med", "dosage": "10mg"}],
-            "date": datetime.now().strftime("%Y-%m-%d")
+            "date": now_local().strftime("%Y-%m-%d")
         }
     
     def _parse_lab_results(self, text: str) -> Dict[str, Any]:
         return {
             "tests": [{"name": "Cholesterol", "value": 180, "unit": "mg/dL"}],
-            "date": datetime.now().strftime("%Y-%m-%d")
+            "date": now_local().strftime("%Y-%m-%d")
         }
 
 

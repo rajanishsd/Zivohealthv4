@@ -1,6 +1,6 @@
-from typing import Generator, Union
+from typing import Generator, Union, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt
 from pydantic import ValidationError
@@ -56,22 +56,72 @@ def get_current_doctor(
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[security.ALGORITHM]
         )
-        # Check if this is a doctor token
-        if not payload.get("is_doctor", False):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Doctor access required",
-            )
-        doctor_id = payload.get("sub")
+        token_data = schemas.TokenPayload(**payload)
     except (jwt.JWTError, ValidationError):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",
         )
-    doctor = crud.doctor.get(db, doctor_id=int(doctor_id))
+    doctor = crud.doctor.get(db, id=token_data.sub)
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
     return doctor
+
+
+def verify_api_key_dependency(
+    x_api_key: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)
+) -> bool:
+    """
+    Dependency to verify API key for specific endpoints
+    """
+    if not settings.REQUIRE_API_KEY:
+        return True
+    
+    # Extract API key from headers
+    api_key = None
+    if x_api_key:
+        api_key = x_api_key
+    elif authorization and authorization.startswith("Bearer "):
+        api_key = authorization.split(" ")[1]
+    
+    if not api_key or not security.verify_api_key(api_key):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key",
+        )
+    
+    return True
+
+
+def get_current_user_or_doctor(
+    db: Session = Depends(get_db), token: str = Depends(reusable_oauth2)
+) -> Union[models.User, models.Doctor]:
+    """
+    Get current user or doctor based on token
+    """
+    try:
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[security.ALGORITHM]
+        )
+        token_data = schemas.TokenPayload(**payload)
+    except (jwt.JWTError, ValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate credentials",
+        )
+    
+    # Check if it's a doctor token
+    if payload.get("is_doctor", False):
+        doctor = crud.doctor.get(db, id=token_data.sub)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+        return doctor
+    else:
+        user = crud.user.get(db, id=token_data.sub)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return user
 
 
 def get_current_active_user(

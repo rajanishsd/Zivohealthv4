@@ -37,7 +37,7 @@ pip install -r requirements.txt
 # Set OpenAI API key
 export OPENAI_API_KEY="your_openai_api_key_here"
 
-# Ensure PostgreSQL is running on port 5433
+# Ensure PostgreSQL is running on port 5432
 # Ensure pgvector extension is available
 ```
 
@@ -228,7 +228,7 @@ embeddings = OpenAIEmbeddings(
 
 # Use custom vector store
 vector_store = CustomLOINCPGVector(
-    connection_string="postgresql://user@localhost:5433/db",
+    connection_string="postgresql://user@localhost:5432/db",
     embedding_function=embeddings,
     collection_name="loinc_terminology"
 )
@@ -263,7 +263,7 @@ WHERE cmetadata->>'loinc_num' = '33747-0';
 
    ```bash
    # Check PostgreSQL is running
-   psql -h localhost -p 5433 -U rajanishsd -d zivohealth -c "SELECT 1;"
+   psql -h localhost -p 5432 -U rajanishsd -d zivohealth -c "SELECT 1;"
    ```
 3. **Table Already Exists Error**
 

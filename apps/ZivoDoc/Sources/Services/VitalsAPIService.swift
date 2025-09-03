@@ -277,7 +277,7 @@ struct VitalDataCount: Codable {
 class VitalsAPIService: ObservableObject {
     static let shared = VitalsAPIService()
     
-    @AppStorage("apiEndpoint") private var apiEndpoint = "http://192.168.0.105:8000"
+    @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
     private var baseURL: String {
         return "\(apiEndpoint)/api/v1/vitals"
     }
@@ -386,24 +386,9 @@ class VitalsAPIService: ObservableObject {
     
     // MARK: - Authentication Headers
     private func getAuthHeaders() -> [String: String] {
-        var headers = [
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        ]
-        
-        // Add authentication token if available
-        let token = NetworkService.shared.getCurrentToken()
-        if !token.isEmpty {
-            headers["Authorization"] = "Bearer \(token)"
-            print("🔍 [VitalsAPIService] Using auth token (length: \(token.count))")
-        } else {
-            print("⚠️ [VitalsAPIService] No auth token available!")
-            // Trigger automatic demo authentication
-            Task {
-                await authenticateWithDemoCredentials()
-            }
-        }
-        
+        // Always include API key, JWT, and HMAC via NetworkService
+        let headers = NetworkService.shared.authHeaders(requiresAuth: true, body: nil)
+        if let token = headers["Authorization"] { print("🔍 [VitalsAPIService] Using auth token header: \(token.prefix(16))...") }
         return headers
     }
     

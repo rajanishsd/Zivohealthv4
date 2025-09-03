@@ -13,6 +13,7 @@ import json
 import asyncio
 from app.core.redis import redis_client
 from app.core.system_metrics import system_metrics
+from app.utils.timezone import now_local, isoformat_now
 
 router = APIRouter(tags=["dashboard"])
 
@@ -46,7 +47,7 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             await asyncio.sleep(10)
             data = {
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": isoformat_now(),
                 "metrics": get_real_time_metrics(),
                 "recent_requests": get_recent_activity(limit=5)
             }
@@ -74,7 +75,7 @@ async def get_overview_metrics(hours: int = Query(24, ge=1, le=168)) -> Dict[str
         }
     
     # Analyze spans for metrics
-    cutoff_time = datetime.now() - timedelta(hours=hours)
+    cutoff_time = now_local() - timedelta(hours=hours)
     valid_spans = []
     sessions = set()
     agents = set()
@@ -139,7 +140,7 @@ async def get_request_timeline_chart(hours: int = Query(24, ge=1, le=168)) -> Di
     """Get data for request timeline chart using Redis telemetry"""
     
     recent_spans = redis_client.zrange('telemetry:recent_spans', 0, -1)
-    cutoff_time = datetime.now() - timedelta(hours=hours)
+    cutoff_time = now_local() - timedelta(hours=hours)
     
     # Group by hour
     timeline_data = {}
@@ -170,7 +171,7 @@ async def get_request_timeline_chart(hours: int = Query(24, ge=1, le=168)) -> Di
     for hour_key, sessions in sessions_by_hour.items():
         timeline_data[hour_key] = len(sessions)
     
-    current_time = datetime.now().replace(minute=0, second=0, microsecond=0)
+    current_time = now_local().replace(minute=0, second=0, microsecond=0)
     data_points = []
     
     for i in range(hours):
@@ -197,7 +198,7 @@ async def get_agent_performance_chart(hours: int = Query(24, ge=1, le=168)) -> D
     if not recent_spans:
         return {"data": [], "total_agents": 0}
     
-    cutoff_time = datetime.now() - timedelta(hours=hours)
+    cutoff_time = now_local() - timedelta(hours=hours)
     agent_stats = {}
     
     for span_id in recent_spans:
@@ -263,7 +264,7 @@ async def get_tool_usage_chart(hours: int = Query(24, ge=1, le=168)) -> Dict[str
     """Get data for tool usage pie chart using Redis telemetry"""
     
     recent_spans = redis_client.zrange('telemetry:recent_spans', 0, -1)
-    cutoff_time = datetime.now() - timedelta(hours=hours)
+    cutoff_time = now_local() - timedelta(hours=hours)
     
     tool_stats = {}
     
@@ -336,7 +337,7 @@ async def get_error_analysis_chart(hours: int = Query(24, ge=1, le=168)) -> Dict
     """Get data for error analysis chart using Redis telemetry"""
     
     recent_spans = redis_client.zrange('telemetry:recent_spans', 0, -1)
-    cutoff_time = datetime.now() - timedelta(hours=hours)
+    cutoff_time = now_local() - timedelta(hours=hours)
     
     error_stats = {}
     
@@ -402,7 +403,7 @@ async def get_workflow_requests(
     
     # Group spans by session to create workflows
     workflows = {}
-    cutoff_time = datetime.now() - timedelta(hours=hours)
+    cutoff_time = now_local() - timedelta(hours=hours)
     
     for span_id in recent_spans:
         span_data = redis_client.get(f'telemetry:span:{span_id}')
@@ -759,7 +760,7 @@ async def get_system_health() -> Dict[str, Any]:
 
 def get_real_time_metrics() -> Dict[str, Any]:
     """Get real-time metrics for WebSocket updates"""
-    last_10_minutes = datetime.now() - timedelta(minutes=10)
+    last_10_minutes = now_local() - timedelta(minutes=10)
     recent_spans = redis_client.zrange('telemetry:recent_spans', -50, -1)  # Last 50 spans
     
     active_sessions = set()
@@ -791,7 +792,7 @@ def get_real_time_metrics() -> Dict[str, Any]:
         "active_sessions": len(active_sessions),
         "active_agents": len(active_agents),
         "recent_errors": recent_errors,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": isoformat_now()
     }
 
 

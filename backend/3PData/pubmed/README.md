@@ -28,7 +28,7 @@ This system downloads, parses, and embeds PubMed and PMC medical literature usin
 2. **Setup Database**:
    ```bash
    # First, enable pgvector in your PostgreSQL
-   psql -h localhost -p 5433 -U your_user -d your_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
+   psql -h localhost -p 5432 -U your_user -d your_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
    
    # Then setup tables
    python pubmed_pmc_embedder.py --setup-db

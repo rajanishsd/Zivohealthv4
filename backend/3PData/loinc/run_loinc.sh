@@ -156,7 +156,7 @@ show_help() {
     echo "Prerequisites:"
     echo "  - Have LoincTableCore.csv in ../data/lonic/ directory"
     echo "  - Install Python dependencies: pip install -r requirements.txt"
-    echo "  - PostgreSQL running on localhost:5433"
+    echo "  - PostgreSQL running on localhost:5432"
     echo "  - Sufficient disk space for local model (~1GB)"
 }
 

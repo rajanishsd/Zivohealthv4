@@ -5,6 +5,7 @@ Pharmacy Agent for processing pharmacy-related documents and queries
 import json
 from typing import Dict, Any, Optional
 from datetime import datetime
+from app.utils.timezone import isoformat_now
 
 
 class PharmacyAgentCompat:
@@ -95,7 +96,7 @@ async def extract_pharmacy_data(ocr_text: str, user_id: int, session_id: int = N
                 "pharmacy_name": "Unknown Pharmacy",
                 "total_amount": 0.0,
                 "medications": [],
-                "extraction_timestamp": datetime.now().isoformat()
+                "extraction_timestamp": isoformat_now()
             },
             "user_id": user_id,
             "session_id": session_id,

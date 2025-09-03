@@ -26,6 +26,7 @@ from app.core.redis import get_redis
 from app.core.system_metrics import system_metrics
 from app.core.database_metrics import db_monitor
 from app.middleware.performance import PerformanceMiddleware
+from app.middleware.api_auth import APIKeyMiddleware
 
 # Configure logging
 logging.basicConfig(
@@ -89,6 +90,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to start performance monitoring: {e}")
     
+    # Verify S3 configuration and access
+    try:
+        from app.services.s3_service import verify_s3_configuration
+        require_write = os.getenv("REQUIRE_S3_WRITE_CHECK", "false").lower() == "true"
+        ok, msg = verify_s3_configuration(require_write=require_write)
+        if ok:
+            logger.info(f"✅ [Startup] S3 check: {msg}")
+        else:
+            logger.warning(f"⚠️ [Startup] S3 check failed: {msg}. Uploads will use local storage if enabled.")
+    except Exception as e:
+        logger.error(f"❌ [Startup] S3 verification error: {e}")
+
     # Event-driven aggregation setup
     try:
         from app.core.background_worker import EventDrivenVitalsAggregationWorker
@@ -163,6 +176,10 @@ def create_application() -> FastAPI:
     )
     
     logger.info("FastAPI instance created successfully")
+    
+    # API Key Authentication Middleware (add first to catch all requests)
+    if settings.REQUIRE_API_KEY:
+        app.add_middleware(APIKeyMiddleware)
     
     # CORS Middleware
     app.add_middleware(
@@ -250,12 +267,24 @@ async def health_check():
         logger.error(f"Redis health check failed: {e}")
         redis_status = "unhealthy"
     
+    try:
+        # Test S3 status (without write)
+        from app.services.s3_service import verify_s3_configuration
+        ok, msg = verify_s3_configuration(require_write=False)
+        s3_status = "healthy" if ok else "degraded"
+        s3_message = msg
+    except Exception as e:
+        logger.error(f"S3 health check failed: {e}")
+        s3_status = "unhealthy"
+        s3_message = str(e)
+    
     return {
         "status": "healthy",
         "version": settings.VERSION,
         "project": settings.PROJECT_NAME,
         "database": db_status,
-        "redis": redis_status
+        "redis": redis_status,
+        "s3": {"status": s3_status, "message": s3_message}
     }
 
 @app.exception_handler(HTTPException)

@@ -16,6 +16,7 @@ sys.path.insert(0, str(backend_path))
 from typing import TypedDict, Dict, Any, List, Optional
 from datetime import datetime
 import asyncio
+from app.utils.timezone import now_local, isoformat_now
 
 from langgraph.graph import StateGraph, END, START
 from langgraph.checkpoint.memory import MemorySaver
@@ -83,7 +84,7 @@ async def run_initial_panel(state: MedicalDoctorState) -> MedicalDoctorState:
             questions_per_round_limit=max(1, int(state.get("max_questions_per_round", 5))),
         )
 
-        decision = panel.process_patient_case(state["patient_case"], state.get("budget_limit"))
+        decision = await panel.process_patient_case_async(state["patient_case"], state.get("budget_limit"))
 
         state["panel_decision"] = decision
         raw_questions = decision.get("questions", []) if isinstance(decision, dict) else []
@@ -96,7 +97,7 @@ async def run_initial_panel(state: MedicalDoctorState) -> MedicalDoctorState:
         state["conversation_log"].append({
             "type": "initial_decision",
             "decision": decision,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": isoformat_now()
         })
 
         state["error"] = ""
@@ -147,7 +148,7 @@ async def ask_questions(state: MedicalDoctorState) -> MedicalDoctorState:
             "type": "questions_asked",
             "questions": current_round_questions,
             "answers": answers,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": isoformat_now()
         })
         state["error"] = ""
     except Exception as e:
@@ -177,14 +178,14 @@ async def run_followup_panel(state: MedicalDoctorState) -> MedicalDoctorState:
             question_rounds_limit=remaining_rounds,
             questions_per_round_limit=max(1, int(state.get("max_questions_per_round", 5))),
         )
-        followup_decision = panel.conduct_chain_of_debate(updated_case)
+        followup_decision = await panel.conduct_chain_of_debate_async(updated_case)
         state["followup_decision"] = followup_decision
 
         # Log follow-up decision
         state["conversation_log"].append({
             "type": "followup_decision",
             "decision": followup_decision,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": isoformat_now()
         })
 
         # Update next-round questions (exclude already asked)

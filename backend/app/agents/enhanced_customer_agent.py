@@ -5,6 +5,7 @@ import time
 from typing import Dict, Any, List, Optional, TypedDict
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
+from app.utils.timezone import now_local, isoformat_now
 
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage, AIMessage
@@ -440,7 +441,7 @@ class EnhancedCustomerAgent:
         
         step_start = time.time()
         state["step_start_times"]["analyze_request"] = step_start
-        print(f"🔍 [DEBUG] Starting analyze_request at {datetime.now().isoformat()}")
+        print(f"🔍 [DEBUG] Starting analyze_request at {isoformat_now()}")
         
         with trace_agent_operation(
             "EnhancedCustomerAgent",
@@ -929,7 +930,7 @@ class EnhancedCustomerAgent:
         
         step_start = time.time()
         state["step_start_times"]["smart_file_question_router"] = step_start
-        print(f"🤖 [DEBUG] Starting smart_file_question_router at {datetime.now().isoformat()}")
+        print(f"🤖 [DEBUG] Starting smart_file_question_router at {isoformat_now()}")
         
         with trace_agent_operation(
             "EnhancedCustomerAgent",
@@ -1054,7 +1055,7 @@ class EnhancedCustomerAgent:
         
         step_start = time.time()
         state["step_start_times"]["process_file"] = step_start
-        print(f"📄 [DEBUG] Starting process_file at {datetime.now().isoformat()}")
+        print(f"📄 [DEBUG] Starting process_file at {isoformat_now()}")
         
         # Handle data_update scenario (no file, just message with structured data)
         if state["request_type"] == "data_update":
@@ -1404,7 +1405,7 @@ class EnhancedCustomerAgent:
         
         step_start = time.time()
         state["step_start_times"]["intelligent_router"] = step_start
-        print(f"🧠 [DEBUG] Starting intelligent_router at {datetime.now().isoformat()}")
+        print(f"🧠 [DEBUG] Starting intelligent_router at {isoformat_now()}")
         
         with trace_agent_operation(
             "EnhancedCustomerAgent",
@@ -1709,7 +1710,7 @@ class EnhancedCustomerAgent:
         """Generate comprehensive response based on all available data"""
         
         step_start = time.time()
-        print(f"💬 [DEBUG] Starting generate_response at {datetime.now().isoformat()}")
+        print(f"💬 [DEBUG] Starting generate_response at {isoformat_now()}")
         
         with trace_agent_operation(
             "EnhancedCustomerAgent",
@@ -2193,7 +2194,7 @@ Please try uploading one of these supported document types."""
         """Execute lab agent directly for lab-related queries"""
         
         step_start = time.time()
-        print(f"🧪 [DEBUG] Starting execute_lab_agent at {datetime.now().isoformat()}")
+        print(f"🧪 [DEBUG] Starting execute_lab_agent at {isoformat_now()}")
         
         try:
             user_question = state["user_message"]
@@ -2255,7 +2256,7 @@ Please try uploading one of these supported document types."""
         """Execute vitals agent directly for vitals-related queries"""
         
         step_start = time.time()
-        print(f"💓 [DEBUG] Starting execute_vitals_agent at {datetime.now().isoformat()}")
+        print(f"💓 [DEBUG] Starting execute_vitals_agent at {isoformat_now()}")
         
         try:
             user_question = state["user_message"]
@@ -2311,7 +2312,7 @@ Please try uploading one of these supported document types."""
         """Execute pharmacy agent directly for pharmacy-related queries"""
         
         step_start = time.time()
-        print(f"💊 [DEBUG] Starting execute_pharmacy_agent at {datetime.now().isoformat()}")
+        print(f"💊 [DEBUG] Starting execute_pharmacy_agent at {isoformat_now()}")
         
         try:
             user_question = state["user_message"]
@@ -2367,7 +2368,7 @@ Please try uploading one of these supported document types."""
         """Execute prescription agent directly for prescription-related queries"""
         
         step_start = time.time()
-        print(f"📋 [DEBUG] Starting execute_prescription_agent at {datetime.now().isoformat()}")
+        print(f"📋 [DEBUG] Starting execute_prescription_agent at {isoformat_now()}")
         
         try:
             user_question = state["user_message"]
@@ -2424,7 +2425,7 @@ Please try uploading one of these supported document types."""
         
         step_start = time.time()
         try:
-            print(f"🍽️ [DEBUG] Starting execute_nutrition_agent at {datetime.now().isoformat()}")
+            print(f"🍽️ [DEBUG] Starting execute_nutrition_agent at {isoformat_now()}")
             
             user_question = state.get("user_message", "")
             retrieval_strategy = state.get("retrieval_strategy", {})
@@ -2485,7 +2486,7 @@ Please try uploading one of these supported document types."""
         """Execute multiple agents for complex queries (fallback to assessment approach)"""
         
         step_start = time.time()
-        print(f"🔄 [DEBUG] Starting execute_multi_agent at {datetime.now().isoformat()}")
+        print(f"🔄 [DEBUG] Starting execute_multi_agent at {isoformat_now()}")
         print(f"🔄 [DEBUG] Using assessment approach for complex/unclear query")
         
         # For complex queries, fall back to the original assessment-based approach
@@ -2617,7 +2618,7 @@ Please try uploading one of these supported document types."""
         """Execute medical consultation by collecting data from multiple agents and using medical doctor agent"""
         
         step_start = time.time()
-        print(f"🩺 [DEBUG] Starting execute_medical_consultation at {datetime.now().isoformat()}")
+        print(f"🩺 [DEBUG] Starting execute_medical_consultation at {isoformat_now()}")
         
         try:
             user_question = state["user_message"]
@@ -2745,7 +2746,7 @@ Please try uploading one of these supported document types."""
         """Execute medical doctor agent directly for question-only workflows"""
         
         step_start = time.time()
-        print(f"🩺 [DEBUG] Starting execute_medical_doctor at {datetime.now().isoformat()}")
+        print(f"🩺 [DEBUG] Starting execute_medical_doctor at {isoformat_now()}")
         
         with trace_agent_operation(
             "EnhancedCustomerAgent",
@@ -3022,7 +3023,7 @@ Please try uploading one of these supported document types."""
             
             # Determine meal time (default to current time)
             from datetime import datetime
-            meal_time = datetime.now()
+            meal_time = now_local()
             
             # Determine meal type based on time of day
             hour = meal_time.hour
@@ -3094,7 +3095,7 @@ Please try uploading one of these supported document types."""
             
             # Copy image to medical images directory
             original_path = Path(file_path)
-            new_filename = f"medical_{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{original_path.name}"
+            new_filename = f"medical_{user_id}_{now_local().strftime('%Y%m%d_%H%M%S')}_{original_path.name}"
             new_path = medical_images_dir / new_filename
             
             import shutil
@@ -3116,9 +3117,9 @@ Please try uploading one of these supported document types."""
                     ai_summary=summary_result.get("summary", "Medical image analysis"),
                     ai_findings=summary_result.get("findings", ""),
                     confidence_score=classification_result.get("confidence", 0.8),
-                    exam_date=datetime.now().date(),
+                    exam_date=now_local().date(),
                     processing_status="processed",
-                    processed_at=datetime.now()
+                    processed_at=now_local()
                 )
                 
                 db.add(medical_image)

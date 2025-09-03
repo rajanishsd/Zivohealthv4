@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import json
 import base64
 import uuid
+from app.utils.timezone import now_local, isoformat_now
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -345,7 +346,7 @@ class PrescriptionClinicalAgentLangGraph:
     def log_execution_step(self, state: PrescriptionClinicalAgentState, step_name: str, status: str, details: Dict = None):
         """Log execution step with context"""
         log_entry = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": isoformat_now(),
             "step": step_name,
             "status": status,
             "details": details or {}
@@ -1009,10 +1010,9 @@ class PrescriptionClinicalAgentLangGraph:
     def _store_prescription_data_direct(self, prescription_data: Dict, user_id: int, session_id: int, image_path: str = None) -> Dict:
         """Store prescription data directly to database"""
         try:
-            db = SessionLocal()
-            
-            if not prescription_data or not prescription_data.get("medications"):
-                return {"error": "No prescription data to store"}
+            with SessionLocal() as db:
+                if not prescription_data or not prescription_data.get("medications"):
+                    return {"error": "No prescription data to store"}
             
             stored_records = []
             
@@ -1064,7 +1064,6 @@ class PrescriptionClinicalAgentLangGraph:
                 })
             
             db.commit()
-            db.close()
             
             return {
                 "success": True,
@@ -1078,10 +1077,9 @@ class PrescriptionClinicalAgentLangGraph:
     def _store_clinical_data_direct(self, clinical_data: Dict, user_id: int, session_id: int, image_path: str = None) -> Dict:
         """Store clinical data directly to database"""
         try:
-            db = SessionLocal()
-            
-            if not clinical_data:
-                return {"error": "No clinical data to store"}
+            with SessionLocal() as db:
+                if not clinical_data:
+                    return {"error": "No clinical data to store"}
             
             # Generate unique ID
             clinical_id = f"cn_{user_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
@@ -1116,7 +1114,6 @@ class PrescriptionClinicalAgentLangGraph:
             
             db.add(clinical_note)
             db.commit()
-            db.close()
             
             return {
                 "success": True,

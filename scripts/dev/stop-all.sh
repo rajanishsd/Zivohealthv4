@@ -165,12 +165,12 @@ stop_postgresql() {
     
     # Force kill any remaining postgres processes
     pkill -f "postgres.*backend/data/postgres" 2>/dev/null || true
-    kill_port "5433" "PostgreSQL"
+    kill_port "5432" "PostgreSQL"
     
     # Clean up any remaining files
     rm -f backend/data/postgres.pid 2>/dev/null || true
     
-    if ! check_service_running "PostgreSQL" "5433"; then
+    if ! check_service_running "PostgreSQL" "5432"; then
         print_success "PostgreSQL stopped successfully"
     else
         print_warning "PostgreSQL may still be running"
@@ -285,8 +285,8 @@ main() {
         echo "✅ Redis: Stopped"
     fi
     
-    if check_service_running "PostgreSQL" "5433"; then
-        echo "❌ PostgreSQL: Still running on port 5433"
+    if check_service_running "PostgreSQL" "5432"; then
+        echo "❌ PostgreSQL: Still running on port 5432"
         all_stopped=false
     else
         echo "✅ PostgreSQL: Stopped"

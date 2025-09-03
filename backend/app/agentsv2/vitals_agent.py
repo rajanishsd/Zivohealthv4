@@ -7,6 +7,7 @@ Supports update, retrieve, and analyze use cases similar to the nutrition agent.
 import json
 import logging
 from datetime import datetime, timedelta
+from app.utils.timezone import now_local, isoformat_now
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Sequence, Annotated
 import operator
@@ -365,7 +366,7 @@ class VitalsAgentLangGraph:
     def log_execution_step(self, state: VitalsAgentState, step_name: str, status: str, details: Dict = None):
         """Log execution step with context"""
         log_entry = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": isoformat_now(),
             "step": step_name,
             "status": status,
             "details": details or {}
@@ -375,7 +376,7 @@ class VitalsAgentLangGraph:
     def _parse_datetime(self, date_str: str) -> datetime:
         """Parse datetime string or return current time"""
         if not date_str:
-            return datetime.now()
+            return now_local()
         
         try:
             # Handle ISO format datetime strings
@@ -385,7 +386,7 @@ class VitalsAgentLangGraph:
             else:
                 return datetime.strptime(date_str, "%Y-%m-%d")
         except:
-            return datetime.now()
+            return now_local()
 
     async def analyze_prompt(self, state: VitalsAgentState) -> VitalsAgentState:
         """
@@ -596,8 +597,8 @@ IMPORTANT:
 - Use consistent units (mmHg for BP, bpm for HR, kg for weight, etc.)""".format(
                 original_prompt=state.original_prompt,
                 user_id=state.user_id,
-                current_date=datetime.now().strftime("%Y-%m-%d"),
-                current_datetime=datetime.now().isoformat()
+                current_date=now_local().strftime("%Y-%m-%d"),
+                current_datetime=isoformat_now()
             )
             
             # Analyze image
@@ -725,8 +726,8 @@ IMPORTANT:
 - Use consistent units (mmHg for BP, bpm for HR, kg for weight, etc.)""".format(
     original_prompt=state.original_prompt,
     user_id=state.user_id,
-    current_date=datetime.now().strftime("%Y-%m-%d"),
-    current_datetime=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_date=now_local().strftime("%Y-%m-%d"),
+    current_datetime=now_local().strftime("%Y-%m-%d %H:%M:%S")
 )
 
             
@@ -1149,6 +1150,8 @@ IMPORTANT:
         """
         from app.crud.vitals import VitalsCRUD
         from app.db.session import get_db
+        from app.core.background_worker import trigger_smart_aggregation
+        import asyncio
         
         results = []
         stats = {
@@ -1168,6 +1171,12 @@ IMPORTANT:
                 try:
                     # Create the vitals record using CRUD
                     stored_record = VitalsCRUD.create_raw_data(db, user_id, submission)
+                    
+                    # Fire-and-forget coalesced aggregation for vitals domain
+                    try:
+                        asyncio.create_task(trigger_smart_aggregation(user_id=user_id, domains=["vitals"]))
+                    except Exception:
+                        pass
                     
                     result = {
                         "action": "inserted",

@@ -1,6 +1,7 @@
 import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta, date
+from app.utils.timezone import now_local, isoformat_now
 from sqlalchemy.orm import Session
 import time
 import os
@@ -10,6 +11,7 @@ from app.models.health_data import LabReport
 from app.models.lab_test_mapping import LabTestMapping
 from app.core.telemetry_simple import trace_agent_operation, log_agent_interaction
 from langchain.schema import SystemMessage, HumanMessage
+from app.core.background_worker import trigger_smart_aggregation
 
 class LabAgent(BaseHealthAgent):
     """Specialized agent for processing laboratory reports and test results"""
@@ -289,14 +291,14 @@ class LabAgent(BaseHealthAgent):
             os.makedirs(interactions_dir, exist_ok=True)
             
             # Create filename with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = now_local().strftime("%Y%m%d_%H%M%S")
             base_filename = f"lab_extraction_{request_id}_{timestamp}"
             
             # Store input (OCR text + prompt)
             input_data = {
                 "request_id": request_id,
                 "agent": "LabAgent",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": isoformat_now(),
                 "ocr_text_length": len(ocr_text),
                 "ocr_text": ocr_text,
                 "extraction_prompt": prompt
@@ -313,7 +315,7 @@ class LabAgent(BaseHealthAgent):
                 output_data = {
                     "request_id": request_id,
                     "agent": "LabAgent", 
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": isoformat_now(),
                     "response": response,
                     "response_type": type(response).__name__,
                     "tests_extracted": len(response.get("tests", [])) if isinstance(response, dict) else 0
@@ -392,7 +394,7 @@ class LabAgent(BaseHealthAgent):
         """Store lab report data to database"""
         
         step_start = time.time()
-        print(f"💾 [DEBUG] Starting store_data at {datetime.now().isoformat()}")
+        print(f"💾 [DEBUG] Starting store_data at {isoformat_now()}")
         
         with trace_agent_operation(
             self.agent_name,
@@ -602,6 +604,13 @@ class LabAgent(BaseHealthAgent):
                 if skipped_duplicates:
                     completion_msg += f" (skipped {len(skipped_duplicates)} duplicates)"
                 print(f"✅ [DEBUG] {completion_msg}")
+                
+                # Trigger coalesced aggregation for labs domain
+                try:
+                    import asyncio
+                    asyncio.create_task(trigger_smart_aggregation(user_id=state["user_id"], domains=["labs"]))
+                except Exception:
+                    pass
                 
                 state["stored_records"] = stored_records
                 self.log_operation("store", {

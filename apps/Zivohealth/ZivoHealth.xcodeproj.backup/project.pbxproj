@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -98,7 +98,7 @@
 
 /* Begin PBXFileReference section */
 		02C4CF13276FC42367ED8931 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
-		040F2D8FFAF4146C11813244 /* ZivoHealth.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ZivoHealth.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		040F2D8FFAF4146C11813244 /* ZivoHealth.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZivoHealth.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		05FEBCB2B0141D23ECDE8704 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
 		065F56C6159414749B50B0F7 /* ChatHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryView.swift; sourceTree = "<group>"; };
 		087F05A6FAB6926BD5398C44 /* BackendVitalsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendVitalsManager.swift; sourceTree = "<group>"; };
@@ -421,7 +421,6 @@
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
 					B089602FE23A6A872591020B = {
-						DevelopmentTeam = "${DEVELOPMENT_TEAM}";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -440,7 +439,6 @@
 				0A8D2DD33D85AF5BF1F22061 /* XCRemoteSwiftPackageReference "Alamofire" */,
 				3F6394B640B75AEC01645793 /* XCRemoteSwiftPackageReference "client-sdk-swift" */,
 			);
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -583,7 +581,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "${DEVELOPMENT_TEAM}";
+				DEVELOPMENT_TEAM = 83B85QRG5R;
 				ENABLE_BITCODE = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ZivoHealth;
@@ -744,7 +742,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "${DEVELOPMENT_TEAM}";
+				DEVELOPMENT_TEAM = 83B85QRG5R;
 				ENABLE_BITCODE = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ZivoHealth;

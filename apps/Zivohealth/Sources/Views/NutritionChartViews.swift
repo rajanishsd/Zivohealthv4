@@ -584,8 +584,8 @@ private func chartView<Legend: View, Content: ChartContent>(
             
             if let chartData = nutritionManager.chartData, !chartData.dataPoints.isEmpty {
                 // Sort data chronologically and remove duplicates
-                let rawDataPoints = nutritionManager.chartData?.dataPoints ?? []
-                let sortedData = rawDataPoints
+                let rawDataPoints = chartData.dataPoints
+                let dedupedData = rawDataPoints
                     .sorted(by: { $0.parsedDate < $1.parsedDate })
                     .reduce(into: [NutritionChartDataPoint]()) { result, dataPoint in
                         // Remove duplicates by date
@@ -593,14 +593,18 @@ private func chartView<Legend: View, Content: ChartContent>(
                             result.append(dataPoint)
                         }
                     }
-                    .suffix(3) // Limit to only 3 most recent periods
-                    .map { $0 }
+                
+                // Normalize to exactly 3 periods, filling missing ones with zero values
+                let anchors = anchorDates(for: nutritionManager.selectedGranularity)
+                let mapByKey = Dictionary(uniqueKeysWithValues: dedupedData.map { (dayFormatter.string(from: $0.parsedDate), $0) })
+                let normalizedData = anchors.map { date in
+                    let key = dayFormatter.string(from: date)
+                    return mapByKey[key] ?? zeroDataPoint(for: date)
+                }
                 
                 VStack(spacing: 16) {
-                Chart {
-                    ForEach(sortedData, id: \.parsedDate) { dataPoint in
-                        chartContent(dataPoint)
-                    }
+                Chart(normalizedData, id: \.parsedDate) { dataPoint in
+                    chartContent(dataPoint)
                 }
                     .frame(height: 240)
                     .id(chartId)
@@ -699,6 +703,73 @@ private func emptyStateView(title: String) -> some View {
             .foregroundColor(.secondary.opacity(0.8))
     }
     .frame(height: 240)
+}
+
+// Shared, cached day formatter (thread-confined via main-thread UI usage)
+private let dayFormatter: DateFormatter = {
+    let df = DateFormatter()
+    df.dateFormat = "yyyy-MM-dd"
+    return df
+}()
+
+// MARK: - Data Normalization Helpers
+private func anchorDates(for granularity: NutritionTimeGranularity, endingAt reference: Date = Date()) -> [Date] {
+    let calendar = Calendar.current
+    switch granularity {
+    case .daily:
+        let d0 = calendar.startOfDay(for: reference)
+        let d1 = calendar.date(byAdding: .day, value: -1, to: d0) ?? d0
+        let d2 = calendar.date(byAdding: .day, value: -2, to: d0) ?? d0
+        return [d2, d1, d0]
+    case .weekly:
+        let thisWeekStart = calendar.dateInterval(of: .weekOfYear, for: reference)?.start ?? reference
+        let lastWeekStart = calendar.date(byAdding: .weekOfYear, value: -1, to: thisWeekStart) ?? thisWeekStart
+        let twoWeeksAgoStart = calendar.date(byAdding: .weekOfYear, value: -2, to: thisWeekStart) ?? thisWeekStart
+        return [twoWeeksAgoStart, lastWeekStart, thisWeekStart]
+    case .monthly:
+        let comps = calendar.dateComponents([.year, .month], from: reference)
+        let thisMonthStart = calendar.date(from: comps) ?? reference
+        let lastMonthStart = calendar.date(byAdding: .month, value: -1, to: thisMonthStart) ?? thisMonthStart
+        let twoMonthsAgoStart = calendar.date(byAdding: .month, value: -2, to: thisMonthStart) ?? thisMonthStart
+        return [twoMonthsAgoStart, lastMonthStart, thisMonthStart]
+    }
+}
+
+private func zeroDataPoint(for date: Date) -> NutritionChartDataPoint {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd"
+    let dateString = formatter.string(from: date)
+    return NutritionChartDataPoint(
+        date: dateString,
+        calories: 0,
+        proteinG: 0,
+        fatG: 0,
+        carbsG: 0,
+        fiberG: 0,
+        sugarG: 0,
+        sodiumMg: 0,
+        mealCount: 0,
+        vitaminAMcg: 0,
+        vitaminCMg: 0,
+        vitaminDMcg: 0,
+        vitaminEMg: 0,
+        vitaminKMcg: 0,
+        vitaminB1Mg: 0,
+        vitaminB2Mg: 0,
+        vitaminB3Mg: 0,
+        vitaminB6Mg: 0,
+        vitaminB12Mcg: 0,
+        folateMcg: 0,
+        calciumMg: 0,
+        ironMg: 0,
+        magnesiumMg: 0,
+        phosphorusMg: 0,
+        potassiumMg: 0,
+        zincMg: 0,
+        copperMg: 0,
+        manganeseMg: 0,
+        seleniumMcg: 0
+    )
 }
 
 private struct TimePeriodSelector: View {

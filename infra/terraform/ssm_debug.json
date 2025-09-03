@@ -1,0 +1,12 @@
+{
+  "commands": [
+    "bash -lc 'cat /opt/zivohealth/.env || true'",
+    "bash -lc 'systemctl status zivohealth.service --no-pager || true'",
+    "bash -lc 'systemctl status zivohealth-deploy-watcher.timer --no-pager || true'",
+    "bash -lc 'docker ps -a || true'",
+    "bash -lc 'docker compose -f /opt/zivohealth/docker-compose.yml ps || true'",
+    "bash -lc 'docker compose -f /opt/zivohealth/docker-compose.yml logs --tail 200 api || true'",
+    "bash -lc 'docker compose -f /opt/zivohealth/docker-compose.yml logs --tail 200 worker || true'",
+    "bash -lc 'curl -sS -m 5 http://127.0.0.1/health || true'"
+  ]
+}

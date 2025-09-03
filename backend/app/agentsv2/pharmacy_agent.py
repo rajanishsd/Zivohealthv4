@@ -31,6 +31,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from app.core.config import settings
+from app.utils.timezone import now_local, isoformat_now
 from app.agentsv2.response_utils import format_agent_response, format_error_response
 
 # Import pharmacy configuration
@@ -356,7 +357,7 @@ class PharmacyAgentLangGraph:
     def log_execution_step(self, state: PharmacyAgentState, step_name: str, status: str, details: Dict = None):
         """Log execution step with context"""
         log_entry = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": isoformat_now(),
             "step": step_name,
             "status": status,
             "details": details or {}
@@ -689,8 +690,8 @@ class PharmacyAgentLangGraph:
         9. Extract exact text values as they appear on the bill""".format(
                 original_prompt=state.original_prompt,
                 user_id=state.user_id,
-                current_date=datetime.now().strftime("%Y-%m-%d"),
-                current_datetime=datetime.now().isoformat()
+                current_date=now_local().strftime("%Y-%m-%d"),
+                current_datetime=isoformat_now()
             )
             
             # Analyze image
@@ -946,8 +947,8 @@ class PharmacyAgentLangGraph:
         9. Extract exact text values as they appear on the bill""".format(
     original_prompt=state.original_prompt,
     user_id=state.user_id,
-    current_date=datetime.now().strftime("%Y-%m-%d"),
-    current_datetime=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    current_date=now_local().strftime("%Y-%m-%d"),
+                current_datetime=now_local().strftime("%Y-%m-%d %H:%M:%S")
 )
 
             
@@ -1024,7 +1025,7 @@ class PharmacyAgentLangGraph:
 
             # Prepare pharmacy bill record - handle nested JSON structure
             user_id = state.user_id
-            current_time = datetime.now().isoformat()
+            current_time = isoformat_now()
             
             pharmacy_info = pharmacy_data.get("pharmacy", {})
             bill_info = pharmacy_data.get("bill", {})
@@ -1480,7 +1481,7 @@ class PharmacyAgentLangGraph:
                 
                 # Convert 2-digit year to 4-digit year
                 if len(year) == 2:
-                    current_year = datetime.now().year
+                    current_year = now_local().year
                     current_century = current_year // 100
                     year_int = int(year)
                     

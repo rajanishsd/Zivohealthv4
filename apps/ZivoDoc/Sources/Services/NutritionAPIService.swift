@@ -8,7 +8,7 @@ class NutritionAPIService: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     
-    @AppStorage("apiEndpoint") private var apiEndpoint = "http://192.168.0.100:8000"
+    @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
     
     private var baseURL: String {
         return "\(apiEndpoint)/api/v1/nutrition"
@@ -24,25 +24,7 @@ class NutritionAPIService: ObservableObject {
     
     // MARK: - Authentication Headers
     private func getAuthHeaders() -> [String: String] {
-        var headers = [
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        ]
-        
-        // Add authentication token if available
-        let token = NetworkService.shared.getCurrentToken()
-        if !token.isEmpty {
-            headers["Authorization"] = "Bearer \(token)"
-            print("🔍 [NutritionAPIService] Using auth token (length: \(token.count))")
-        } else {
-            print("⚠️ [NutritionAPIService] No auth token available!")
-            // Trigger automatic demo authentication
-            Task {
-                await authenticateWithDemoCredentials()
-            }
-        }
-        
-        return headers
+        return NetworkService.shared.authHeaders(requiresAuth: true, body: nil)
     }
     
     // MARK: - Demo Authentication

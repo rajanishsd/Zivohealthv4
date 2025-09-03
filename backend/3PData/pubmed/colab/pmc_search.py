@@ -34,7 +34,7 @@ from transformers.modeling_utils import load_state_dict
 from safetensors.torch import save_file
 import os
 # Configuration
-DATABASE_URL = "postgresql://rajanishsd@localhost:5433/zivohealth"
+DATABASE_URL = "postgresql://rajanishsd@localhost:5432/zivohealth"
 COLLECTION_NAME = "pmc_tracked_docs"
 
 

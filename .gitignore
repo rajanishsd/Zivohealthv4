@@ -44,3 +44,20 @@ dump.rdb
 *.rdb
 
 
+
+# Terraform artifacts
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/*.tfvars
+infra/terraform/tfplan
+
+# Local dumps and generated secrets
+local_data.dump
+generated_api_keys.json
+backend/data/*.pid
+
+# Xcode user data
+**/xcuserdata/
+*.xcuserstate
+*.xcuserdatad

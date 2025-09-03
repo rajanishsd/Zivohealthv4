@@ -10,6 +10,7 @@ import logging
 import json
 import uuid
 from datetime import datetime, timezone
+from app.utils.timezone import now_local, isoformat_now
 from typing import Dict, Any, List, Optional
 from contextlib import contextmanager
 from dataclasses import dataclass, asdict
@@ -158,7 +159,7 @@ class AgentInteractionLogger:
         """Context manager for tracking individual requests"""
         request_id = str(uuid.uuid4())
         self.current_request_id = request_id
-        self.request_start_time = datetime.now()
+        self.request_start_time = now_local()
         
         try:
             self.log_info(
@@ -176,7 +177,7 @@ class AgentInteractionLogger:
             )
             yield request_id
         finally:
-            execution_time = (datetime.now() - self.request_start_time).total_seconds() * 1000
+            execution_time = (now_local() - self.request_start_time).total_seconds() * 1000
             self.log_info(
                 event_type=EventType.REQUEST_END,
                 agent_name="RequestManager",
@@ -304,7 +305,7 @@ class AgentInteractionLogger:
         entry = AgentLogEntry(
             session_id=self.current_session_id or "no-session",
             request_id=self.current_request_id or "no-request",
-            timestamp=datetime.now().isoformat(),
+            timestamp=isoformat_now(),
             event_type=event_type,
             agent_name=agent_name,
             log_level=log_level,
@@ -411,11 +412,11 @@ def log_agent_method(event_type: EventType):
     def decorator(func):
         def wrapper(self, *args, **kwargs):
             agent_name = self.__class__.__name__
-            start_time = datetime.now()
+            start_time = now_local()
             
             try:
                 result = func(self, *args, **kwargs)
-                execution_time = (datetime.now() - start_time).total_seconds() * 1000
+                execution_time = (now_local() - start_time).total_seconds() * 1000
                 
                 agent_logger.log_agent_processing(
                     agent_name=agent_name,

@@ -27,6 +27,7 @@ import uuid
 import re
 
 from contextvars import ContextVar
+from typing import Set
 from app.core.config import settings
 
 # LangSmith tracing imports
@@ -39,6 +40,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage, SystemMessage
 from app.agentsv2.response_utils import format_agent_response, format_error_response
+from app.utils.timezone import now_local
 
 # Context variables for passing state to tools  
 current_session_id: ContextVar[Optional[int]] = ContextVar('current_session_id', default=None)
@@ -48,6 +50,9 @@ current_user_id: ContextVar[Optional[str]] = ContextVar('current_user_id', defau
 user_response_events: Dict[str, asyncio.Event] = {}
 user_responses: Dict[str, str] = {}
 _lock = threading.Lock()
+
+# Track pending clarifying questions per session to prevent duplicate asks
+_pending_question_sessions: Set[int] = set()
 
 def get_or_create_event_loop():
     """Get the current event loop or create a new one"""
@@ -61,14 +66,9 @@ def get_or_create_event_loop():
 
 def extract_chat_title_and_content(response_content: str) -> tuple[Optional[str], str, Optional[str], Optional[List[dict]]]:
     """
-    Extract the chat title, content, reasoning, and visualizations from the LLM JSON response.
-    Expected format: {"title": "Brief title", "reasoning": "Tool selection reasoning", "content": "Response content", "visualizations": [...]}
-    
-    Args:
-        response_content (str): The full LLM response content
-        
-    Returns:
-        tuple[Optional[str], str, Optional[str], Optional[List[dict]]]: The extracted title, content, reasoning, and visualizations, or (None, original_content, None, None) if parsing fails
+    Extract the chat title, content, and reasoning from the LLM JSON response.
+    NOTE: Visualizations are NO LONGER parsed from LLM output here. They must come
+    from standardized agent response_data.results.visualizations downstream.
     """
     try:
         # Try to parse as JSON
@@ -92,29 +92,8 @@ def extract_chat_title_and_content(response_content: str) -> tuple[Optional[str]
                 reasoning = str(reasoning).strip()
                 reasoning = reasoning if reasoning else None
             
-            # Process visualizations if they exist
+            # Stop deriving visualizations from LLM JSON
             processed_visualizations = None
-            if visualizations and isinstance(visualizations, list):
-                processed_visualizations = []
-                for viz in visualizations:
-                    if isinstance(viz, dict):
-                        # Ensure all required fields are present
-                        filename = viz.get("filename", "")
-                        viz_data = {
-                            "id": f"viz_{uuid.uuid4().hex[:8]}",
-                            "type": "chart",
-                            "title": viz.get("title", "Visualization"),
-                            "description": viz.get("description", "Generated visualization"),
-                            "filename": filename,
-                            "file_path": viz.get("path", ""),
-                            "relative_url": f"/files/plots/{filename}" if filename else "",
-                            "key_findings": viz.get("key_findings", "")
-                        }
-                        processed_visualizations.append(viz_data)
-                        print(f"🔍 [DEBUG] Extracted visualization from response: {viz_data['title']} -> {viz_data['relative_url']}")
-                
-                if processed_visualizations:
-                    print(f"🔍 [DEBUG] Total visualizations extracted from response: {len(processed_visualizations)}")
             
             # Ensure content is always a string
             if isinstance(content, dict):
@@ -184,6 +163,8 @@ class CustomerState(TypedDict):
     extracted_text: str
     document_type: Optional[str]  # Document type from document workflow
     source_file_path: Optional[str]  # Source file path for document processing
+    image_path: Optional[str]  # If uploaded file is an image, store path here
+    image_base64: Optional[str]  # Optional base64 for images if provided
     session_id: Optional[int]  # Add session_id to track chat session
     conversation_history: List[Dict[str, Any]]
     intent_classification: Optional[IntentClassification]
@@ -212,6 +193,12 @@ async def ask_user_question(question: str, session_id: Optional[int], user_id: s
         return f"I need more context to ask this question: {question}"
 
     try:
+        # Ensure only one clarifying question is in-flight per session
+        with _lock:
+            if session_id in _pending_question_sessions:
+                return "I'm waiting for your answer to the previous question."
+            _pending_question_sessions.add(session_id)
+
         # Persist and notify via centralized chat session helper (single writer)
         try:
             from app.api.v1.endpoints.chat_sessions import ask_user_question_and_wait
@@ -221,7 +208,10 @@ async def ask_user_question(question: str, session_id: Optional[int], user_id: s
         except Exception:
             pass
     finally:
-        pass
+        # Clear pending flag so future questions can proceed after this completes or fails
+        with _lock:
+            if session_id in _pending_question_sessions:
+                _pending_question_sessions.discard(session_id)
 
 def set_user_response(response_key: str, response: str):
     """Set the user response for a pending question"""
@@ -287,10 +277,47 @@ async def assess_user_intent(state: CustomerState) -> CustomerState:
         
         # Get file information if available
         uploaded_file = state.get("uploaded_file")
+        
         print(f"🔍 [DEBUG] assess_user_intent - uploaded_file from state: {uploaded_file}")
         file_info = ""
         if uploaded_file:
-            file_info = f"""
+            try:
+                file_path_val = uploaded_file.get('file_path')
+                file_type_val = str(uploaded_file.get('file_type', '')).lower()
+                is_image = file_type_val in ['jpg', 'jpeg', 'png']
+                # Update state for downstream tools using a single path + flag
+                state["source_file_path"] = file_path_val
+                state["is_image"] = is_image
+                # Also pass temp path for local processing, when available
+                temp_val = uploaded_file.get('temp_path')
+                if temp_val:
+                    state["temp_processing_path"] = temp_val
+
+                # Populate base64 for images (use temp path if available)
+                try:
+                    if is_image and not state.get("image_base64"):
+                        import base64
+                        # Prefer temp path; else resolve to local from stored URL
+                        local_path = temp_val or file_path_val
+                        if not temp_val:
+                            try:
+                                from app.services.file_storage import ensure_local_processing_path
+                                local_path = ensure_local_processing_path(file_path_val)
+                            except Exception:
+                                local_path = file_path_val
+                        with open(local_path, "rb") as img_f:
+                            state["image_base64"] = base64.b64encode(img_f.read()).decode("utf-8")
+                except Exception:
+                    pass
+                file_info = f"""
+        FILE PROVIDED:
+        - File name: {uploaded_file.get('original_name', 'Unknown')}
+        - File type: {uploaded_file.get('file_type', 'Unknown')}
+        - File path (stored): {file_path_val}
+        - Is image: {is_image}
+        """
+            except Exception:
+                file_info = f"""
         FILE PROVIDED:
         - File name: {uploaded_file.get('original_name', 'Unknown')}
         - File type: {uploaded_file.get('file_type', 'Unknown')}
@@ -299,7 +326,7 @@ async def assess_user_intent(state: CustomerState) -> CustomerState:
             
         # Add time context for meal-related requests
         from datetime import datetime
-        current_time = datetime.now()
+        current_time = now_local()
   
         
        
@@ -354,6 +381,7 @@ async def assess_user_intent(state: CustomerState) -> CustomerState:
         DONOT ASK ANY FURTHER QUESTIONS:
         - if file is provided without any request then complete the assessment as "final_user_input": "user want to upload the file to update health records" and dont ask any further questions.
         - if user request message is there along with file then dont ask any further questions.
+        - also you already have access to users complete health records, so dont ask for any further information on health records.
 
         CONTEXT AWARENESS:
         - Consider the conversation history provided above to understand references to previous topics
@@ -575,6 +603,22 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
     session_id = state.get("session_id")
     uploaded_file = state.get("uploaded_file")
     
+    # Helper to compose effective prompt by combining tool's prompt with assessed user input
+    def _compose_effective_prompt(local_prompt: str) -> str:
+        base = (local_prompt or "").strip()
+        # Strip any OCR-style artifacts like "Image analyzed: ..." to avoid misleading the agent
+        try:
+            base = re.sub(r"(?im)^\s*Image analyzed:.*$", "", base).strip()
+        except Exception:
+            pass
+        assessed = (state.get("user_input") or "").strip()
+        if assessed and base:
+            # Avoid duplication if assessed text is already included
+            if assessed.lower() in base.lower():
+                return base
+            return f"{base}\n\nUser input: {assessed}".strip()
+        return assessed or base
+
     # Create agent tool functions
     @tool
     async def ask_clarifying_question(question: str, reasoning: str) -> str:
@@ -623,22 +667,21 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         final_source_file_path = state.get("source_file_path", "")
         final_image_base64 = state.get("image_base64", None)
         
-        # Get image path from uploaded file if available
-        final_image_path = None
-        uploaded_file = state.get("uploaded_file")
-        if uploaded_file is not None:
-            final_image_path = uploaded_file.get("file_path")
+        # Get image path from uploaded file if available (prefer temp_path if present)
+        final_image_path = state.get("file_path", None) if state.get("is_image") else None
         
         from app.agentsv2.vitals_agent import VitalsAgentLangGraph
         agent = VitalsAgentLangGraph()
-        return await agent.run(prompt_with_user_input, user_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
+        # Combine tool-specified prompt with assessed user input, de-duplicating
+        effective_prompt = _compose_effective_prompt(prompt_with_user_input)
+        return await agent.run(effective_prompt, user_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
     
     @tool
     async def nutrition_agent_tool(prompt_with_user_input: str) -> dict:
         """Handle nutrition data operations (food intake, calorie tracking, meal logging, dietary analysis).
         
         SUPPORTED OPERATIONS:
-        1. UPDATE: "update my nutrition data: [user input]" - Log meals, food intake, and nutrition information
+        1. UPDATE: "update my nutrition or meals or breakfast or snack data: [user input]" - Log meals, food intake, and nutrition information
         2. RETRIEVE: "retrieve my nutrition data: [user input]" - Get historical nutrition data, meal logs, and calorie tracking
         3. ANALYZE & RECOMMENDATIONS: "analyze my nutrition: [user input]" - Analyze dietary patterns, nutritional balance, and provide dietary recommendations. dont split the user request into multiple tool calls for analysis and recommendations
         
@@ -668,15 +711,14 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         final_source_file_path = state.get("source_file_path", "")
         final_image_base64 = state.get("image_base64", None)
         
-        # Get image path from uploaded file if available
-        final_image_path = None
-        uploaded_file = state.get("uploaded_file")
-        if uploaded_file is not None:
-            final_image_path = uploaded_file.get("file_path")
+        # Get image path from uploaded file if available (prefer temp_path if present)
+        final_image_path = state.get("file_path", None) if state.get("is_image") else None
         
         from app.agentsv2.nutrition_agent import NutritionAgentLangGraph
         agent = NutritionAgentLangGraph()
-        return await agent.run(prompt_with_user_input, user_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
+        # Combine tool-specified prompt with assessed user input, de-duplicating
+        effective_prompt = _compose_effective_prompt(prompt_with_user_input)
+        return await agent.run(effective_prompt, user_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
     
     @tool
     async def pharmacy_agent_tool(prompt_with_user_input: str) -> dict:
@@ -712,15 +754,14 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         final_source_file_path = state.get("source_file_path", "")
         final_image_base64 = state.get("image_base64", None)
         
-        # Get image path from uploaded file if available
-        final_image_path = None
-        uploaded_file = state.get("uploaded_file")
-        if uploaded_file is not None:
-            final_image_path = uploaded_file.get("file_path")
+        # Get image path from uploaded file if available (prefer temp_path if present)
+        final_image_path = state.get("file_path", None) if state.get("is_image") else None
         
         from app.agentsv2.pharmacy_agent import PharmacyAgentLangGraph
         agent = PharmacyAgentLangGraph()
-        return await agent.run(prompt_with_user_input, user_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
+        # Combine tool-specified prompt with assessed user input, de-duplicating
+        effective_prompt = _compose_effective_prompt(prompt_with_user_input)
+        return await agent.run(effective_prompt, user_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
     
     @tool
     async def lab_agent_tool(prompt_with_user_input: str) -> dict:
@@ -756,15 +797,14 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         final_source_file_path = state.get("source_file_path", "")
         final_image_base64 = state.get("image_base64", None)
         
-        # Get image path from uploaded file if available
-        final_image_path = None
-        uploaded_file = state.get("uploaded_file")
-        if uploaded_file is not None:
-            final_image_path = uploaded_file.get("file_path")
+        # Get image path from uploaded file if available (prefer temp_path if present)
+        final_image_path = state.get("file_path", None) if state.get("is_image") else None
         
         from app.agentsv2.lab_agent import LabAgentLangGraph
         agent = LabAgentLangGraph()
-        result = await agent.run(prompt_with_user_input, user_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
+        # Combine tool-specified prompt with assessed user input, de-duplicating
+        effective_prompt = _compose_effective_prompt(prompt_with_user_input)
+        result = await agent.run(effective_prompt, user_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
         
         # Debug: Log what the lab agent returns to the LangChain agent
         print(f"🔍 [DEBUG] lab_agent_tool returning to LangChain agent:")
@@ -811,15 +851,14 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         final_source_file_path = state.get("source_file_path", "")
         final_image_base64 = state.get("image_base64", None)
         
-        # Get image path from uploaded file if available
-        final_image_path = None
-        uploaded_file = state.get("uploaded_file")
-        if uploaded_file is not None:
-            final_image_path = uploaded_file.get("file_path")
+        # Get image path from state if available (images only)
+        final_image_path = state.get("file_path", None) if state.get("is_image") else None
         
         from app.agentsv2.prescription_clinical_agent import PrescriptionClinicalAgentLangGraph
         agent = PrescriptionClinicalAgentLangGraph()
-        return await agent.process_request(prompt_with_user_input, user_id, session_id, final_image_path, final_image_base64, final_extracted_text, final_source_file_path)
+        # Combine tool-specified prompt with assessed user input, de-duplicating
+        effective_prompt = _compose_effective_prompt(prompt_with_user_input)
+        return await agent.process_request(effective_prompt, user_id, session_id, final_image_path, final_image_base64, final_extracted_text, final_source_file_path)
     
     @tool
     async def medical_doctor_agent_tool(patient_case: str, budget_limit: float = None) -> dict:
@@ -857,7 +896,7 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
             from app.agentsv2.medical_doctor_panels import MedicalDoctorPanel
             try:
                 panel = MedicalDoctorPanel(api_key=settings.OPENAI_API_KEY, budget_limit=budget_limit)
-                return panel.process_patient_case(patient_case, budget_limit)
+                return await panel.process_patient_case_async(patient_case, budget_limit)
             except Exception as inner_e:
                 return {"action": "error", "details": str(inner_e)}
     
@@ -883,7 +922,15 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
             Dict containing document processing results with clear guidance for next steps
         """
         from app.agentsv2.document_workflow import process_file_async
-        result = await process_file_async(user_id, file_path, analysis_only)
+       # Get all required values from state
+        final_source_file_path = state.get("source_file_path", "")
+        final_image_base64 = state.get("image_base64", None)
+        
+        # Get image path from state if available (images only)
+        final_image_path = state.get("file_path", None) if state.get("is_image") else None
+        file_name =state["uploaded_file"].get("original_name")
+        file_type = state["uploaded_file"].get("file_type")
+        result = await process_file_async(user_id, file_name, file_type, final_image_path, final_image_base64, final_source_file_path,  analysis_only)
         
         # Extract key information from the result
         analysis_result = result.get("analysis_result", {})
@@ -894,7 +941,19 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         # Store extracted text in state for other tools to use
         state["extracted_text"] = extracted_text
         state["document_type"] = document_type
-        state["source_file_path"] = file_path
+        # Persisted path should be the durable reference (S3 URI if enabled); prefer uploaded file_path from state
+        persisted_path = None
+        try:
+            if state.get("uploaded_file"):
+                persisted_path = state["uploaded_file"].get("file_path") or file_path
+        except Exception:
+            persisted_path = file_path
+        state["source_file_path"] = persisted_path
+        try:
+            ext = (Path(persisted_path).suffix or "").lower()
+            state["is_image"] = ext in [".jpg", ".jpeg", ".png"]
+        except Exception:
+            pass
         
         # Create enhanced result with clear next steps guidance
         enhanced_result = result.copy()
@@ -902,7 +961,7 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
             "document_type": document_type,
             "confidence": confidence,
             "extracted_text": extracted_text,
-            "source_file_path": file_path,
+            "source_file_path": persisted_path,
             "recommended_agent": _get_recommended_agent_for_document_type(document_type),
             "agent_prompt": f"Process this {document_type} document for user {user_id}. The extracted text and file information are provided."
         }
@@ -1004,7 +1063,7 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
                - document_type (e.g., "Lab Report", "Clinical Notes", "Prescription")
                - recommended_agent (e.g., "lab_agent_tool", "prescription_clinical_agent_tool")
                - extracted_text and source_file_path
-            Step 3: Call the recommended agent tool with appropriate parameters
+            Step 3: Call the recommended agent tool based on the user input ONLY and don't change the user input to the tool, use it as it is and pass the same input to the tool. Never pass OCR/extracted text (e.g., strings like "Image analyzed: ...") as tool input.
             Step 4: The agent tools will automatically use the extracted_text and source_file_path from the previous step
 
             EXECUTION APPROACH:
@@ -1034,7 +1093,7 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
                     {{
                         "title": "Chart Title",
                         "filename": "chart_file.png", 
-                        "path": "data/plots/chart_file.png",
+                        "path": get the path from the tool result,
                         "description": "Description of what this visualization shows"
                     }}
                 ]
@@ -1113,10 +1172,34 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         existing_agent_results = state.get("agent_results", {})
         existing_agent_results["execution_result"] = cleaned_content
         
-        # Store extracted visualizations if any
-        if extracted_visualizations:
-            existing_agent_results["visualizations"] = extracted_visualizations
-            print(f"🔍 [DEBUG] Stored {len(extracted_visualizations)} visualizations in agent_results")
+        # Parse the LLM JSON response to extract visualizations
+        try:
+            import json
+            # Try to parse the response as JSON to extract visualizations
+            json_start = response_content.find('{')
+            json_end = response_content.rfind('}') + 1
+            if json_start >= 0 and json_end > json_start:
+                json_str = response_content[json_start:json_end]
+                llm_response = json.loads(json_str)
+                
+                print(f"🔍 [DEBUG] LLM JSON keys: {list(llm_response.keys()) if isinstance(llm_response, dict) else 'Not a dict'}")
+                
+                # Extract visualizations from the LLM JSON
+                if isinstance(llm_response, dict) and "visualizations" in llm_response:
+                    llm_visualizations = llm_response["visualizations"]
+                    print(f"🔍 [DEBUG] Found visualizations in LLM JSON: {len(llm_visualizations) if isinstance(llm_visualizations, list) else 'Not a list'}")
+                    if isinstance(llm_visualizations, list) and llm_visualizations:
+                        existing_agent_results["visualizations"] = llm_visualizations
+                        print(f"🔍 [DEBUG] Stored {len(llm_visualizations)} visualizations from LLM JSON")
+                        for i, viz in enumerate(llm_visualizations):
+                            print(f"🔍 [DEBUG] Viz {i}: {viz.get('title', 'No title')} - {viz.get('filename', 'No filename')}")
+                    else:
+                        print(f"🔍 [DEBUG] LLM visualizations is empty or not a list")
+                else:
+                    print(f"🔍 [DEBUG] No visualizations key found in LLM JSON")
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"⚠️ [DEBUG] Could not parse LLM JSON for visualizations: {e}")
+            print(f"⚠️ [DEBUG] Raw response content: {response_content[:500]}")
         
         state["agent_results"] = existing_agent_results
         
@@ -1165,12 +1248,31 @@ def synthesize_final_response(state: CustomerState) -> CustomerState:
                 results["execution_plan"] = state["execution_plan"]
             
 
-            # Extract visualizations from agent_results for debugging
-            agent_visualizations = agent_results.get('visualizations', []) if agent_results else []
-            print(f"🔍 [DEBUG] Customer workflow - Visualizations: {len(agent_visualizations)} found in agent_results")
+            # Extract visualizations from agent_results and put in results (same as individual agents)
+            agent_visualizations = []
+            if agent_results:
+                # Check if visualizations are stored directly in agent_results (from LLM JSON parsing)
+                if "visualizations" in agent_results and isinstance(agent_results["visualizations"], list):
+                    agent_visualizations.extend(agent_results["visualizations"])
+                    print(f"🔍 [DEBUG] Customer workflow - Found {len(agent_results['visualizations'])} visualizations in agent_results")
+                
+                # Also check nested agent results for any additional visualizations
+                for agent_key, agent_data in agent_results.items():
+                    if isinstance(agent_data, dict) and "visualizations" in agent_data:
+                        agent_visualizations.extend(agent_data["visualizations"])
+                        print(f"🔍 [DEBUG] Customer workflow - Found {len(agent_data['visualizations'])} visualizations in {agent_key}")
+            
+            if agent_visualizations:
+                results["visualizations"] = agent_visualizations
+                print(f"🔍 [DEBUG] Customer workflow - Added {len(agent_visualizations)} visualizations to results")
             
             # Determine task types from agent results
             task_types = list(agent_results.keys()) if agent_results else ["customer_request"]
+            
+            # Debug logging before calling format_agent_response
+            print(f"🔍 [DEBUG] synthesize_final_response - results keys: {list(results.keys())}")
+            if "visualizations" in results:
+                print(f"🔍 [DEBUG] synthesize_final_response - results.visualizations: {len(results['visualizations'])} items")
             
             # Use standardized response formatter with consistent title field
             state["response_data"] = format_agent_response(
@@ -1182,6 +1284,12 @@ def synthesize_final_response(state: CustomerState) -> CustomerState:
                 title=state.get("generated_title", "Chat"),
                 error=state.get("error") if state.get("error") else None
             )
+            
+            # Debug logging after format_agent_response
+            response_data = state["response_data"]
+            print(f"🔍 [DEBUG] synthesize_final_response - response_data keys: {list(response_data.keys())}")
+            if "visualizations" in response_data:
+                print(f"🔍 [DEBUG] synthesize_final_response - response_data.visualizations: {len(response_data['visualizations'])} items")
             
             print(f"✅ [DEBUG] Customer workflow created standardized response_data")
             return state

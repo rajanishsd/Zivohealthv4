@@ -13,7 +13,7 @@ load_dotenv()
 
 # Database Configuration
 DATABASE_HOST = os.getenv('POSTGRES_SERVER', 'localhost')
-DATABASE_PORT = int(os.getenv('POSTGRES_PORT', '5433'))
+DATABASE_PORT = int(os.getenv('POSTGRES_PORT', '5432'))
 DATABASE_USER = os.getenv('POSTGRES_USER', 'rajanishsd')
 DATABASE_PASSWORD = os.getenv('POSTGRES_PASSWORD', '')
 DATABASE_NAME = os.getenv('POSTGRES_DB', 'zivohealth')

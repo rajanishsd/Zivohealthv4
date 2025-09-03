@@ -14,7 +14,7 @@ from app.crud.nutrition import nutrition_data as NutritionCRUD
 from app.models.vitals_data import VitalsRawData
 from app.models.nutrition_data import NutritionRawData
 from app.core.config import settings
-
+from app.utils.timezone import now_local
 # Configure logging for worker process
 logging.basicConfig(
     level=logging.INFO,
@@ -27,11 +27,14 @@ class SmartDelayedAggregationWorker:
     Smart delayed aggregation worker designed for separate process execution
     """
     
-    def __init__(self, batch_size: int = None, delay_seconds: int = 30):
+    def __init__(self, batch_size: int = None, delay_seconds: int = 30, allowed_domains: set = None):
         # Configuration - smaller batch sizes to prevent connection exhaustion
         self.batch_size = batch_size or 100  # Reduced from default to 100
         self.delay_seconds = delay_seconds
         self.max_batch_size = 500  # Hard limit to prevent connection pool exhaustion
+        
+        # Optional domain filtering: {'vitals', 'nutrition', 'labs'} or None for all
+        self.allowed_domains = set(allowed_domains) if allowed_domains else None
         
         # Worker state
         self.running = False
@@ -45,8 +48,14 @@ class SmartDelayedAggregationWorker:
             logger.warning(f"Batch size {self.batch_size} exceeds safe limit, reducing to {self.max_batch_size}")
             self.batch_size = self.max_batch_size
 
-    async def trigger_delayed_aggregation(self, user_id: int = None):
-        """Trigger smart delayed aggregation - waits for data chunks to stop"""
+    async def trigger_delayed_aggregation(self, user_id: int = None, domains: list = None):
+        """Trigger smart delayed aggregation - waits for data chunks to stop.
+        If domains provided, restrict processing to those domains for this run.
+        """
+        
+        # Update domain restriction for this cycle if provided
+        if domains is not None:
+            self.allowed_domains = set(domains)
         
         # Cancel existing timer if running
         if self.pending_timer_task and not self.pending_timer_task.done():
@@ -68,12 +77,21 @@ class SmartDelayedAggregationWorker:
             # If we reach here, no new data arrived during delay period
             logger.info(f"🚀 [SmartWorker] Delay period complete - starting aggregation")
             
-            # Start processing in separate task to avoid blocking
-            asyncio.create_task(self.process_all_pending_data())
+            # Check if worker is already running before starting
+            if self.running:
+                logger.info(f"⚠️ [SmartWorker] Worker already running from previous trigger - skipping")
+                return
+            
+            # Start processing in the same event loop to avoid conflicts
+            await self.process_all_pending_data()
             
         except asyncio.CancelledError:
             logger.info(f"⏰ [SmartWorker] Timer cancelled - new data arrived, resetting delay")
             raise
+        except Exception as e:
+            logger.error(f"❌ [SmartWorker] Error in delayed aggregation timer: {e}")
+            # Reset running state in case of error
+            self.running = False
 
     async def process_all_pending_data(self):
         """Process ALL pending data in small batches with proper connection cleanup"""
@@ -82,16 +100,34 @@ class SmartDelayedAggregationWorker:
             return 0
             
         self.running = True
-        self.start_time = datetime.now()
+        self.start_time = now_local()
         
         logger.info("🚀 [SmartWorker] Starting delayed aggregation - will process until completion")
         
         total_cycles = 0
+        max_cycles = 1000  # Prevent infinite loops
+        max_duration = 300  # 5 minutes max runtime
         
         try:
             while self.running:
+                # Check for timeout
+                duration = (now_local() - self.start_time).total_seconds()
+                if duration > max_duration:
+                    logger.warning(f"⏰ [SmartWorker] Max duration ({max_duration}s) reached - stopping")
+                    break
+                
+                # Check for max cycles
+                if total_cycles >= max_cycles:
+                    logger.warning(f"⏰ [SmartWorker] Max cycles ({max_cycles}) reached - stopping")
+                    break
+                
                 # Process one small batch with fresh connection
-                processed_count = await self.process_batch()
+                try:
+                    processed_count = await self.process_batch()
+                except Exception as e:
+                    logger.error(f"❌ [SmartWorker] Error processing batch: {e}")
+                    # Continue with next batch instead of failing completely
+                    processed_count = 0
                 
                 if processed_count == 0:
                     # No more data to process - mission complete!
@@ -110,7 +146,7 @@ class SmartDelayedAggregationWorker:
                 await asyncio.sleep(0.1)
             
             # Final statistics
-            duration = (datetime.now() - self.start_time).total_seconds()
+            duration = (now_local() - self.start_time).total_seconds()
             throughput = self.total_processed / duration if duration > 0 else 0
             
             logger.info(f"🎉 [SmartWorker] Job completed successfully!")
@@ -118,6 +154,9 @@ class SmartDelayedAggregationWorker:
             
             return self.total_processed
             
+        except Exception as e:
+            logger.error(f"❌ [SmartWorker] Critical error in process_all_pending_data: {e}")
+            return 0
         finally:
             self.running = False
 
@@ -125,13 +164,18 @@ class SmartDelayedAggregationWorker:
         """Process a batch of pending aggregation data"""
         db = SessionLocal()
         try:
-            # Get pending entries for all systems
-            vitals_entries = VitalsCRUD.get_pending_aggregation_entries(db, limit=self.batch_size)
-            # Get nutrition entries - use consistent method name
-            nutrition_entries = NutritionCRUD.get_pending_aggregation_entries(db, limit=self.batch_size)
-            # Get lab reports that need categorization
-            from app.crud.lab_categorization import lab_categorization
-            lab_entries = lab_categorization.get_pending_categorization_entries(db, limit=self.batch_size)
+            # Get pending entries for requested systems only
+            vitals_entries = []
+            nutrition_entries = []
+            lab_entries = []
+
+            if self.allowed_domains is None or 'vitals' in self.allowed_domains:
+                vitals_entries = VitalsCRUD.get_pending_aggregation_entries(db, limit=self.batch_size)
+            if self.allowed_domains is None or 'nutrition' in self.allowed_domains:
+                nutrition_entries = NutritionCRUD.get_pending_aggregation_entries(db, limit=self.batch_size)
+            if self.allowed_domains is None or 'labs' in self.allowed_domains:
+                from app.crud.lab_categorization import lab_categorization
+                lab_entries = lab_categorization.get_pending_categorization_entries(db, limit=self.batch_size)
             
             # Combine all types for processing
             total_entries = len(vitals_entries) + len(nutrition_entries) + len(lab_entries)
@@ -227,7 +271,7 @@ class SmartDelayedAggregationWorker:
                 # Mark entries as completed (done inside the aggregation methods)
                 processed_count += len(group_entries)
                 
-                logger.debug(f"✅ [SmartWorker] Completed nutrition aggregation for user {user_id} on {target_date}")
+                logger.info(f"✅ [SmartWorker] Completed nutrition aggregation for user {user_id} on {target_date}")
                 
             except Exception as e:
                 logger.error(f"❌ [SmartWorker] Nutrition aggregation failed for user {user_id} on {target_date}: {e}")
@@ -279,7 +323,7 @@ class SmartDelayedAggregationWorker:
         # Aggregate monthly data
         monthly_count = NutritionCRUD.aggregate_monthly_data(db, user_id, target_date.year, target_date.month)
         
-        logger.debug(f"📊 [SmartWorker] Created {daily_count} daily, {weekly_count} weekly, {monthly_count} monthly nutrition aggregates")
+        logger.info(f"📊 [SmartWorker] Created {daily_count} daily, {weekly_count} weekly, {monthly_count} monthly nutrition aggregates")
 
     async def _perform_lab_categorization_and_aggregation(self, db: Session):
         """Perform lab categorization and aggregation for lab reports"""
@@ -327,16 +371,28 @@ class SmartDelayedAggregationWorker:
         if self.pending_timer_task and not self.pending_timer_task.done():
             self.pending_timer_task.cancel()
         logger.info("🛑 [SmartWorker] Stop requested")
+    
+    def force_reset(self):
+        """Force reset worker state - emergency recovery"""
+        self.running = False
+        if self.pending_timer_task and not self.pending_timer_task.done():
+            self.pending_timer_task.cancel()
+        self.start_time = None
+        self.total_processed = 0
+        self.batches_processed = 0
+        logger.info("🔄 [SmartWorker] Force reset completed")
 
 # Global worker instance for coordination
 _global_worker = SmartDelayedAggregationWorker()
 
 # Smart delayed functions
-async def trigger_smart_aggregation(user_id: int = None, delay_seconds: int = 30):
-    """Trigger smart delayed aggregation - waits for data chunks to stop"""
+async def trigger_smart_aggregation(user_id: int = None, delay_seconds: int = 30, domains: list = None):
+    """Trigger smart delayed aggregation - waits for data chunks to stop.
+    Optionally restrict to specific domains: ['vitals'|'nutrition'|'labs']
+    """
     global _global_worker
     _global_worker.delay_seconds = delay_seconds
-    await _global_worker.trigger_delayed_aggregation(user_id)
+    await _global_worker.trigger_delayed_aggregation(user_id, domains)
 
 async def process_all_pending_aggregation():
     """Process all pending aggregation data immediately (for startup)"""
@@ -376,7 +432,8 @@ def get_worker() -> SmartDelayedAggregationWorker:
 
 def reset_worker():
     """Reset worker"""
-    pass
+    global _global_worker
+    _global_worker.force_reset()
 
 async def start_background_worker():
     """Start smart delayed processing"""
@@ -387,29 +444,47 @@ def stop_background_worker():
     pass
 
 # Separate process worker entry point
-async def run_worker_process():
-    """Entry point for running worker as separate process - Auto-Exit when done"""
+async def run_worker_process(domains: list = None):
+    """Entry point for running worker as separate process - Auto-Exit when done.
+    Optionally restrict to specific domains.
+    """
     logger.info("🚀 [WorkerProcess] Starting background aggregation worker")
     
     # Check if there's any work to do first - check BOTH vitals and nutrition
     db = SessionLocal()
     try:
-        vitals_pending = len(VitalsCRUD.get_pending_aggregation_entries(db, limit=1))
-        nutrition_pending = len(NutritionCRUD.get_pending_aggregation_entries(db, limit=1))
-        total_initial_pending = vitals_pending + nutrition_pending
+        vitals_pending = 0
+        nutrition_pending = 0
+        labs_pending = 0
+        if domains is None or 'vitals' in (set(domains)):
+            vitals_pending = len(VitalsCRUD.get_pending_aggregation_entries(db, limit=1))
+        if domains is None or 'nutrition' in (set(domains)):
+            nutrition_pending = len(NutritionCRUD.get_pending_aggregation_entries(db, limit=1))
+        if domains is None or 'labs' in (set(domains)):
+            from app.crud.lab_categorization import lab_categorization
+            labs_pending = len(lab_categorization.get_pending_categorization_entries(db, limit=1))
+        total_initial_pending = vitals_pending + nutrition_pending + labs_pending
         
         if total_initial_pending == 0:
             logger.info("✅ [WorkerProcess] No pending work found - exiting immediately")
             return 0
         
         # Get total counts for logging
-        total_vitals_pending = len(VitalsCRUD.get_pending_aggregation_entries(db, limit=100000))
-        total_nutrition_pending = len(NutritionCRUD.get_pending_aggregation_entries(db, limit=100000))
-        logger.info(f"📊 [WorkerProcess] Found {total_vitals_pending:,} vitals + {total_nutrition_pending:,} nutrition = {total_vitals_pending + total_nutrition_pending:,} total pending entries")
+        total_vitals_pending = 0
+        total_nutrition_pending = 0
+        total_labs_pending = 0
+        if domains is None or 'vitals' in (set(domains)):
+            total_vitals_pending = len(VitalsCRUD.get_pending_aggregation_entries(db, limit=100000))
+        if domains is None or 'nutrition' in (set(domains)):
+            total_nutrition_pending = len(NutritionCRUD.get_pending_aggregation_entries(db, limit=100000))
+        if domains is None or 'labs' in (set(domains)):
+            from app.crud.lab_categorization import lab_categorization
+            total_labs_pending = len(lab_categorization.get_pending_categorization_entries(db, limit=100000))
+        logger.info(f"📊 [WorkerProcess] Found {total_vitals_pending:,} vitals + {total_nutrition_pending:,} nutrition + {total_labs_pending:,} labs = {total_vitals_pending + total_nutrition_pending + total_labs_pending:,} total pending entries")
     finally:
         db.close()
     
-    worker = SmartDelayedAggregationWorker(batch_size=100)  # Small batches for separate process
+    worker = SmartDelayedAggregationWorker(batch_size=100, allowed_domains=set(domains) if domains else None)  # Small batches for separate process
     
     try:
         # Process all pending data until queue is empty
@@ -430,4 +505,4 @@ async def run_worker_process():
 
 if __name__ == "__main__":
     """Run as separate process"""
-    asyncio.run(run_worker_process()) 
+    asyncio.run(run_worker_process())

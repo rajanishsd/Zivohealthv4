@@ -3,6 +3,7 @@ import sys
 from typing import List, Optional, Dict, Any, Literal
 from dataclasses import dataclass, field
 from datetime import datetime
+import asyncio
 import json
 import base64
 
@@ -33,6 +34,7 @@ from app.agentsv2.lab_analyze_workflow import LabAnalyzeWorkflow
 from app.agentsv2.response_utils import format_agent_response, format_error_response
 from langchain.callbacks.tracers import LangChainTracer
 import os
+from app.core.background_worker import trigger_smart_aggregation
 
 load_dotenv()
 
@@ -361,8 +363,9 @@ class LabAgentLangGraph:
     
     def log_execution_step(self, state: LabAgentState, step_name: str, status: str, details: Dict = None):
         """Log execution step with context"""
+        from app.utils.timezone import isoformat_now
         log_entry = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": isoformat_now(),
             "step": step_name,
             "status": status,
             "details": details or {}
@@ -760,6 +763,14 @@ class LabAgentLangGraph:
             # 4. Store results
             state.update_results = batch_result
             self.log_execution_step(state, "update_lab_records", "completed", {"batch_result": batch_result})
+
+            # 5. Trigger smart aggregation for labs asynchronously (delayed batch processor)
+            try:
+                # Fire-and-forget: schedule aggregation just for labs domain
+                asyncio.create_task(trigger_smart_aggregation(user_id=user_id, domains=["labs"]))
+            except Exception as agg_e:
+                # Non-fatal: log but do not fail the update step
+                print(f"⚠️ [LabAgent] Failed to trigger smart aggregation: {agg_e}")
         except Exception as e:
             state.has_error = True
             state.error_context = {
@@ -1304,6 +1315,11 @@ class LabAgentLangGraph:
             conn.commit()
             cursor.close()
             conn.close()
+            # Trigger coalesced labs aggregation (fire-and-forget)
+            try:
+                asyncio.create_task(trigger_smart_aggregation(user_id=cleaned_result.get('user_id'), domains=["labs"]))
+            except Exception:
+                pass
             return result
             
         except Exception as e:

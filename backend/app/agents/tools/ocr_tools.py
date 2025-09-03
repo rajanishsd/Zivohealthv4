@@ -14,7 +14,7 @@ from PIL import Image
 from langchain.tools import Tool
 from pathlib import Path
 import tempfile
-
+from app.utils.timezone import now_local, isoformat_now
 # Import configuration
 from app.core.config import settings
 
@@ -474,14 +474,14 @@ class OCRToolkit:
             os.makedirs(aws_responses_dir, exist_ok=True)
             
             # Create filename with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = now_local().strftime("%Y%m%d_%H%M%S")
             filename = f"textract_response_{job_id}_{timestamp}.json"
             file_path = os.path.join(aws_responses_dir, filename)
             
             # Prepare response data for storage
             response_data = {
                 "job_id": job_id,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": isoformat_now(),
                 "page_count": page_count,
                 "total_responses": len(all_responses),
                 "responses": all_responses

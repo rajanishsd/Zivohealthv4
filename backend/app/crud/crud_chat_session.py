@@ -11,6 +11,7 @@ from app.schemas.chat_session import (
     ChatMessageCreate, ChatMessageUpdate,
     PrescriptionCreate, PrescriptionUpdate
 )
+from app.utils.timezone import now_local
 
 
 class CRUDChatSession(CRUDBase[ChatSession, ChatSessionCreate, ChatSessionUpdate]):
@@ -26,7 +27,7 @@ class CRUDChatSession(CRUDBase[ChatSession, ChatSessionCreate, ChatSessionUpdate
         obj_in_data.setdefault("message_count", 0)
         
         # Set timestamps explicitly (database defaults will handle this, but being explicit)
-        now = datetime.now()
+        now = now_local()
         obj_in_data.setdefault("created_at", now)
         obj_in_data.setdefault("updated_at", now)
         
@@ -106,7 +107,7 @@ class CRUDChatMessage(CRUDBase[ChatMessage, ChatMessageCreate, ChatMessageUpdate
         obj_in_data["user_id"] = session.user_id
         
         # Always set created_at explicitly
-        obj_in_data["created_at"] = datetime.now()
+        obj_in_data["created_at"] = now_local()
         
         db_obj = self.model(**obj_in_data)
         db.add(db_obj)
@@ -115,7 +116,7 @@ class CRUDChatMessage(CRUDBase[ChatMessage, ChatMessageCreate, ChatMessageUpdate
         
         # Update session message count and last message time
         session.message_count = db.query(ChatMessage).filter(ChatMessage.session_id == session_id).count()
-        session.last_message_at = datetime.now()
+        session.last_message_at = now_local()
         db.commit()
         
         return db_obj

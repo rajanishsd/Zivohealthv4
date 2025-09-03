@@ -12,6 +12,7 @@ import hashlib
 from typing import List, Dict, Union, Optional
 from langchain.tools import Tool
 from pathlib import Path
+from app.utils.timezone import now_local, isoformat_now
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -381,6 +382,114 @@ class OCRToolkit:
                     self.logger.debug(f"🗑️ [OCR] Cleaned up S3 object: s3://{self.s3_bucket}/{s3_key}")
                 except Exception as cleanup_error:
                     self.logger.warning(f"⚠️ [OCR] Failed to cleanup S3 object: {cleanup_error}")
+
+    def _extract_text_from_pdf_s3_uri(self, s3_uri: str, pages: Union[str, List[int], None] = None) -> str:
+        """
+        Extract text from a PDF already stored in S3 using AWS Textract async API.
+
+        Assumes the input is an s3:// URI; does NOT upload the file again.
+
+        Args:
+            s3_uri: The S3 URI to the PDF, e.g., s3://bucket/key/to/file.pdf
+            pages: Pages to extract. Options are the same as _extract_text_from_pdf_bytes.
+
+        Returns:
+            Extracted text from specified pages or an error string starting with a bracketed tag.
+        """
+        import time
+        from urllib.parse import urlparse
+
+        try:
+            if not self.is_textract_ready or not self.textract_client:
+                self.logger.error("❌ [OCR] AWS Textract not available for S3 PDF processing")
+                return "AWS Textract not available"
+
+            parsed = urlparse(s3_uri)
+            if parsed.scheme != "s3" or not parsed.netloc or not parsed.path:
+                return "Invalid S3 URI"
+
+            bucket = parsed.netloc
+            key = parsed.path.lstrip('/')
+
+            self.logger.debug(f"📤 [OCR] Starting async text detection for S3 PDF: s3://{bucket}/{key}")
+            if pages:
+                self.logger.debug(f"📄 [OCR] Page filter requested: {pages}")
+
+            # Start async text detection using S3 location
+            response = self.textract_client.start_document_text_detection(
+                DocumentLocation={'S3Object': {'Bucket': bucket, 'Name': key}}
+            )
+
+            job_id = response['JobId']
+            self.logger.debug(f"📋 [OCR] Started async job with ID: {job_id}")
+
+            # Poll for completion
+            max_wait_time = 300
+            poll_interval = 2
+            total_wait = 0
+
+            while total_wait < max_wait_time:
+                self.logger.debug(f"⏳ [OCR] Polling job status (waited {total_wait}s)")
+                response = self.textract_client.get_document_text_detection(JobId=job_id)
+                status = response['JobStatus']
+
+                if status == 'SUCCEEDED':
+                    self.logger.info(f"✅ [OCR] Async job completed successfully after {total_wait}s")
+                    break
+                if status == 'FAILED':
+                    error_msg = response.get('StatusMessage', 'Unknown error')
+                    self.logger.error(f"❌ [OCR] Async job failed: {error_msg}")
+                    return f"PDF processing failed: {error_msg}"
+
+                time.sleep(poll_interval)
+                total_wait += poll_interval
+
+            if total_wait >= max_wait_time:
+                self.logger.error(f"❌ [OCR] Async job timed out after {max_wait_time}s")
+                return "PDF processing timed out. Please try with a smaller document."
+
+            # Collect and process results
+            all_text_blocks: List[Dict] = []
+            next_token = None
+            page_count = 0
+            current_page = 0
+
+            while True:
+                if next_token:
+                    response = self.textract_client.get_document_text_detection(JobId=job_id, NextToken=next_token)
+                else:
+                    response = self.textract_client.get_document_text_detection(JobId=job_id)
+
+                for block in response.get('Blocks', []):
+                    if block['BlockType'] == 'PAGE':
+                        current_page += 1
+                        page_count = current_page
+                    elif block['BlockType'] == 'LINE':
+                        all_text_blocks.append({'text': block['Text'], 'page': current_page})
+
+                next_token = response.get('NextToken')
+                if not next_token:
+                    break
+
+            filtered_text_blocks = self._filter_text_blocks_by_pages(all_text_blocks, pages, page_count)
+            extracted_text = '\n'.join([blk['text'] for blk in filtered_text_blocks])
+            return extracted_text.strip() if extracted_text else "No text found in specified pages"
+
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            self.logger.error(f"❌ [OCR] AWS Textract async error: {error_code} - {e.response['Error']['Message']}")
+            if error_code == 'InvalidDocumentException':
+                return "Invalid PDF format or corrupted PDF"
+            if error_code == 'UnsupportedDocumentException':
+                return "PDF format not supported or too large"
+            return f"AWS Textract error: {error_code}"
+        except NoCredentialsError as e:
+            self.logger.error(f"❌ [OCR] AWS credentials not found for PDF: {e}")
+            return "AWS credentials not configured"
+        except Exception as e:
+            self.logger.error(f"❌ [OCR] Error processing S3 PDF with Textract: {e}")
+            self.logger.error(f"❌ [OCR] Exception type: {type(e).__name__}")
+            return f"Error processing PDF: {str(e)}"
     
     def _filter_text_blocks_by_pages(self, all_text_blocks: List[Dict], pages: Union[str, List[int], None], total_pages: int) -> List[Dict]:
         """
@@ -639,14 +748,14 @@ class OCRToolkit:
             os.makedirs(aws_responses_dir, exist_ok=True)
             
             # Create filename with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = now_local().strftime("%Y%m%d_%H%M%S")
             filename = f"textract_response_{job_id}_{timestamp}.json"
             file_path = os.path.join(aws_responses_dir, filename)
             
             # Prepare response data for storage
             response_data = {
                 "job_id": job_id,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": isoformat_now(),
                 "page_count": page_count,
                 "total_responses": len(all_responses),
                 "responses": all_responses

@@ -1,0 +1,8 @@
+{
+  "commands": [
+    "bash -lc 'sudo docker compose -f /opt/zivohealth/docker-compose.yml ps || true'",
+    "bash -lc 'sudo docker compose -f /opt/zivohealth/docker-compose.yml images || true'",
+    "bash -lc 'sudo docker ps -a || true'",
+    "bash -lc 'CID=$(sudo docker ps -aqf \"name=api\"); if [ -n \"$CID\" ]; then sudo docker logs --tail 200 $CID; else echo no_api_container; fi'"
+  ]
+}

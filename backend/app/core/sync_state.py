@@ -5,6 +5,7 @@ import asyncio
 import logging
 from typing import Dict, Set
 from datetime import datetime, timedelta
+from app.utils.timezone import now_local
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class SyncStateManager:
             self.active_sync_operations[user_id] = set()
         
         self.active_sync_operations[user_id].add(operation_id)
-        self.last_sync_activity[user_id] = datetime.now()
+        self.last_sync_activity[user_id] = now_local()
         
         logger.info(f"🔄 [SyncState] Started sync operation {operation_id} for user {user_id}")
         logger.info(f"🔄 [SyncState] Active operations for user {user_id}: {len(self.active_sync_operations[user_id])}")
@@ -33,7 +34,7 @@ class SyncStateManager:
         """Register the end of a sync operation"""
         if user_id in self.active_sync_operations:
             self.active_sync_operations[user_id].discard(operation_id)
-            self.last_sync_activity[user_id] = datetime.now()
+            self.last_sync_activity[user_id] = now_local()
             
             # Clean up empty sets
             if not self.active_sync_operations[user_id]:
@@ -56,7 +57,7 @@ class SyncStateManager:
             return float('inf')
         
         latest_activity = max(self.last_sync_activity.values())
-        return (datetime.now() - latest_activity).total_seconds()
+        return (now_local() - latest_activity).total_seconds()
     
     def should_start_worker(self) -> bool:
         """Determine if the aggregation worker should be started"""

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from pathlib import Path
 import tempfile
 import os
+from app.utils.timezone import now_local, isoformat_now
 
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
@@ -140,7 +141,7 @@ class DocumentProcessingOrchestrator:
         overall_start = time.time()
         request_id = str(uuid.uuid4())
         
-        print(f"📊 [DEBUG] Starting document processing at {datetime.now().isoformat()}")
+        print(f"📊 [DEBUG] Starting document processing at {isoformat_now()}")
         print(f"📊 [DEBUG] File: {file_path}")
         print(f"📊 [DEBUG] Type: {file_type}")
         print(f"📊 [DEBUG] User ID: {user_id}")
@@ -231,7 +232,7 @@ class DocumentProcessingOrchestrator:
         
         step_start = time.time()
         state["step_start_times"]["extract_text"] = step_start
-        print(f"🔤 [DEBUG] Starting text extraction at {datetime.now().isoformat()}")
+        print(f"🔤 [DEBUG] Starting text extraction at {isoformat_now()}")
         
         with trace_agent_operation(
             "DocumentProcessingOrchestrator",

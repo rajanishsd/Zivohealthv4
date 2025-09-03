@@ -32,6 +32,7 @@ try:
     from app.crud.vitals import VitalsCRUD
     from app.crud.nutrition import nutrition_data as NutritionCRUD
     from app.core.sync_state import sync_state_manager
+    from app.utils.timezone import now_local, isoformat_now
 except ImportError as e:
     print(f"❌ Import error: {e}")
     print("💡 Make sure you're running this from the zivohealth directory:")
@@ -124,7 +125,7 @@ class AggregationStatusMonitor:
             sync_status = sync_state_manager.get_status()
             
             return {
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': isoformat_now(),
                 'vitals_aggregation_queue': vitals_status_counts,
                 'nutrition_aggregation_queue': nutrition_status_counts,
                 'vitals_recent_activity': [
@@ -235,7 +236,7 @@ class AggregationStatusMonitor:
         """Print monitor header"""
         print("\n🧠 Enhanced Smart Aggregation Monitor")
         print("=" * 60)
-        print(f"⏰ Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"⏰ Started at: {now_local().strftime('%Y-%m-%d %H:%M:%S')}")
         print()
         
     def print_chunk_tracking_info(self):
@@ -358,7 +359,7 @@ class AggregationStatusMonitor:
 async def monitor_smart_aggregation():
     """Enhanced monitoring with detailed status updates"""
     monitor = AggregationStatusMonitor()
-    monitor.start_time = datetime.now()
+    monitor.start_time = now_local()
     
     monitor.print_status_header()
     monitor.print_chunk_tracking_info()
@@ -418,7 +419,7 @@ async def monitor_smart_aggregation():
         current_total_active = current_status['vitals_total_active'] + current_status['nutrition_total_active']
         
         if current_total_pending == 0 and current_total_active == 0:
-            elapsed = (datetime.now() - monitor.start_time).total_seconds()
+            elapsed = (now_local() - monitor.start_time).total_seconds()
             total_completed = current_status['vitals_total_completed'] + current_status['nutrition_total_completed']
             print(f"🎉 Aggregation completed in {elapsed:.1f} seconds!")
             print(f"✅ Final status: {total_completed:,} entries processed")

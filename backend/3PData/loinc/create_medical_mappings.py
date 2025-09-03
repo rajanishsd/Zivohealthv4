@@ -42,7 +42,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Database configuration
-DATABASE_URL = "postgresql://rajanishsd@localhost:5433/zivohealth"
+DATABASE_URL = "postgresql://rajanishsd@localhost:5432/zivohealth"
 Base = declarative_base()
 
 # Vital Signs Data with LOINC Codes

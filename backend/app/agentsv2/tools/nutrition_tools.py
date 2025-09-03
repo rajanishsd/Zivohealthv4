@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 # User profile configuration for YouTube authentication
 YOUTUBE_USER_PROFILE_PATH = getattr(settings, 'YOUTUBE_USER_PROFILE_PATH', None)
 BROWSER_TYPE = getattr(settings, 'YOUTUBE_BROWSER_TYPE', 'chrome')
+# Feature flag to control headless browser automation (pyppeteer)
+ENABLE_BROWSER_AUTOMATION = getattr(settings, 'ENABLE_BROWSER_AUTOMATION', False)
 
 # Rate limiting configuration
 YOUTUBE_REQUEST_DELAY = 2.0  # Minimum seconds between YouTube API requests
@@ -137,6 +139,40 @@ def google_search(query: str, site: Optional[str] = None, max_results: int = 10)
             links.append(url)
     return links
 
+def google_search_with_metadata(query: str, max_results: int = 10) -> List[Dict[str, Any]]:
+    """Structured Google search using Serper with title, link, snippet."""
+    try:
+        api_key = os.getenv("SERPER_API_KEY") or "75885909dc660d544bb5dba225d2698c52e9fc78"
+        google_serper = GoogleSerperAPIWrapper(serper_api_key=api_key)
+        results = google_serper.results(query)
+        items = []
+        for item in results.get("organic", [])[:max_results]:
+            items.append({
+                "title": item.get("title") or "",
+                "link": item.get("link") or "",
+                "snippet": item.get("snippet") or item.get("content") or ""
+            })
+        return items
+    except Exception as e:
+        logger.warning(f"google_search_with_metadata failed: {e}")
+        return []
+
+def _summarize_url_basic(url: str, timeout: float = 12.0) -> Dict[str, Any]:
+    """Fetch a URL and extract a basic summary (title + meta description)."""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        resp = requests.get(url, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        title = (soup.find('title').get_text().strip() if soup.find('title') else '')
+        meta_desc_tag = soup.find('meta', attrs={'name': 'description'})
+        description = meta_desc_tag.get('content', '').strip() if meta_desc_tag else ''
+        return {"title": title, "description": description}
+    except Exception as e:
+        return {"title": "", "description": f"summary_failed: {e}"}
+
 def extract_video_id(url: str) -> Optional[str]:
     parsed = urllib.parse.urlparse(url)
     qs = urllib.parse.parse_qs(parsed.query)
@@ -169,9 +205,9 @@ async def check_youtube_video_with_profile(url: str, target_nutrient: str = "pro
     browser = None
     try:
         browser = await launch(
-            headless=False,  # Set to True for headless mode
+            headless=True,
             args=browser_args,
-            executablePath=None  # Let pyppeteer find the browser
+            executablePath=None
         )
         page = await browser.newPage()
         
@@ -236,7 +272,10 @@ async def check_youtube_video_with_profile(url: str, target_nutrient: str = "pro
         return {"url": url, "matched": False, "error": str(e)}
     finally:
         if browser:
-            await browser.close()
+            try:
+                await browser.close()
+            except Exception:
+                pass
 
 def check_youtube_video_basic(url: str, target_nutrient: str = "protein", amount: int = 30) -> Dict[str, Any]:
     """
@@ -315,29 +354,25 @@ def check_youtube_video_basic(url: str, target_nutrient: str = "protein", amount
     
     return {"url": url, "matched": False, "source": "youtube_basic"}
 
-def check_youtube_video(url: str, target_nutrient: str = "protein", amount: int = 30) -> Dict[str, Any]:
+async def check_youtube_video(url: str, target_nutrient: str = "protein", amount: int = 30) -> Dict[str, Any]:
     """
     Main YouTube video checking function that chooses between profile and basic methods.
+    Runs safely within an existing asyncio event loop.
     """
-    if YOUTUBE_USER_PROFILE_PATH and os.path.exists(YOUTUBE_USER_PROFILE_PATH):
-        # Use async method with user profile
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(check_youtube_video_with_profile(url, target_nutrient, amount))
-            return result
-        finally:
-            loop.close()
-    else:
-        # Use basic method without profile
-        return check_youtube_video_basic(url, target_nutrient, amount)
+    try:
+        if ENABLE_BROWSER_AUTOMATION and YOUTUBE_USER_PROFILE_PATH and os.path.exists(YOUTUBE_USER_PROFILE_PATH):
+            return await check_youtube_video_with_profile(url, target_nutrient, amount)
+        # Run blocking basic method in a thread to avoid blocking the loop
+        return await asyncio.to_thread(check_youtube_video_basic, url, target_nutrient, amount)
+    except Exception as e:
+        return {"url": url, "matched": False, "source": "youtube", "error": str(e)}
 
 async def extract_nutrients_from_page(url: str, target_nutrient: str = "protein", amount: int = 30) -> Dict[str, Any]:
     """
     Extract nutrients from web pages. Falls back to basic HTTP scraping when browser automation fails.
     """
-    # First try browser automation
-    if launch:
+    # First try browser automation if explicitly enabled
+    if ENABLE_BROWSER_AUTOMATION and launch:
         try:
             browser = await launch(headless=True, args=['--no-sandbox'])
             page = await browser.newPage()
@@ -352,9 +387,14 @@ async def extract_nutrients_from_page(url: str, target_nutrient: str = "protein"
         except Exception as e:
             logger.warning(f"Browser automation failed: {e}")
             # Continue to fallback method
+        finally:
+            try:
+                await browser.close()
+            except Exception:
+                pass
     
-    # Fallback to basic HTTP scraping
-    return extract_nutrients_from_page_basic(url, target_nutrient, amount)
+    # Fallback to basic HTTP scraping (run in thread to avoid blocking loop)
+    return await asyncio.to_thread(extract_nutrients_from_page_basic, url, target_nutrient, amount)
 
 def extract_nutrients_from_page_basic(url: str, target_nutrient: str = "protein", amount: int = 30) -> Dict[str, Any]:
     """
@@ -647,33 +687,31 @@ async def search_and_filter_nutrition(query: str) -> Dict[str, Any]:
     print(f"Raw search results from SerpAPI: {search_results}")
     all_results = []
     if source == "youtube":
-        for url in search_results:
+        # Process YouTube URLs concurrently
+        async def _process(url: str):
             print(f"Checking YouTube URL: {url}")
             try:
-                res = check_youtube_video(url, parsed['nutrient'], parsed['amount'])
-                if res is None:
-                    res = {"url": url, "matched": False, "source": "youtube", "error": "Transcript fetch failed or unavailable"}
+                res = await check_youtube_video(url, parsed['nutrient'], parsed['amount'])
+                return res or {"url": url, "matched": False, "source": "youtube", "error": "No result"}
             except Exception as e:
-                res = {"url": url, "matched": False, "source": "youtube", "error": str(e)}
-            all_results.append(res)
+                return {"url": url, "matched": False, "source": "youtube", "error": str(e)}
+        gathered = await asyncio.gather(*[_process(url) for url in search_results], return_exceptions=True)
+        for item in gathered:
+            if isinstance(item, Exception):
+                all_results.append({"url": "unknown", "matched": False, "source": "youtube", "error": str(item)})
+            else:
+                all_results.append(item)
     else:
-        # Fix async event loop management
+        # Proper async handling within running event loop
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        try:
-            results = loop.run_until_complete(
-                asyncio.gather(*[
-                    extract_nutrients_from_page(url, parsed['nutrient'], parsed['amount']) for url in search_results
-                ])
-            )
-            all_results = results
+            gathered = await asyncio.gather(*[
+                extract_nutrients_from_page(url, parsed['nutrient'], parsed['amount']) for url in search_results
+            ], return_exceptions=True)
+            for idx, item in enumerate(gathered):
+                if isinstance(item, Exception):
+                    all_results.append({"url": search_results[idx] if idx < len(search_results) else "unknown", "matched": False, "source": "web", "error": str(item)})
+                else:
+                    all_results.append(item)
         except Exception as e:
             logger.error(f"Error in async web scraping: {e}")
             # Fallback: return basic results without content analysis
@@ -699,6 +737,50 @@ async def nutrition_recipe_search_tool(query: str) -> Dict[str, Any]:
         Dict containing search results with recipes, ingredients, and nutritional information
     """
     return await search_and_filter_nutrition(query)
+
+@tool
+async def internet_search_tool(query: str) -> Dict[str, Any]:
+    """
+    Generic internet search tool for nutrition-related or general queries.
+    Returns structured results with title, link, and snippet/description.
+
+    Args:
+        query: Natural language query, e.g., "benefits of fiber intake" or "low sodium diet risks".
+
+    Returns:
+        Dict with "query" and "results" (list of {title, link, snippet}).
+    """
+    try:
+        # Step 1: Use Serper to fetch structured organic results
+        items = google_search_with_metadata(query, max_results=10)
+
+        # Step 2: Enrich missing snippets by fetching a few pages concurrently
+        async def _enrich(item: Dict[str, Any]) -> Dict[str, Any]:
+            if item.get("snippet"):
+                return item
+            link = item.get("link")
+            if not link:
+                return item
+            try:
+                summary = await asyncio.to_thread(_summarize_url_basic, link)
+                # Prefer meta description if available
+                snippet = summary.get("description") or summary.get("title") or ""
+                if snippet:
+                    item["snippet"] = snippet[:300]
+            except Exception:
+                pass
+            return item
+
+        # Only enrich top 5 to keep it fast
+        to_enrich = items[:5]
+        enriched = await asyncio.gather(*[_enrich(i.copy()) for i in to_enrich], return_exceptions=True)
+        for idx, maybe in enumerate(enriched):
+            if isinstance(maybe, dict):
+                items[idx] = maybe
+
+        return {"query": query, "results": items}
+    except Exception as e:
+        return {"query": query, "results": [], "error": str(e)}
 
 # Export main class
 __all__ = ['NutritionToolkit'] 

@@ -28,7 +28,7 @@ This document describes how to manage all ZivoHealth services: PostgreSQL, Redis
 
 ZivoHealth consists of 4 main services:
 
-1. **PostgreSQL Database** (Port 5433)
+1. **PostgreSQL Database** (Port 5432)
    - Stores user data, chat sessions, messages
    - Data location: `backend/data/postgres/`
 
@@ -48,7 +48,7 @@ ZivoHealth consists of 4 main services:
 
 ### PostgreSQL Database
 - **Location**: System-managed (brew services or manual)
-- **Port**: 5433
+- **Port**: 5432
 - **Data**: `backend/data/postgres/`
 
 ```bash
@@ -110,7 +110,7 @@ Services should be stopped in reverse order:
 
 | Service | Port | URL |
 |---------|------|-----|
-| PostgreSQL | 5433 | `localhost:5433` |
+| PostgreSQL | 5432 | `localhost:5432` |
 | Redis | 6379 | `localhost:6379` |
 | Backend | 8000 | http://localhost:8000 |
 | Dashboard | 3000 | http://localhost:3000 |
@@ -123,7 +123,7 @@ Services should be stopped in reverse order:
 ./scripts/status-all.sh
 
 # Check specific ports
-lsof -ti:5433  # PostgreSQL
+lsof -ti:5432  # PostgreSQL
 lsof -ti:6379  # Redis
 lsof -ti:8000  # Backend
 lsof -ti:3000  # Dashboard
@@ -137,7 +137,7 @@ sleep 5
 ./scripts/start-all.sh
 
 # Manual force kill
-sudo kill -9 $(lsof -ti:5433,6379,8000,3000)
+sudo kill -9 $(lsof -ti:5432,6379,8000,3000)
 ```
 
 ### Common Issues

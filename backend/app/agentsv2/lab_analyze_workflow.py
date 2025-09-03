@@ -24,6 +24,7 @@ sys.path.insert(0, str(backend_path))
 from langgraph.graph import StateGraph, END, START
 from langchain_openai import ChatOpenAI
 from app.core.config import settings
+from app.utils.timezone import now_local, isoformat_now
 from configurations.lab_config import LAB_TABLES, PRIMARY_LAB_TABLE, ALL_LAB_TABLES, AGGREGATION_TABLES
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -67,6 +68,7 @@ class LabAnalyzeWorkflowState:
     
     # Visualization
     plots: List[str] = field(default_factory=list)  # Base64 encoded images
+    saved_plots: List[Dict[str, Any]] = field(default_factory=list)  # Saved plot metadata (S3 URIs)
     
     # Response formatting
     formatted_results: Dict[str, Any] = field(default_factory=dict)
@@ -300,19 +302,19 @@ class LabAnalyzeWorkflow:
                 saved_plot_files = []
                 
                 def save_plot(filename=None, plt_figure=None, format='png', dpi=100):
-                    """Save matplotlib plot directly to data/plots folder"""
+                    """Save matplotlib plot to local folder and upload to S3 when enabled"""
                     try:
                         if plt_figure is None:
                             plt_figure = plt.gcf()
                         
                         # Generate filename if not provided
                         if filename is None:
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            timestamp = now_local().strftime("%Y%m%d_%H%M%S")
                             filename = f"plot_{timestamp}.png"
                         elif not filename.endswith('.png'):
                             filename = filename + ".png"
                         
-                        # Save directly to data/plots folder
+                        # Save to local folder
                         local_path = os.path.join(plots_dir, filename)
                         plt_figure.savefig(local_path, format=format, dpi=dpi, bbox_inches='tight')
                         
@@ -324,18 +326,40 @@ class LabAnalyzeWorkflow:
                         plot_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
                         plot_buffers.append(plot_base64)
                         
+                        # Upload to S3 if enabled (single saved path)
+                        saved_path = local_path
+                        try:
+                            from app.core.config import settings as _settings
+                            if bool(getattr(_settings, 'USE_S3_UPLOADS', False)):
+                                from app.services.s3_service import upload_bytes_and_get_uri
+                                s3_prefix = getattr(_settings, 'UPLOADS_S3_PREFIX', 'uploads') or 'uploads'
+                                s3_key = f"{s3_prefix.rstrip('/')}/plots/{filename}"
+                                s3_uri = upload_bytes_and_get_uri(
+                                    bucket=_settings.AWS_S3_BUCKET,
+                                    key=s3_key,
+                                    data=buffer.getvalue(),
+                                    content_type='image/png'
+                                )
+                                print(f"  [save_plot] S3 upload: {s3_uri}")
+                                saved_path = s3_uri
+                        except Exception as upload_exc:
+                            # Non-fatal: keep local save and proceed
+                            print(f"⚠️  [save_plot] S3 upload failed, using local file only: {str(upload_exc)}")
+                            saved_path = local_path
+                        
                         buffer.close()
                         plt.close(plt_figure)
                         
                         # Track saved files
                         saved_plot_files.append({
                             "filename": filename,
-                            "local_path": local_path,
+                            "local_path": saved_path,
                             "base64": plot_base64,
                             "size_bytes": os.path.getsize(local_path)
                         })
                         
-                        return f"Plot saved as {filename} in {plots_dir}! Total plots: {len(plot_buffers)}"
+                        location_msg = saved_path
+                        return f"Plot saved as {filename} to {location_msg}! Total plots: {len(plot_buffers)}"
                     except Exception as e:
                         return f"Error saving plot: {str(e)}"
                 
@@ -470,7 +494,7 @@ class LabAnalyzeWorkflow:
 
             Classify the type of analysis requested.
             Create a detailed analysis plan, including interpretive guidance.
-            Identify all data requirements (including extensive lab data tests, reference ranges, demographics, etc.)
+            Identify all data requirements (including extensive lab data tests, reference ranges, etc.)
             Specify the recommended time period and the desired granularity for analysis.
             Assess the complexity of the analysis.
             List any missing information needed to deliver the requested analysis.
@@ -491,7 +515,6 @@ class LabAnalyzeWorkflow:
                 }},
                 "data_requirements": {{
                     "labs": ["test categories", "loinc_code", "units", "dates"],
-                    "demographics": ["age", "sex", "relevant clinical info if needed (e.g., weight, diagnosis)"],
                     "reference_ranges": "yes|no|optional"
                 }},
                 "time_period": "recent|30_days|6_months|1_year|all_time|user_specified",
@@ -582,7 +605,7 @@ class LabAnalyzeWorkflow:
             self.current_results = {}
             self.current_plots = []
             
-            current_date = datetime.now().strftime('%Y_%m_%d')
+            current_date = now_local().strftime('%Y_%m_%d')
             system_prompt = f"""
             You are a Python data analysis expert specializing in medical lab data. Your goal is to perform the requested analysis by first retrieving relevant data, then analyzing it.
 
@@ -650,7 +673,7 @@ class LabAnalyzeWorkflow:
             plt.tight_layout()
             
             # Add date postfix to filename for uniqueness (datetime is globally available)
-            current_date = datetime.now().strftime('%Y_%m_%d')
+            current_date = now_local().strftime('%Y_%m_%d')
             save_plot(f'my_chart_name_{current_date}')  # ← Use this, NOT plt.savefig()
             plt.close()
             ```
@@ -720,6 +743,10 @@ class LabAnalyzeWorkflow:
                 # Use the GPT message content directly
                 state.agent_response = final_message.content
                 print(f"🔍 [DEBUG] agent_code_analysis - GPT Response: {final_message.content[:200]}...")
+
+            # If we have saved plots, persist them in state (single source of truth for visuals)
+            if getattr(self, 'downloaded_plot_files', None):
+                state.saved_plots = list(self.downloaded_plot_files)
             
             self.log_execution_step(state, "agent_code_analysis", "completed")
             
@@ -780,28 +807,52 @@ class LabAnalyzeWorkflow:
                 }
             else:
                 
-                # Use the actual GPT agent response - this contains the analyzed results
+                # Build visualizations from downloaded_plot_files (single source of truth)
+                direct_visualizations = []
+                # Optional: parse LLM JSON once for metadata
+                structured_analysis = self._extract_json_from_response(state.agent_response) if state.agent_response else None
+                meta_by_filename: Dict[str, Dict[str, Any]] = {}
+                if isinstance(structured_analysis, dict):
+                    meta_list = structured_analysis.get("visualizations_created")
+                    if isinstance(meta_list, list):
+                        for mv in meta_list:
+                            if isinstance(mv, dict) and mv.get("filename"):
+                                meta_by_filename[mv.get("filename")] = mv
+
+                for p in state.saved_plots or []:
+                    if isinstance(p, dict):
+                        s3_uri = p.get("local_path") or p.get("s3_uri") or p.get("file_path")
+                        filename = p.get("filename", "")
+                        meta = meta_by_filename.get(filename, {})
+                        title = meta.get("title") or filename or "Analysis Chart"
+                        description = meta.get("description") or p.get("description", "Generated visualization")
+                        key_findings = meta.get("key_findings", "")
+                        direct_visualizations.append({
+                            "id": f"viz_{hash(filename) & 0xffff:04x}",
+                            "type": "chart",
+                            "title": title,
+                            "description": description,
+                            "filename": filename,
+                            "key_findings": key_findings,
+                            "s3_uri": s3_uri,
+                            "plot_path": s3_uri,
+                            "file_path": s3_uri,
+                        })
+
+                # Use LLM message as narrative only
                 final_response = state.agent_response if state.agent_response else "Analysis completed successfully."
-                
-                # Try to extract structured JSON response from agent response
-                structured_analysis = self._extract_json_from_response(final_response)
-                
-                # The agent already returns structured analysis with visualizations
+
                 state.formatted_results = {
                     "success": True,
                     "task_types": ["lab_analysis"],
                     "results": {
                         "analysis": structured_analysis if structured_analysis else final_response,
-                        "original_request": state.original_request
+                        "original_request": state.original_request,
+                        "visualizations": direct_visualizations
                     },
                     "execution_log": state.execution_log,
                     "message": "Lab analysis completed successfully"
                 }
-                
-                # Extract visualizations from the structured analysis if present
-                if structured_analysis and "visualizations_created" in structured_analysis:
-                    state.formatted_results["visualizations"] = structured_analysis["visualizations_created"]
-                    print(f"🔍 [DEBUG] format_results - Visualizations: {state.formatted_results['visualizations']}")
             
             print(f"🔍 [DEBUG] format_results - Formatted results success: {state.formatted_results.get('success')}")
             self.log_execution_step(state, "format_results", "completed")
@@ -935,7 +986,7 @@ class LabAnalyzeWorkflow:
     def log_execution_step(self, state: LabAnalyzeWorkflowState, step_name: str, status: str, details: Dict = None):
         """Log execution step with context"""
         log_entry = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": isoformat_now(),
             "step": step_name,
             "status": status,
             "details": details or {}
