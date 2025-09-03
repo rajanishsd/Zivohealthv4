@@ -43,14 +43,15 @@ logs/
 dump.rdb
 *.rdb
 
-
-
 # Terraform artifacts
 infra/terraform/.terraform/
 infra/terraform/*.tfstate
 infra/terraform/*.tfstate.*
 infra/terraform/*.tfvars
 infra/terraform/tfplan
+# Terraform provider binaries (platform-specific)
+infra/terraform/.terraform/providers/
+infra/terraform/.terraform/modules/
 
 # Local dumps and generated secrets
 local_data.dump
@@ -61,3 +62,54 @@ backend/data/*.pid
 **/xcuserdata/
 *.xcuserstate
 *.xcuserdatad
+
+# Large binary files and artifacts
+*.bin
+*.pkl
+*.h5
+*.hdf5
+*.model
+*.weights
+*.checkpoint
+
+# Database dumps and backups
+*.dump
+*.backup
+*.bak
+*.sql.bak
+
+# Machine learning models and data
+**/models/
+**/checkpoints/
+**/weights/
+**/embeddings/
+
+# Large media files
+*.mp4
+*.avi
+*.mov
+*.wmv
+*.flv
+*.mkv
+*.webm
+
+# Large archive files
+*.tar
+*.tar.gz
+*.tar.bz2
+*.zip
+*.rar
+*.7z
+
+# Large log files
+*.log.*
+*.log.gz
+*.log.bz2
+
+# Temporary and cache files
+*.tmp
+*.temp
+*.cache
+.cache/
+tmp/
+temp/
