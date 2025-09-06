@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
 from app.db.base import Base
+from app.utils.timezone import local_now_db_expr, local_now_db_func
 
 class LabReportDaily(Base):
     """Daily aggregation of lab reports"""
@@ -31,8 +32,8 @@ class LabReportDaily(Base):
     status = Column(String(20), nullable=True)  # 'green', 'amber', 'red'
     
     # Audit fields
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, server_default=local_now_db_expr(), nullable=False)
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func(), nullable=False)
     
     # Indexes and constraints
     __table_args__ = (
@@ -74,8 +75,8 @@ class LabReportMonthly(Base):
     status = Column(String(20), nullable=True)  # 'green', 'amber', 'red'
     
     # Audit fields
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, server_default=local_now_db_expr(), nullable=False)
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func(), nullable=False)
     
     # Indexes and constraints
     __table_args__ = (
@@ -117,8 +118,8 @@ class LabReportQuarterly(Base):
     status = Column(String(20), nullable=True)  # 'green', 'amber', 'red'
     
     # Audit fields
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, server_default=local_now_db_expr(), nullable=False)
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func(), nullable=False)
     
     # Indexes and constraints
     __table_args__ = (
@@ -159,8 +160,8 @@ class LabReportYearly(Base):
     status = Column(String(20), nullable=True)  # 'green', 'amber', 'red'
     
     # Audit fields
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, server_default=local_now_db_expr(), nullable=False)
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func(), nullable=False)
     
     # Indexes and constraints
     __table_args__ = (

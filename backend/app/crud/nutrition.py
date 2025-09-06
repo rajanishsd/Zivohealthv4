@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, desc, asc, String
 from datetime import datetime, date, timedelta
+from app.utils.timezone import to_local_naive, local_now_db_func
 import json
 
 from app.crud.base import CRUDBase
@@ -11,6 +12,7 @@ from app.models.nutrition_data import (
     NutritionWeeklyAggregate, 
     NutritionMonthlyAggregate,
     NutritionSyncStatus,
+    NutritionMealPlan,
     NutritionDataSource,
     MealType
 )
@@ -27,6 +29,9 @@ class CRUDNutritionData(CRUDBase[NutritionRawData, NutritionDataCreate, Nutritio
     def create_with_user(self, db: Session, *, obj_in: NutritionDataCreate, user_id: int) -> NutritionRawData:
         """Create nutrition data with user ID"""
         obj_in_data = obj_in.dict()
+        # Normalize times to local naive
+        if obj_in_data.get("meal_time"):
+            obj_in_data["meal_time"] = to_local_naive(obj_in_data["meal_time"])
         obj_in_data["user_id"] = user_id
         db_obj = self.model(**obj_in_data)
         db.add(db_obj)
@@ -761,9 +766,132 @@ class CRUDNutritionSyncStatus:
         db.refresh(sync_status)
         return sync_status
 
+class CRUDNutritionMealPlan(CRUDBase[NutritionMealPlan, None, None]):
+    """CRUD operations for nutrition meal plans"""
+    
+    def create_meal_plan(
+        self, 
+        db: Session, 
+        *, 
+        goal_id: int,
+        meal_type: str,
+        meal_name: str,
+        calories_kcal: Optional[int] = None,
+        protein_g: Optional[float] = None,
+        carbohydrate_g: Optional[float] = None,
+        fat_g: Optional[float] = None,
+        fiber_g: Optional[float] = None,
+        preparation_time_min: Optional[int] = None,
+        difficulty: Optional[str] = None,
+        ingredients: Optional[str] = None,  # JSON string
+        micronutrients: Optional[str] = None,  # JSON string
+        notes: Optional[str] = None,
+        is_recommended: bool = False
+    ) -> NutritionMealPlan:
+        """Create a meal plan entry"""
+        db_obj = NutritionMealPlan(
+            goal_id=goal_id,
+            meal_type=meal_type,
+            meal_name=meal_name,
+            calories_kcal=calories_kcal,
+            protein_g=protein_g,
+            carbohydrate_g=carbohydrate_g,
+            fat_g=fat_g,
+            fiber_g=fiber_g,
+            preparation_time_min=preparation_time_min,
+            difficulty=difficulty,
+            ingredients=ingredients,
+            micronutrients=micronutrients,
+            notes=notes,
+            is_recommended=is_recommended
+        )
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+    
+    def get_by_goal(self, db: Session, *, goal_id: int) -> List[NutritionMealPlan]:
+        """Get all meal plans for a specific goal"""
+        return db.query(self.model).filter(
+            self.model.goal_id == goal_id
+        ).order_by(self.model.meal_type, self.model.id).all()
+    
+    def get_by_goal_and_meal_type(
+        self, 
+        db: Session, 
+        *, 
+        goal_id: int, 
+        meal_type: str
+    ) -> List[NutritionMealPlan]:
+        """Get meal plans for a specific goal and meal type"""
+        return db.query(self.model).filter(
+            and_(
+                self.model.goal_id == goal_id,
+                self.model.meal_type == meal_type
+            )
+        ).order_by(self.model.id).all()
+    
+    def get_recommended_by_goal(
+        self, 
+        db: Session, 
+        *, 
+        goal_id: int
+    ) -> List[NutritionMealPlan]:
+        """Get recommended meal plans for a specific goal"""
+        return db.query(self.model).filter(
+            and_(
+                self.model.goal_id == goal_id,
+                self.model.is_recommended == True
+            )
+        ).order_by(self.model.meal_type, self.model.id).all()
+    
+    def create_batch_meal_plans(
+        self, 
+        db: Session, 
+        *, 
+        goal_id: int,
+        meal_plans_data: List[Dict[str, Any]]
+    ) -> List[NutritionMealPlan]:
+        """Create multiple meal plans in batch"""
+        meal_plans = []
+        for meal_data in meal_plans_data:
+            meal_plan = NutritionMealPlan(
+                goal_id=goal_id,
+                meal_type=meal_data.get('meal_type'),
+                meal_name=meal_data.get('meal_name'),
+                calories_kcal=meal_data.get('calories_kcal'),
+                protein_g=meal_data.get('protein_g'),
+                carbohydrate_g=meal_data.get('carbohydrate_g'),
+                fat_g=meal_data.get('fat_g'),
+                fiber_g=meal_data.get('fiber_g'),
+                preparation_time_min=meal_data.get('preparation_time_min'),
+                difficulty=meal_data.get('difficulty'),
+                ingredients=json.dumps(meal_data.get('ingredients', [])) if meal_data.get('ingredients') else None,
+                micronutrients=json.dumps(meal_data.get('micronutrients', {})) if meal_data.get('micronutrients') else None,
+                notes=meal_data.get('notes'),
+                is_recommended=meal_data.get('is_recommended', False)
+            )
+            meal_plans.append(meal_plan)
+            db.add(meal_plan)
+        
+        db.commit()
+        for meal_plan in meal_plans:
+            db.refresh(meal_plan)
+        
+        return meal_plans
+    
+    def delete_by_goal(self, db: Session, *, goal_id: int) -> int:
+        """Delete all meal plans for a specific goal"""
+        deleted_count = db.query(self.model).filter(
+            self.model.goal_id == goal_id
+        ).delete(synchronize_session=False)
+        db.commit()
+        return deleted_count
+
 # Create instances
 nutrition_data = CRUDNutritionData(NutritionRawData)
 nutrition_daily_aggregate = CRUDNutritionDailyAggregate(NutritionDailyAggregate)
 nutrition_weekly_aggregate = CRUDNutritionWeeklyAggregate(NutritionWeeklyAggregate)
 nutrition_monthly_aggregate = CRUDNutritionMonthlyAggregate(NutritionMonthlyAggregate)
 nutrition_sync_status = CRUDNutritionSyncStatus()
+nutrition_meal_plan = CRUDNutritionMealPlan(NutritionMealPlan)

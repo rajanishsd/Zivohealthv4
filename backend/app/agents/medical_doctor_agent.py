@@ -165,8 +165,8 @@ class MedicalDoctorAgent:
                         }
                         
                         # Save clinical report to database with simplified context
-                        db = next(get_db())
-                        try:
+                        from app.core.database_utils import get_db_session
+                        with get_db_session() as db:
                             clinical_report_obj = clinical_report.create_clinical_report(
                                 db=db,
                                 user_id=user_id,
@@ -184,8 +184,6 @@ class MedicalDoctorAgent:
                             )
                             clinical_report_id = clinical_report_obj.id
                             print(f"📋 [DEBUG] Saved clinical report with ID: {clinical_report_id}")
-                        finally:
-                            db.close()
                             
                     except Exception as e:
                         print(f"⚠️  [DEBUG] Failed to save clinical report: {str(e)}")

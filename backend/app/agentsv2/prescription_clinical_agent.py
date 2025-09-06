@@ -20,6 +20,7 @@ sys.path.insert(0, str(backend_path))
 from langgraph.graph import StateGraph, END, START
 from langchain_openai import ChatOpenAI
 from app.core.config import settings
+from app.core.database_utils import execute_query_safely_json, get_table_schema_safely, get_raw_db_connection, get_db_session
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
@@ -242,13 +243,7 @@ class PrescriptionClinicalAgentLangGraph:
                     if re.search(pattern, clean_query):
                         return f"Query contains blocked keyword: {blocked.upper()}"
 
-                conn = self.get_postgres_connection()
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute(query)
-                results = cursor.fetchall()
-                cursor.close()
-                conn.close()
-                return json.dumps(results, default=str)
+                return execute_query_safely_json(query)
             except Exception as e:
                 return f"Query Error: {e}"
         
@@ -269,26 +264,7 @@ class PrescriptionClinicalAgentLangGraph:
                 String describing the table schema
             """
             try:
-                conn = self.get_postgres_connection()
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute('''
-                    SELECT column_name, data_type, is_nullable, column_default
-                    FROM information_schema.columns
-                    WHERE table_name = %s AND table_schema = 'public'
-                    ORDER BY ordinal_position;
-                ''', (table_name,))
-                columns = cursor.fetchall()
-                cursor.close()
-                conn.close()
-                if not columns:
-                    return f"No schema found for table '{table_name}'."
-                
-                result = f"Schema for table '{table_name}':\n"
-                for col in columns:
-                    nullable = "NULL" if col['is_nullable'] == 'YES' else "NOT NULL"
-                    default = f" DEFAULT {col['column_default']}" if col['column_default'] else ""
-                    result += f"  {col['column_name']}: {col['data_type']} {nullable}{default}\n"
-                return result
+                return get_table_schema_safely(table_name)
             except Exception as e:
                 return f"Schema Error: {e}"
         
@@ -333,15 +309,6 @@ class PrescriptionClinicalAgentLangGraph:
         
         return workflow.compile()
 
-    def get_postgres_connection(self):
-        """Get PostgreSQL connection (same as lab agent)"""
-        return psycopg2.connect(
-            host=settings.POSTGRES_SERVER,
-            port=settings.POSTGRES_PORT,
-            database=settings.POSTGRES_DB,
-            user=settings.POSTGRES_USER,
-            password=settings.POSTGRES_PASSWORD or ""
-        )
 
     def log_execution_step(self, state: PrescriptionClinicalAgentState, step_name: str, status: str, details: Dict = None):
         """Log execution step with context"""
@@ -1010,60 +977,60 @@ class PrescriptionClinicalAgentLangGraph:
     def _store_prescription_data_direct(self, prescription_data: Dict, user_id: int, session_id: int, image_path: str = None) -> Dict:
         """Store prescription data directly to database"""
         try:
-            with SessionLocal() as db:
+            with get_db_session() as db:
                 if not prescription_data or not prescription_data.get("medications"):
                     return {"error": "No prescription data to store"}
             
-            stored_records = []
-            
-            # Store each medication as a separate prescription record
-            for idx, med_data in enumerate(prescription_data.get("medications", [])):
-                # Generate unique ID
-                prescription_id = f"rx_{user_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{idx}"
+                stored_records = []
                 
-                # Build instructions including additional details
-                instruction_parts = []
-                if med_data.get("instructions"):
-                    instruction_parts.append(med_data.get("instructions"))
-                if med_data.get("warnings"):
-                    instruction_parts.append(f"Warning: {med_data.get('warnings')}")
-                if med_data.get("indication"):
-                    instruction_parts.append(f"For: {med_data.get('indication')}")
+                # Store each medication as a separate prescription record
+                for idx, med_data in enumerate(prescription_data.get("medications", [])):
+                    # Generate unique ID
+                    prescription_id = f"rx_{user_id}_{now_local().strftime('%Y%m%d_%H%M%S')}_{idx}"
+                    
+                    # Build instructions including additional details
+                    instruction_parts = []
+                    if med_data.get("instructions"):
+                        instruction_parts.append(med_data.get("instructions"))
+                    if med_data.get("warnings"):
+                        instruction_parts.append(f"Warning: {med_data.get('warnings')}")
+                    if med_data.get("indication"):
+                        instruction_parts.append(f"For: {med_data.get('indication')}")
+                    
+                    combined_instructions = ". ".join(instruction_parts) if instruction_parts else None
+                    
+                    # Parse prescription date
+                    prescribed_at = now_local()
+                    if prescription_data.get("prescription_date"):
+                        try:
+                            prescribed_at = datetime.fromisoformat(prescription_data.get("prescription_date"))
+                        except:
+                            pass
+                    
+                    prescription = Prescription(
+                        id=prescription_id,
+                        session_id=session_id,
+                        user_id=user_id,
+                        medication_name=med_data.get("medication_name", "Unknown Medication"),
+                        dosage=med_data.get("dosage") or med_data.get("strength"),
+                        frequency=med_data.get("frequency"),
+                        instructions=combined_instructions,
+                        duration=med_data.get("duration") if med_data.get("duration") != "" else None,
+                        prescribed_by=prescription_data.get("prescribing_doctor", "Document Upload"),
+                        prescribed_at=prescribed_at,
+                        prescription_image_link=image_path
+                    )
+                    
+                    db.add(prescription)
+                    db.flush()
+                    
+                    stored_records.append({
+                        "table": "prescriptions",
+                        "id": prescription.id,
+                        "medication": med_data.get("medication_name")
+                    })
                 
-                combined_instructions = ". ".join(instruction_parts) if instruction_parts else None
-                
-                # Parse prescription date
-                prescribed_at = datetime.utcnow()
-                if prescription_data.get("prescription_date"):
-                    try:
-                        prescribed_at = datetime.fromisoformat(prescription_data.get("prescription_date"))
-                    except:
-                        pass
-                
-                prescription = Prescription(
-                    id=prescription_id,
-                    session_id=session_id,
-                    user_id=user_id,
-                    medication_name=med_data.get("medication_name", "Unknown Medication"),
-                    dosage=med_data.get("dosage") or med_data.get("strength"),
-                    frequency=med_data.get("frequency"),
-                    instructions=combined_instructions,
-                    duration=med_data.get("duration") if med_data.get("duration") != "" else None,
-                    prescribed_by=prescription_data.get("prescribing_doctor", "Document Upload"),
-                    prescribed_at=prescribed_at,
-                    prescription_image_link=image_path
-                )
-                
-                db.add(prescription)
-                db.flush()
-                
-                stored_records.append({
-                    "table": "prescriptions",
-                    "id": prescription.id,
-                    "medication": med_data.get("medication_name")
-                })
-            
-            db.commit()
+                db.commit()
             
             return {
                 "success": True,
@@ -1077,43 +1044,43 @@ class PrescriptionClinicalAgentLangGraph:
     def _store_clinical_data_direct(self, clinical_data: Dict, user_id: int, session_id: int, image_path: str = None) -> Dict:
         """Store clinical data directly to database"""
         try:
-            with SessionLocal() as db:
+            with get_db_session() as db:
                 if not clinical_data:
                     return {"error": "No clinical data to store"}
             
-            # Generate unique ID
-            clinical_id = f"cn_{user_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-            
-            # Parse visit date
-            visit_date = datetime.utcnow()
-            if clinical_data.get("visit_date"):
-                try:
-                    visit_date = datetime.fromisoformat(clinical_data.get("visit_date"))
-                except:
-                    pass
-            
-            clinical_note = ClinicalNotes(
-                id=clinical_id,
-                session_id=session_id,
-                user_id=user_id,
-                diagnosis=clinical_data.get("diagnosis"),
-                symptoms_presented=clinical_data.get("symptoms_presented"),
-                doctor_observations=clinical_data.get("doctor_observations"),
-                clinical_findings=clinical_data.get("clinical_findings"),
-                treatment_plan=clinical_data.get("treatment_plan"),
-                follow_up_recommendations=clinical_data.get("follow_up_recommendations"),
-                vital_signs_mentioned=clinical_data.get("vital_signs_mentioned"),
-                medical_history_noted=clinical_data.get("medical_history_noted"),
-                visit_date=visit_date,
-                clinic_or_hospital=clinical_data.get("clinic_or_hospital"),
-                attending_physician=clinical_data.get("attending_physician"),
-                specialty=clinical_data.get("specialty"),
-                document_type=clinical_data.get("document_type", "document_upload"),
-                document_image_link=image_path  # This should be source_file_path
-            )
-            
-            db.add(clinical_note)
-            db.commit()
+                # Generate unique ID
+                clinical_id = f"cn_{user_id}_{now_local().strftime('%Y%m%d_%H%M%S')}"
+                
+                # Parse visit date
+                visit_date = now_local()
+                if clinical_data.get("visit_date"):
+                    try:
+                        visit_date = datetime.fromisoformat(clinical_data.get("visit_date"))
+                    except:
+                        pass
+                
+                clinical_note = ClinicalNotes(
+                    id=clinical_id,
+                    session_id=session_id,
+                    user_id=user_id,
+                    diagnosis=clinical_data.get("diagnosis"),
+                    symptoms_presented=clinical_data.get("symptoms_presented"),
+                    doctor_observations=clinical_data.get("doctor_observations"),
+                    clinical_findings=clinical_data.get("clinical_findings"),
+                    treatment_plan=clinical_data.get("treatment_plan"),
+                    follow_up_recommendations=clinical_data.get("follow_up_recommendations"),
+                    vital_signs_mentioned=clinical_data.get("vital_signs_mentioned"),
+                    medical_history_noted=clinical_data.get("medical_history_noted"),
+                    visit_date=visit_date,
+                    clinic_or_hospital=clinical_data.get("clinic_or_hospital"),
+                    attending_physician=clinical_data.get("attending_physician"),
+                    specialty=clinical_data.get("specialty"),
+                    document_type=clinical_data.get("document_type", "document_upload"),
+                    document_image_link=image_path  # This should be source_file_path
+                )
+                
+                db.add(clinical_note)
+                db.commit()
             
             return {
                 "success": True,

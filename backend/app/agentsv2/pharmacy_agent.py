@@ -31,6 +31,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from app.core.config import settings
+from app.core.database_utils import execute_query_safely_json, get_table_schema_safely, get_raw_db_connection
 from app.utils.timezone import now_local, isoformat_now
 from app.agentsv2.response_utils import format_agent_response, format_error_response
 
@@ -295,13 +296,7 @@ class PharmacyAgentLangGraph:
                     if re.search(pattern, clean_query):
                         return f"Query contains blocked keyword: {blocked.upper()}"
 
-                conn = self.get_postgres_connection()
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute(query)
-                results = cursor.fetchall()
-                cursor.close()
-                conn.close()
-                return json.dumps(results, default=str)
+                return execute_query_safely_json(query)
             except Exception as e:
                 return f"Query Error: {e}"
         
@@ -320,39 +315,12 @@ class PharmacyAgentLangGraph:
             try:
                 if not table_name:
                     table_name = self.table_name
-                conn = self.get_postgres_connection()
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute('''
-                    SELECT column_name, data_type, is_nullable, column_default
-                    FROM information_schema.columns
-                    WHERE table_name = %s AND table_schema = 'public'
-                    ORDER BY ordinal_position;
-                ''', (table_name,))
-                columns = cursor.fetchall()
-                cursor.close()
-                conn.close()
-                if not columns:
-                    return f"No schema found for table '{table_name}'."
-                lines = [f"Schema for table '{table_name}':"]
-                for col in columns:
-                    nullable = 'NULL' if col['is_nullable'] == 'YES' else 'NOT NULL'
-                    default = f", DEFAULT: {col['column_default']}" if col['column_default'] else ''
-                    lines.append(f"- {col['column_name']}: {col['data_type']} ({nullable}){default}")
-                return '\n'.join(lines)
+                return get_table_schema_safely(table_name)
             except Exception as e:
                 return f"Schema Query Error for table '{table_name}': {e}"
         
         return [query_pharmacy_db, describe_pharmacy_table_schema]
 
-    def get_postgres_connection(self):
-        """Get PostgreSQL connection using settings"""
-        return psycopg2.connect(
-            host=settings.POSTGRES_SERVER,
-            port=settings.POSTGRES_PORT,
-            database=settings.POSTGRES_DB,
-            user=settings.POSTGRES_USER,
-            password=settings.POSTGRES_PASSWORD
-        )
 
     def log_execution_step(self, state: PharmacyAgentState, step_name: str, status: str, details: Dict = None):
         """Log execution step with context"""
@@ -1025,6 +993,7 @@ class PharmacyAgentLangGraph:
 
             # Prepare pharmacy bill record - handle nested JSON structure
             user_id = state.user_id
+            # Use server-side local timezone in inserts; keep current_time for client-side mirrors if needed
             current_time = isoformat_now()
             
             pharmacy_info = pharmacy_data.get("pharmacy", {})
@@ -1514,11 +1483,10 @@ class PharmacyAgentLangGraph:
 
             cleaned = {key: clean_value(value) for key, value in bill_data.items()}
 
-            conn = self.get_postgres_connection()
-            cursor = conn.cursor()
-
-            # Prepare all fields for pharmacy_bills table
-            fields = [
+            with get_raw_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Prepare all fields for pharmacy_bills table
+                    fields = [
                 'user_id', 'pharmacy_name', 'pharmacy_address', 'pharmacy_phone',
                 'pharmacy_gstin', 'pharmacy_fssai_license', 'pharmacy_dl_numbers',
                 'pharmacy_registration_address', 'pharmacy_premise_address', 'pos_location',
@@ -1536,38 +1504,31 @@ class PharmacyAgentLangGraph:
                 'pharmacybill_filepath', 'created_at', 'updated_at'
             ]
             
-            values = [cleaned.get(f, None) for f in fields]
+                    values = [cleaned.get(f, None) for f in fields]
 
             # Convert lists to JSON strings for PostgreSQL
-            for i, field in enumerate(fields):
-                if field in ['pharmacy_dl_numbers', 'compliance_codes'] and values[i] is not None:
-                    if isinstance(values[i], list):
-                        values[i] = json.dumps(values[i])
+                    for i, field in enumerate(fields):
+                        if field in ['pharmacy_dl_numbers', 'compliance_codes'] and values[i] is not None:
+                            if isinstance(values[i], list):
+                                values[i] = json.dumps(values[i])
 
             # Insert pharmacy bill
-            insert_fields = ', '.join(fields)
-            insert_placeholders = ', '.join(['%s'] * len(fields))
-            insert_query = f"""
-                INSERT INTO pharmacy_bills ({insert_fields})
-                VALUES ({insert_placeholders})
-                RETURNING id
-            """
+                    insert_fields = ', '.join(fields)
+                    insert_placeholders = ', '.join(['%s'] * len(fields))
+                    tz = settings.DEFAULT_TIMEZONE
+                    insert_query = f"""
+                        INSERT INTO pharmacy_bills ({insert_fields})
+                        VALUES ({insert_placeholders})
+                        RETURNING id
+                    """
             
-            cursor.execute(insert_query, values)
-            bill_id = cursor.fetchone()[0]
-            conn.commit()
-            
-            return {"success": True, "action": "inserted", "bill_id": bill_id}
+                    cursor.execute(insert_query, values)
+                    bill_id = cursor.fetchone()[0]
+                    
+                    return {"success": True, "action": "inserted", "bill_id": bill_id}
             
         except Exception as e:
-            if conn:
-                conn.rollback()
             return {"success": False, "action": "error", "error": str(e)}
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
 
     def _insert_pharmacy_medications(self, medications_data: list) -> dict:
         """Insert multiple medication records for a pharmacy bill"""
@@ -1575,11 +1536,10 @@ class PharmacyAgentLangGraph:
             if not medications_data:
                 return {"success": True, "action": "no_medications", "inserted_count": 0}
 
-            conn = self.get_postgres_connection()
-            cursor = conn.cursor()
-
-            # Prepare all fields for pharmacy_medications table
-            fields = [
+            with get_raw_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Prepare all fields for pharmacy_medications table
+                    fields = [
                 'bill_id', 'user_id', 'medication_name', 'generic_name', 'brand_name',
                 'strength', 'quantity', 'unit_of_measurement', 'unit_price', 'total_price',
                 'dosage_instructions', 'frequency', 'duration', 'manufacturer_name',
@@ -1588,41 +1548,42 @@ class PharmacyAgentLangGraph:
                 'cgst_rate', 'cgst_amount', 'sgst_rate', 'sgst_amount',
                 'igst_rate', 'igst_amount', 'prescription_validity_date',
                 'dispensing_dl_number', 'created_at', 'updated_at'
-            ]
+                    ]
             
-            # Prepare batch insert
-            insert_fields = ', '.join(fields)
-            insert_placeholders = ', '.join(['%s'] * len(fields))
-            insert_query = f"""
-                INSERT INTO pharmacy_medications ({insert_fields})
-                VALUES ({insert_placeholders})
-                RETURNING id
-            """
+                    # Prepare batch insert
+                    insert_fields = ', '.join(fields)
+                    insert_placeholders = ', '.join(['%s'] * len(fields))
+                    tz = settings.DEFAULT_TIMEZONE
+                    insert_query = f"""
+                        INSERT INTO pharmacy_medications ({insert_fields})
+                        VALUES ({insert_placeholders})
+                        RETURNING id
+                    """
             
-            inserted_ids = []
-            
-            for medication_data in medications_data:
-                def clean_value(value):
-                    return None if value == "" else value
+                    inserted_ids = []
+                    
+                    for medication_data in medications_data:
+                        def clean_value(value):
+                            return None if value == "" else value
 
-                # Clean the data and handle special date parsing
-                cleaned = {key: clean_value(value) for key, value in medication_data.items()}
-                
-                # Special handling for expiry_date
-                if 'expiry_date' in cleaned:
-                    cleaned['expiry_date'] = self._parse_expiry_date(cleaned['expiry_date'])
-                
-                # Special handling for prescription_validity_date if needed
-                if 'prescription_validity_date' in cleaned:
-                    cleaned['prescription_validity_date'] = self._parse_expiry_date(cleaned['prescription_validity_date'])
-                
-                values = [cleaned.get(f, None) for f in fields]
-                
-                cursor.execute(insert_query, values)
-                medication_id = cursor.fetchone()[0]
-                inserted_ids.append(medication_id)
-            
-            conn.commit()
+                        # Clean the data and handle special date parsing
+                        cleaned = {key: clean_value(value) for key, value in medication_data.items()}
+                        
+                        # Special handling for expiry_date
+                        if 'expiry_date' in cleaned:
+                            cleaned['expiry_date'] = self._parse_expiry_date(cleaned['expiry_date'])
+                        
+                        # Special handling for prescription_validity_date if needed
+                        if 'prescription_validity_date' in cleaned:
+                            cleaned['prescription_validity_date'] = self._parse_expiry_date(cleaned['prescription_validity_date'])
+                        
+                        values = [cleaned.get(f, None) for f in fields]
+                        
+                        cursor.execute(insert_query, values)
+                        medication_id = cursor.fetchone()[0]
+                        inserted_ids.append(medication_id)
+                    
+                    conn.commit()
             
             return {
                 "success": True, 
@@ -1632,14 +1593,7 @@ class PharmacyAgentLangGraph:
             }
             
         except Exception as e:
-            if conn:
-                conn.rollback()
             return {"success": False, "action": "error", "error": str(e)}
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
 
     async def _use_advanced_retrieval(self, user_request: str) -> Dict[str, Any]:
         """Use LangGraph ReAct agent for retrieval (same logic as original ReAct agent)"""

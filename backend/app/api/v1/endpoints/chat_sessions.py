@@ -167,16 +167,14 @@ async def _wait_for_ws_connection(session_id: int, timeout_seconds: float = 20.0
 
 async def persist_assistant_message_and_notify(session_id: int, message_in: ChatMessageCreate) -> ChatMessage:
     """Persist an assistant message and notify connected clients, waiting briefly for WS attachment."""
-    from app.db.session import SessionLocal
-    db = SessionLocal()
-    try:
+    from app.core.database_utils import get_db_session
+    with get_db_session() as db:
         # Ensure role is assistant for clarity
         message_in.role = message_in.role or "assistant"
         if message_in.role != "assistant":
             message_in.role = "assistant"
 
         message = crud.chat_message.create_with_session(db=db, obj_in=message_in, session_id=session_id)
-        db.commit()
 
         # Wait for WS connection if needed (longer to catch UI attachment)
         await _wait_for_ws_connection(session_id, 20.0)
@@ -204,8 +202,6 @@ async def persist_assistant_message_and_notify(session_id: int, message_in: Chat
             pass
 
         return message
-    finally:
-        db.close()
 
 
 def _create_pending_response_key(session_id: int) -> str:

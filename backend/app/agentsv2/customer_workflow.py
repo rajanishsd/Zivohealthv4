@@ -351,7 +351,7 @@ async def assess_user_intent(state: CustomerState) -> CustomerState:
         1. VITALS: Heart rate, blood pressure, weight, temperature, oxygen saturation
         - Agents can: update database, retrieve data, analyze trends
         2. NUTRITION: Food intake, calorie tracking, meal logging, dietary analysis
-        - Agents can: update database, retrieve data, analyze trends
+        - Agents can: update database, retrieve data, analyze trends, create/set/update nutrition goal
         3. BIOMARKERS/LAB RESULTS: Blood tests, LFT, kidney function, cholesterol, etc.
         - Agents can: update database, retrieve data, analyze trends
         4. PHARMACY: Medication inventory, drug information, prescription management
@@ -382,6 +382,7 @@ async def assess_user_intent(state: CustomerState) -> CustomerState:
         - if file is provided without any request then complete the assessment as "final_user_input": "user want to upload the file to update health records" and dont ask any further questions.
         - if user request message is there along with file then dont ask any further questions.
         - also you already have access to users complete health records, so dont ask for any further information on health records.
+        - Dont ask for any further information if user request is to set nutrition goal.
 
         CONTEXT AWARENESS:
         - Consider the conversation history provided above to understand references to previous topics
@@ -412,6 +413,7 @@ async def assess_user_intent(state: CustomerState) -> CustomerState:
         - "I have a headache and nausea" (diagnosis - complete by default)
         - "What could cause shortness of breath?" (medical advice - complete by default)
         - "Analyze my lab report" (with relevant health-related PDF file attached)
+        - "I want to start a Weight loss diet plan. Please set nutrition goals accordingly."
 
         EXAMPLES OF NON-HEALTH REQUESTS (NOT SUPPORTED):
         - "Book me a flight to New York"
@@ -674,7 +676,7 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         agent = VitalsAgentLangGraph()
         # Combine tool-specified prompt with assessed user input, de-duplicating
         effective_prompt = _compose_effective_prompt(prompt_with_user_input)
-        return await agent.run(effective_prompt, user_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
+        return await agent.run(effective_prompt, user_id, session_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
     
     @tool
     async def nutrition_agent_tool(prompt_with_user_input: str) -> dict:
@@ -698,6 +700,7 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         - "update my nutrition data: I had a chicken salad with olive oil dressing for lunch"
         - "retrieve my nutrition data: show me my calorie intake for this week"
         - "analyze my nutrition: am I getting enough protein in my diet? and recommend me a meal plan"
+        - "Set Nutrition Goal: I want to start a Weight loss diet plan. Please set nutrition goals accordingly."
         
         Args:
             prompt_with_user_input: Combined prompt that includes the operation type AND the user's actual words/input
@@ -718,7 +721,7 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         agent = NutritionAgentLangGraph()
         # Combine tool-specified prompt with assessed user input, de-duplicating
         effective_prompt = _compose_effective_prompt(prompt_with_user_input)
-        return await agent.run(effective_prompt, user_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
+        return await agent.run(effective_prompt, user_id, session_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
     
     @tool
     async def pharmacy_agent_tool(prompt_with_user_input: str) -> dict:
@@ -761,7 +764,7 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         agent = PharmacyAgentLangGraph()
         # Combine tool-specified prompt with assessed user input, de-duplicating
         effective_prompt = _compose_effective_prompt(prompt_with_user_input)
-        return await agent.run(effective_prompt, user_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
+        return await agent.run(effective_prompt, user_id, session_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
     
     @tool
     async def lab_agent_tool(prompt_with_user_input: str) -> dict:
@@ -804,7 +807,7 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         agent = LabAgentLangGraph()
         # Combine tool-specified prompt with assessed user input, de-duplicating
         effective_prompt = _compose_effective_prompt(prompt_with_user_input)
-        result = await agent.run(effective_prompt, user_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
+        result = await agent.run(effective_prompt, user_id, session_id,final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
         
         # Debug: Log what the lab agent returns to the LangChain agent
         print(f"🔍 [DEBUG] lab_agent_tool returning to LangChain agent:")

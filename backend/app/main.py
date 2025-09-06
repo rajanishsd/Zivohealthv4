@@ -21,6 +21,7 @@ warnings.filterwarnings(
 # Import core modules (but not API routes yet)
 from app.core.config import settings
 from app.db.session import engine
+from app.core.database_utils import get_db_session
 from app.db.base import Base
 from app.core.redis import get_redis
 from app.core.system_metrics import system_metrics
@@ -51,8 +52,7 @@ async def lifespan(app: FastAPI):
         from sqlalchemy import inspect
         from app.db.session import SessionLocal
         
-        db = SessionLocal()
-        try:
+        with get_db_session() as db:
             inspector = inspect(db.bind)
             existing_tables = inspector.get_table_names()
             required_tables = [table.name for table in Base.metadata.tables.values()]
@@ -64,8 +64,6 @@ async def lifespan(app: FastAPI):
                 logger.warning("cd deployment && python database_setup.py")
             else:
                 logger.info("All required database tables exist")
-        finally:
-            db.close()
     except Exception as e:
         logger.warning(f"Could not check database tables: {e}")
     
@@ -114,8 +112,7 @@ async def lifespan(app: FastAPI):
             from app.db.session import SessionLocal
             from app.crud.vitals import VitalsCRUD
             
-            db = SessionLocal()
-            try:
+            with get_db_session() as db:
                 pending_count = len(VitalsCRUD.get_pending_aggregation_entries(db, limit=1))
                 if pending_count > 0:
                     logger.info(f"📊 [Startup] Found pending data - triggering separate worker process")
@@ -136,8 +133,6 @@ async def lifespan(app: FastAPI):
                         logger.error(f"❌ [Startup] Failed to trigger worker process: {e}")
                 else:
                     logger.info("ℹ️ [Startup] No pending aggregation data found")
-            finally:
-                db.close()
         else:
             logger.info("⏸️ [Startup] Pending data processing disabled by environment variable")
             
@@ -249,9 +244,9 @@ async def health_check():
     """Health check endpoint"""
     try:
         # Test database connection
-        from app.db.session import get_db
-        db = next(get_db())
-        db.execute("SELECT 1")
+        from app.core.database_utils import get_db_session
+        with get_db_session() as db:
+            db.execute("SELECT 1")
         db_status = "healthy"
     except Exception as e:
         logger.error(f"Database health check failed: {e}")

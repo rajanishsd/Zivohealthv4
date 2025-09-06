@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, Index
 from sqlalchemy.sql import func
 from datetime import datetime
 from app.db.base import Base
+from app.utils.timezone import local_now_db_expr, local_now_db_func
 
 class LabTestMapping(Base):
     """Mapping table for lab test names to categories"""
@@ -26,8 +27,8 @@ class LabTestMapping(Base):
     is_standardized = Column(Boolean, default=True, nullable=False)  # Whether this is a standardized test name
     
     # Audit fields
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, server_default=local_now_db_expr(), nullable=False)
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func(), nullable=False)
     
     # Indexes for efficient querying
     __table_args__ = (

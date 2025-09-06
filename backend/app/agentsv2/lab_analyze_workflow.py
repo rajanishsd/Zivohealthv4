@@ -269,7 +269,6 @@ class LabAnalyzeWorkflow:
             This tool allows the agent to:
             - Run data analysis and visualization code, Fix any python errors and retry until you achieve comprehensive results
             - Access pandas, numpy, matplotlib, seaborn
-            - Save plots directly to data/plots/ folder using save_plot()
             - Handle errors gracefully, Fix any python errors and retry until you achieve comprehensive results
             
             Args:
@@ -635,7 +634,6 @@ class LabAnalyzeWorkflow:
             - Store your final results in a 'results' dictionary when using execute_python_code
             - CRITICAL: To save plots, you MUST use save_plot() function, NOT plt.savefig()
             - Use save_plot('filename') after creating each visualization
-            - save_plot() saves files directly to data/plots/ folder
             - Include error handling and provide clear, medical-focused analysis
             - Iterate until you have a complete analysis that answers the user's request
             - IMPORTANT: At the end of your analysis, return your findings in a structured JSON format (see below)
@@ -993,15 +991,7 @@ class LabAnalyzeWorkflow:
         }
         state.execution_log.append(log_entry)
     
-    def get_postgres_connection(self):
-        """Get PostgreSQL connection using settings"""
-        return psycopg2.connect(
-            host=settings.POSTGRES_SERVER,
-            port=settings.POSTGRES_PORT,
-            database=settings.POSTGRES_DB,
-            user=settings.POSTGRES_USER,
-            password=settings.POSTGRES_PASSWORD
-        )
+
     
     async def run(self, request: str, user_id: int) -> Dict[str, Any]:
         """

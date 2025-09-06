@@ -32,6 +32,7 @@ from app.agentsv2.response_utils import format_agent_response, format_error_resp
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from app.core.config import settings
+from app.core.database_utils import execute_query_safely_json, get_table_schema_safely, get_raw_db_connection
 from app.agentsv2.tools.nutrition_tools import internet_search_tool
 from app.utils.timezone import now_local, isoformat_now
 from app.core.background_worker import trigger_smart_aggregation
@@ -123,6 +124,7 @@ class NutritionAgentState:
     # Input data
     original_prompt: str = ""
     user_id: Optional[int] = None
+    session_id: Optional[int] = None
     extracted_text: Optional[str] = None
     image_path: Optional[str] = None  # Path to food image for processing (only if no extracted_text)
     image_base64: Optional[str] = None  # Base64 encoded image data
@@ -215,6 +217,7 @@ class NutritionAgentLangGraph:
         workflow.add_node("update_nutrition_records", self.update_nutrition_records)
         workflow.add_node("retrieve_nutrition_data", self.retrieve_nutrition_data)
         workflow.add_node("analyze_nutrition", self.analyze_nutrition)
+        workflow.add_node("create_nutrition_goal", self.create_nutrition_goal)
         workflow.add_node("handle_error", self.handle_error)
         workflow.add_node("format_response", self.format_response)
         
@@ -229,6 +232,7 @@ class NutritionAgentLangGraph:
                 "update_nutrition_records": "update_nutrition_records",
                 "retrieve_nutrition_data": "retrieve_nutrition_data", 
                 "analyze_nutrition": "analyze_nutrition",
+                "create_nutrition_goal": "create_nutrition_goal",
                 "error": "handle_error"
             }
         )
@@ -237,6 +241,7 @@ class NutritionAgentLangGraph:
         workflow.add_edge("update_nutrition_records", "format_response")
         workflow.add_edge("retrieve_nutrition_data", "format_response")
         workflow.add_edge("analyze_nutrition", "format_response")
+        workflow.add_edge("create_nutrition_goal", "format_response")
         workflow.add_edge("handle_error", "format_response")
         
         # End workflow
@@ -310,13 +315,7 @@ class NutritionAgentLangGraph:
                     if re.search(pattern, clean_query):
                         return f"Query contains blocked keyword: {blocked.upper()}"
 
-                conn = self.get_postgres_connection()
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute(query)
-                results = cursor.fetchall()
-                cursor.close()
-                conn.close()
-                return json.dumps(results, default=str)
+                return execute_query_safely_json(query)
             except Exception as e:
                 return f"Query Error: {e}"
         
@@ -335,39 +334,12 @@ class NutritionAgentLangGraph:
             try:
                 if not table_name:
                     table_name = self.table_name
-                conn = self.get_postgres_connection()
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute('''
-                    SELECT column_name, data_type, is_nullable, column_default
-                    FROM information_schema.columns
-                    WHERE table_name = %s AND table_schema = 'public'
-                    ORDER BY ordinal_position;
-                ''', (table_name,))
-                columns = cursor.fetchall()
-                cursor.close()
-                conn.close()
-                if not columns:
-                    return f"No schema found for table '{table_name}'."
-                lines = [f"Schema for table '{table_name}':"]
-                for col in columns:
-                    nullable = 'NULL' if col['is_nullable'] == 'YES' else 'NOT NULL'
-                    default = f", DEFAULT: {col['column_default']}" if col['column_default'] else ''
-                    lines.append(f"- {col['column_name']}: {col['data_type']} ({nullable}){default}")
-                return '\n'.join(lines)
+                return get_table_schema_safely(table_name)
             except Exception as e:
                 return f"Schema Query Error for table '{table_name}': {e}"
         
         return [query_nutrition_db, describe_nutrition_table_schema, internet_search_tool]
 
-    def get_postgres_connection(self):
-        """Get PostgreSQL connection using settings"""
-        return psycopg2.connect(
-            host=settings.POSTGRES_SERVER,
-            port=settings.POSTGRES_PORT,
-            database=settings.POSTGRES_DB,
-            user=settings.POSTGRES_USER,
-            password=settings.POSTGRES_PASSWORD
-        )
 
     def log_execution_step(self, state: NutritionAgentState, step_name: str, status: str, details: Dict = None):
         """Log execution step with context"""
@@ -396,8 +368,9 @@ class NutritionAgentLangGraph:
                         "- I had a salad with 100g of chicken breast and 100g of rice for lunch today"
                 "2. retrieve : Retrieve nutrition data, food entries, or specific nutrient information by category or date range.\n"
                 "3. analyze : Analyze nutrition trends, comparitive analysis, or do more complex data analysis and provide result (e.g., show trends in nutrition intake and how to improve the food intake).\n"
+                "4. create_nutrition_goal : Create or modify a user's nutrition goal based on a requested diet objective (e.g., weight loss, diabetic diet, etc.).\n"
                 "Given the user's request, return ONLY a JSON object with the following keys with no additional commentary:\n"
-                "  task_type: one of ['update', 'retrieve', 'analyze']\n"
+                "  task_type: one of ['update', 'retrieve', 'analyze', 'create_nutrition_goal']\n"
                 "  reason: a brief explanation for your classification\n"
                 "If the request is ambiguous or does not match any, set task_type to 'unknown' and explain in reason."
             )
@@ -471,6 +444,8 @@ class NutritionAgentLangGraph:
             return "retrieve_nutrition_data"
         elif task in ["analyze"]:
             return "analyze_nutrition"
+        elif task in ["create_nutrition_goal", "create_goal", "set_goal", "nutrition_goal"]:
+            return "create_nutrition_goal"
         else:
             return "error"
 
@@ -1152,7 +1127,36 @@ IMPORTANT:
         
         return state
 
-    async def run(self, prompt: str, user_id: int, extracted_text: str = None, image_path: str = None, image_base64: str = None, source_file_path: str = None) -> Dict[str, Any]:
+    async def create_nutrition_goal(self, state: NutritionAgentState) -> NutritionAgentState:
+        """Run the nutritional goal workflow (placeholders) and capture results."""
+        self.log_execution_step(state, "create_nutrition_goal", "started")
+        try:
+            # Use the user's original prompt to infer objective in higher layers; for now, accept the raw prompt
+            from app.agentsv2.nutrition_goal_workflow import run_nutritional_goal_workflow
+            # Prepare a minimal request_data scaffold; future: parse objective from prompt
+            request_data = {
+                "objective_code": state.task_parameters.get("original_prompt") or "unspecified",
+                "original_prompt": state.original_prompt
+            }
+            result = await run_nutritional_goal_workflow(
+                user_id=state.user_id or 0,
+                session_id=state.session_id,
+                request_data=request_data
+            )
+            # Attach results to response_data shape used by format_response
+            state.response_data = result
+            self.log_execution_step(state, "create_nutrition_goal", "completed")
+        except Exception as e:
+            state.has_error = True
+            state.error_context = {
+                "error_type": "workflow",
+                "node": "create_nutrition_goal",
+                "message": str(e)
+            }
+            self.log_execution_step(state, "create_nutrition_goal", "failed", {"error": str(e)})
+        return state
+
+    async def run(self, prompt: str, user_id: int, session_id: int = None, extracted_text: str = None, image_path: str = None, image_base64: str = None, source_file_path: str = None) -> Dict[str, Any]:
         """
         Execute the nutrition agent workflow.
         
@@ -1171,6 +1175,7 @@ IMPORTANT:
             initial_state = NutritionAgentState(
                 original_prompt=prompt,
                 user_id=user_id,
+                session_id=session_id,
                 extracted_text=extracted_text,
                 image_path=image_path,
                 image_base64=image_base64,
@@ -1307,68 +1312,61 @@ IMPORTANT:
             if not cleaned.get('aggregation_status'):
                 cleaned['aggregation_status'] = 'pending'
 
-            conn = self.get_postgres_connection()
-            cursor = conn.cursor()
+            with get_raw_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Prepare all fields for insert/update
+                    fields = [
+                        'user_id', 'food_item_name', 'dish_name', 'dish_type', 'meal_type',
+                        'portion_size', 'portion_unit',
+                        'calories', 'protein_g', 'fat_g', 'carbs_g', 'fiber_g', 'sugar_g', 'sodium_mg',
+                        'vitamin_a_mcg', 'vitamin_c_mg', 'vitamin_d_mcg', 'vitamin_e_mg', 'vitamin_k_mcg',
+                        'vitamin_b1_mg', 'vitamin_b2_mg', 'vitamin_b3_mg', 'vitamin_b6_mg', 'vitamin_b12_mcg', 'folate_mcg',
+                        'calcium_mg', 'iron_mg', 'magnesium_mg', 'phosphorus_mg', 'potassium_mg', 'zinc_mg',
+                        'copper_mg', 'manganese_mg', 'selenium_mcg',
+                        'meal_date', 'meal_time', 'data_source', 'confidence_score', 'image_url', 'aggregation_status'
+                    ]
+                    values = [cleaned.get(f, None) for f in fields]
 
-            # Prepare all fields for insert/update
-            fields = [
-                'user_id', 'food_item_name', 'dish_name', 'dish_type', 'meal_type',
-                'portion_size', 'portion_unit',
-                'calories', 'protein_g', 'fat_g', 'carbs_g', 'fiber_g', 'sugar_g', 'sodium_mg',
-                'vitamin_a_mcg', 'vitamin_c_mg', 'vitamin_d_mcg', 'vitamin_e_mg', 'vitamin_k_mcg',
-                'vitamin_b1_mg', 'vitamin_b2_mg', 'vitamin_b3_mg', 'vitamin_b6_mg', 'vitamin_b12_mcg', 'folate_mcg',
-                'calcium_mg', 'iron_mg', 'magnesium_mg', 'phosphorus_mg', 'potassium_mg', 'zinc_mg',
-                'copper_mg', 'manganese_mg', 'selenium_mcg',
-                'meal_date', 'meal_time', 'data_source', 'confidence_score', 'image_url', 'aggregation_status'
-            ]
-            values = [cleaned.get(f, None) for f in fields]
-
-            # Upsert logic: try update, if not found then insert
-            update_fields = [f"{f} = %s" for f in fields[1:]]  # skip user_id for update
-            update_query = f"""
-                UPDATE {self.table_name}
-                SET {', '.join(update_fields)}, updated_at = NOW()
-                WHERE user_id = %s 
-                  AND meal_date = %s 
-                  AND meal_time = %s
-                  AND dish_name IS NOT DISTINCT FROM %s
-                RETURNING id
-            """
-            cursor.execute(
-                update_query,
-                values[1:] + [
-                    values[0],
-                    values[fields.index('meal_date')],
-                    values[fields.index('meal_time')],
-                    values[fields.index('dish_name')]
-                ]
-            )
-            result = cursor.fetchone()
-            if result:
-                conn.commit()
-                return {"action": "updated", "record_id": result[0]}
-            # If not updated, insert
-            insert_fields = ', '.join(fields)
-            insert_placeholders = ', '.join(['%s'] * len(fields))
-            insert_query = f"""
-                INSERT INTO {self.table_name} ({insert_fields})
-                VALUES ({insert_placeholders})
-                RETURNING id
-            """
-            cursor.execute(insert_query, values)
-            new_id = cursor.fetchone()[0]
-            conn.commit()
-           
+                    # Upsert logic: try update, if not found then insert
+                    update_fields = [f"{f} = %s" for f in fields[1:]]  # skip user_id for update
+                    tz = settings.DEFAULT_TIMEZONE
+                    update_query = f"""
+                        UPDATE {self.table_name}
+                        SET {', '.join(update_fields)}, updated_at = timezone('{tz}', now())
+                        WHERE user_id = %s 
+                          AND meal_date = %s 
+                          AND meal_time = %s
+                          AND dish_name IS NOT DISTINCT FROM %s
+                        RETURNING id
+                    """
+                    cursor.execute(
+                        update_query,
+                        values[1:] + [
+                            values[0],
+                            values[fields.index('meal_date')],
+                            values[fields.index('meal_time')],
+                            values[fields.index('dish_name')]
+                        ]
+                    )
+                    result = cursor.fetchone()
+                    if result:
+                        return {"action": "updated", "record_id": result[0]}
+                    # If not updated, insert
+                    insert_fields = ', '.join(fields)
+                    insert_placeholders = ', '.join(['%s'] * len(fields))
+                    tz = settings.DEFAULT_TIMEZONE
+                    # Ensure created_at/updated_at use local timezone server time if present in fields
+                    insert_query = f"""
+                        INSERT INTO {self.table_name} ({insert_fields})
+                        VALUES ({insert_placeholders})
+                        RETURNING id
+                    """
+                    cursor.execute(insert_query, values)
+                    new_id = cursor.fetchone()[0]
+                    
             return {"action": "inserted", "record_id": new_id}
         except Exception as e:
-            if conn:
-                conn.rollback()
             return {"action": "error", "error": str(e)}
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
 
     async def _use_advanced_retrieval(self, user_request: str) -> Dict[str, Any]:
         """Use LangGraph ReAct agent for retrieval but *bypass* the model's final

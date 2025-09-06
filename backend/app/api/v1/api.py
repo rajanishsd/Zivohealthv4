@@ -7,6 +7,7 @@ from app.api.v1.endpoints import health
 from app.api.v1.endpoints import appointments
 from app.api.v1.endpoints import vitals
 from app.api.v1.endpoints import nutrition
+from app.api.v1.endpoints import nutrition_goals
 from app.api.v1.endpoints import agents
 from app.api.v1.endpoints import lab_reports
 from app.api.v1.endpoints import files
@@ -24,6 +25,7 @@ api_router.include_router(doctors.router, prefix="/doctors", tags=["doctors"])
 api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(vitals.router, prefix="/vitals", tags=["vitals"])
 api_router.include_router(nutrition.router, prefix="/nutrition", tags=["nutrition"])
+api_router.include_router(nutrition_goals.router, prefix="/nutrition-goals", tags=["nutrition-goals"])
 api_router.include_router(appointments.router, prefix="/appointments", tags=["appointments"])
 api_router.include_router(agents.router, prefix="/agents", tags=["agents"])
 api_router.include_router(audit.router, prefix="/audit", tags=["audit"])

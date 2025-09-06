@@ -1,6 +1,13 @@
 import SwiftUI
 
 struct ChatView: View {
+    // Optional prefilled draft to show as the next page context
+    let prefillDraft: String?
+    let placeholderText: String?
+    init(prefillDraft: String? = nil, placeholderText: String? = nil) {
+        self.prefillDraft = prefillDraft
+        self.placeholderText = placeholderText
+    }
     @ObservedObject private var viewModel = ChatViewModel.shared
     @StateObject private var historyManager = ChatHistoryManager.shared
     @State private var messageText = ""
@@ -262,7 +269,7 @@ struct ChatView: View {
             }
 
             // Message Input
-            MessageInputView(onSend: { message in
+            MessageInputView(prefillText: prefillDraft, placeholderText: placeholderText, onSend: { message in
                 Task {
                     await viewModel.sendStreamingMessage(message)
                 }
@@ -339,6 +346,7 @@ struct ChatView: View {
                 await viewModel.loadCurrentSessionData()
             }
         }
+        
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToChatTab"))) { _ in
             // Close any open sheets when switching to chat tab
             showingChatHistory = false
@@ -374,6 +382,8 @@ struct ChatView: View {
 
 // MARK: - Message Input Component
 struct MessageInputView: View {
+    let prefillText: String?
+    let placeholderText: String?
     let onSend: (String) -> Void
     let onSendWithFile: (String, URL) -> Void
     let isAnalyzing: Bool
@@ -459,13 +469,6 @@ struct MessageInputView: View {
                 }
                 
                 ZStack(alignment: .leading) {
-                    if messageText.isEmpty && selectedFileName == nil && !isAnalyzing {
-                        Text("Type a message...")
-                            .font(.system(size: UIFont.systemFontSize * 0.75))
-                            .foregroundColor(.gray)
-                            .padding(.leading, 4)
-                    }
-                    
                     if isExpanded {
                         // Expanded TextEditor when expanded
                         TextEditor(text: $messageText)
@@ -486,6 +489,14 @@ struct MessageInputView: View {
                         .font(.system(size: UIFont.systemFontSize * 0.9))
                         .focused($isFocused)
                         .disabled(isAnalyzing)
+                    }
+
+                    if messageText.isEmpty && selectedFileName == nil && !isAnalyzing {
+                        Text(placeholderText ?? "Type a message...")
+                            .font(.system(size: UIFont.systemFontSize * 0.75))
+                            .foregroundColor(.gray)
+                            .padding(.leading, 4)
+                            .allowsHitTesting(false)
                     }
                 }
                 .padding(8)
@@ -525,6 +536,16 @@ struct MessageInputView: View {
             .background(.regularMaterial)
         }
         .background(Color(UIColor.systemBackground))
+        .onAppear {
+            if let prefill = prefillText, messageText.isEmpty {
+                messageText = prefill
+                // Expand and focus to make it clear it's editable
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded = true
+                    isFocused = true
+                }
+            }
+        }
         .sheet(isPresented: $showingAttachmentOptions) {
             AttachmentOptionsView(
                 onUploadFile: {

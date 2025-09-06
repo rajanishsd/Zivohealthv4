@@ -978,6 +978,8 @@ class NutritionAgent:
         base_prompt = self._create_nutrition_extraction_prompt()
         return f"{base_prompt}\n\nUser Message: {user_message}\n"
 
+    
+
     async def store_data(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Store nutrition data to database"""
         

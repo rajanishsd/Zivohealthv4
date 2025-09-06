@@ -1,9 +1,10 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Text, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Text, ForeignKey, Index, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from enum import Enum
 
 from app.db.base import Base
+from app.utils.timezone import local_now_db_expr, local_now_db_func
 
 class NutritionDataSource(str, Enum):
     """Source of nutrition data"""
@@ -102,8 +103,8 @@ class NutritionRawData(Base):
     aggregated_at = Column(DateTime, nullable=True)
     
     # Tracking
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=local_now_db_expr())
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func())
     
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
@@ -178,8 +179,8 @@ class NutritionDailyAggregate(Base):
     
     # Metadata
     notes = Column(Text)  # Summary notes
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=local_now_db_expr())
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func())
     
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
@@ -243,8 +244,8 @@ class NutritionWeeklyAggregate(Base):
     
     # Metadata
     notes = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=local_now_db_expr())
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func())
     
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
@@ -307,8 +308,8 @@ class NutritionMonthlyAggregate(Base):
     
     # Metadata
     notes = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=local_now_db_expr())
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func())
     
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
@@ -336,8 +337,8 @@ class NutritionSyncStatus(Base):
     error_count = Column(Integer, default=0)
     
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=local_now_db_expr())
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func())
     
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
@@ -345,4 +346,32 @@ class NutritionSyncStatus(Base):
     # Unique constraint for user + source combination
     __table_args__ = (
         Index('idx_user_source_nutrition', 'user_id', 'data_source'),
+    )
+
+
+class NutritionMealPlan(Base):
+    """Meal plans generated for nutrition goals - stores meal data as JSON strings"""
+    __tablename__ = "nutrition_meal_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    goal_id = Column(Integer, ForeignKey("nutrition_goals.id"), nullable=False)
+    
+    # Meal data stored as JSON strings
+    breakfast = Column(Text, nullable=True)  # JSON string with breakfast options
+    lunch = Column(Text, nullable=True)  # JSON string with lunch options
+    dinner = Column(Text, nullable=True)  # JSON string with dinner options
+    snacks = Column(Text, nullable=True)  # JSON string with snack options
+    recommended_options = Column(Text, nullable=True)  # JSON string with recommended options
+    total_calories_kcal = Column(Integer, nullable=True)
+    
+    # Tracking
+    created_at = Column(DateTime, server_default=local_now_db_expr())
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func())
+    
+    # Relationships
+    goal = relationship("NutritionGoal", foreign_keys=[goal_id])
+
+    # Indexes for efficient querying
+    __table_args__ = (
+        Index('ix_nutrition_meal_plans_goal_id', 'goal_id'),
     ) 

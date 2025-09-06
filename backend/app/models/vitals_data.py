@@ -3,6 +3,7 @@ from sqlalchemy import Column, Integer, String, DateTime, Float, Date, Text, For
 from sqlalchemy.orm import relationship
 from enum import Enum
 from app.db.base import Base
+from app.utils.timezone import local_now_db_expr, local_now_db_func
 
 class VitalMetricType(str, Enum):
     """Enumeration of supported vital metric types"""
@@ -68,8 +69,8 @@ class VitalsRawData(Base):
     aggregated_at = Column(DateTime, nullable=True)  # When aggregation was completed
     
     # Tracking
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=local_now_db_expr())
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func())
     
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
@@ -115,8 +116,8 @@ class VitalsRawCategorized(Base):
     aggregated_at = Column(DateTime, nullable=True)  # When aggregation was completed
     
     # Tracking
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=local_now_db_expr())
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func())
     
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
@@ -158,8 +159,8 @@ class VitalsHourlyAggregate(Base):
     
     # Metadata
     notes = Column(Text)  # Summary notes
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=local_now_db_expr())
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func())
     
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
@@ -197,8 +198,8 @@ class VitalsDailyAggregate(Base):
     
     # Metadata
     notes = Column(Text)  # Summary notes
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=local_now_db_expr())
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func())
     
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
@@ -237,8 +238,8 @@ class VitalsWeeklyAggregate(Base):
     
     # Metadata
     notes = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=local_now_db_expr())
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func())
     
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
@@ -276,8 +277,8 @@ class VitalsMonthlyAggregate(Base):
     
     # Metadata
     notes = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=local_now_db_expr())
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func())
     
     # Relationships
     user = relationship("User", foreign_keys=[user_id])

@@ -984,15 +984,7 @@ class PharmacyAnalyzeWorkflow:
         }
         state.execution_log.append(log_entry)
     
-    def get_postgres_connection(self):
-        """Get PostgreSQL connection using settings"""
-        return psycopg2.connect(
-            host=settings.POSTGRES_SERVER,
-            port=settings.POSTGRES_PORT,
-            database=settings.POSTGRES_DB,
-            user=settings.POSTGRES_USER,
-            password=settings.POSTGRES_PASSWORD
-        )
+ 
     
     async def run(self, request: str, user_id: int) -> Dict[str, Any]:
         """

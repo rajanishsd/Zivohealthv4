@@ -19,6 +19,7 @@ sys.path.insert(0, str(backend_path))
 from langgraph.graph import  StateGraph, END, START
 from langchain_openai import ChatOpenAI
 from app.core.config import settings
+from app.core.database_utils import execute_query_safely_json, get_table_schema_safely, get_raw_db_connection
 from configurations.lab_config import LAB_TABLES, PRIMARY_LAB_TABLE, ALL_LAB_TABLES, AGGREGATION_TABLES
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -253,13 +254,7 @@ class LabAgentLangGraph:
                     if re.search(pattern, clean_query):
                         return f"Query contains blocked keyword: {blocked.upper()}"
 
-                conn = self.get_postgres_connection()
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute(query)
-                results = cursor.fetchall()
-                cursor.close()
-                conn.close()
-                return json.dumps(results, default=str)
+                return execute_query_safely_json(query)
             except Exception as e:
                 return f"Query Error: {e}"
         
@@ -285,25 +280,7 @@ class LabAgentLangGraph:
             try:
                 if not table_name:
                     table_name = self.table_name
-                conn = self.get_postgres_connection()
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute('''
-                    SELECT column_name, data_type, is_nullable, column_default
-                    FROM information_schema.columns
-                    WHERE table_name = %s AND table_schema = 'public'
-                    ORDER BY ordinal_position;
-                ''', (table_name,))
-                columns = cursor.fetchall()
-                cursor.close()
-                conn.close()
-                if not columns:
-                    return f"No schema found for table '{table_name}'."
-                lines = [f"Schema for table '{table_name}':"]
-                for col in columns:
-                    nullable = 'NULL' if col['is_nullable'] == 'YES' else 'NOT NULL'
-                    default = f", DEFAULT: {col['column_default']}" if col['column_default'] else ''
-                    lines.append(f"- {col['column_name']}: {col['data_type']} ({nullable}){default}")
-                return '\n'.join(lines)
+                return get_table_schema_safely(table_name)
             except Exception as e:
                 return f"Schema Query Error for table '{table_name}': {e}"
         
@@ -347,15 +324,6 @@ class LabAgentLangGraph:
         
         return workflow.compile()
     
-    def get_postgres_connection(self):
-        """Get PostgreSQL connection using settings"""
-        return psycopg2.connect(
-            host=settings.POSTGRES_SERVER,
-            port=settings.POSTGRES_PORT,
-            database=settings.POSTGRES_DB,
-            user=settings.POSTGRES_USER,
-            password=settings.POSTGRES_PASSWORD
-        )
     
     def get_available_tables(self) -> Dict[str, str]:
         """Get dictionary of available lab tables"""
@@ -985,7 +953,7 @@ class LabAgentLangGraph:
         
         return state
     
-    async def run(self, prompt: str, user_id: int = None, extracted_text: str = None, image_path: str = None, image_base64: str = None, source_file_path: str = None) -> Dict:
+    async def run(self, prompt: str, user_id: int = None, session_id: int = None, extracted_text: str = None, image_path: str = None, image_base64: str = None, source_file_path: str = None) -> Dict:
         """
         Execute the lab agent workflow.
         
@@ -1163,158 +1131,157 @@ class LabAgentLangGraph:
                 if original_test_name != cleaned_result['test_name']:
                     print(f"🔍 [DEBUG] Normalized test name: '{original_test_name}' -> '{cleaned_result['test_name']}'")
             
-            conn = self.get_postgres_connection()
-            cursor = conn.cursor()
-            
-            # Check if record exists (potential duplicate detection)
-            # Use LOWER() for case-insensitive comparison
-            check_query = f"""
-                SELECT id, test_value, test_unit, reference_range, test_status, test_category, 
-                       report_date, ordering_physician, test_notes, test_methodology, lab_address
-                FROM {self.table_name}
-                WHERE user_id = %s AND LOWER(test_name) = LOWER(%s) AND test_date = %s
-            """
-            cursor.execute(check_query, (
-                cleaned_result['user_id'],
-                cleaned_result['test_name'],
-                cleaned_result['test_date']
-            ))
-            existing_records = cursor.fetchall()
-            
-            if existing_records:
-                # Record exists - check for actual changes needed
-                existing_record = existing_records[0]  # Get first match
-                record_id = existing_record[0]
-                
-                # Map existing values
-                existing_values = {
-                    'test_value': existing_record[1],
-                    'test_unit': existing_record[2], 
-                    'reference_range': existing_record[3],
-                    'test_status': existing_record[4],
-                    'test_category': existing_record[5],
-                    'report_date': existing_record[6],
-                    'ordering_physician': existing_record[7],
-                    'test_notes': existing_record[8],
-                    'test_methodology': existing_record[9],
-                    'lab_address': existing_record[10]
-                }
-                
-                # Check what fields actually need updating
-                update_fields = []
-                update_values = []
-                changes_detected = []
-                
-                updatable_fields = ['test_value']
-                
-                for field in updatable_fields:
-                    if field in cleaned_result and cleaned_result[field] is not None:
-                        new_value = cleaned_result[field]
-                        old_value = existing_values[field]
-                        
-                        # Check if value is actually different
-                        if str(new_value).strip() != str(old_value or '').strip():
-                            update_fields.append(f"{field} = %s")
-                            update_values.append(new_value)
-                            changes_detected.append({
-                                'field': field,
-                                'old_value': old_value,
-                                'new_value': new_value
-                            })
-                
-                if update_fields:
-                    # Add updated_at timestamp
-                    update_fields.append("updated_at = NOW()")
-                    
-                    update_query = f"""
-                        UPDATE {self.table_name}
-                            SET {', '.join(update_fields)}
-                            WHERE user_id = %s AND LOWER(test_name) = LOWER(%s) AND test_date = %s
-                        """
-                    
-                    # Add WHERE clause values
-                    update_values.extend([
-                        cleaned_result['user_id'], cleaned_result['test_name'], 
+            with get_raw_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Check if record exists (potential duplicate detection)
+                    # Use LOWER() for case-insensitive comparison
+                    check_query = f"""
+                        SELECT id, test_value, test_unit, reference_range, test_status, test_category, 
+                               report_date, ordering_physician, test_notes, test_methodology, lab_address
+                        FROM {self.table_name}
+                        WHERE user_id = %s AND LOWER(test_name) = LOWER(%s) AND test_date = %s
+                    """
+                    cursor.execute(check_query, (
+                        cleaned_result['user_id'],
+                        cleaned_result['test_name'],
                         cleaned_result['test_date']
-                    ])
+                    ))
+                    existing_records = cursor.fetchall()
                     
-                    cursor.execute(update_query, update_values)
-                    affected_rows = cursor.rowcount
+                    if existing_records:
+                        # Record exists - check for actual changes needed
+                        existing_record = existing_records[0]  # Get first match
+                        record_id = existing_record[0]
+                        
+                        # Map existing values
+                        existing_values = {
+                            'test_value': existing_record[1],
+                            'test_unit': existing_record[2], 
+                            'reference_range': existing_record[3],
+                            'test_status': existing_record[4],
+                            'test_category': existing_record[5],
+                            'report_date': existing_record[6],
+                            'ordering_physician': existing_record[7],
+                            'test_notes': existing_record[8],
+                            'test_methodology': existing_record[9],
+                            'lab_address': existing_record[10]
+                        }
+                        
+                        # Check what fields actually need updating
+                        update_fields = []
+                        update_values = []
+                        changes_detected = []
+                        
+                        updatable_fields = ['test_value']
+                        
+                        for field in updatable_fields:
+                            if field in cleaned_result and cleaned_result[field] is not None:
+                                new_value = cleaned_result[field]
+                                old_value = existing_values[field]
+                                
+                                # Check if value is actually different
+                                if str(new_value).strip() != str(old_value or '').strip():
+                                    update_fields.append(f"{field} = %s")
+                                    update_values.append(new_value)
+                                    changes_detected.append({
+                                        'field': field,
+                                        'old_value': old_value,
+                                        'new_value': new_value
+                                    })
+                        
+                        if update_fields:
+                            # Add updated_at timestamp using local timezone
+                            tz = settings.DEFAULT_TIMEZONE
+                            update_fields.append(f"updated_at = timezone('{tz}', now())")
+                            
+                            update_query = f"""
+                                UPDATE {self.table_name}
+                                    SET {', '.join(update_fields)}
+                                    WHERE user_id = %s AND LOWER(test_name) = LOWER(%s) AND test_date = %s
+                                """
+                            
+                            # Add WHERE clause values
+                            update_values.extend([
+                                cleaned_result['user_id'], cleaned_result['test_name'], 
+                                cleaned_result['test_date']
+                            ])
+                            
+                            cursor.execute(update_query, update_values)
+                            affected_rows = cursor.rowcount
+                            
+                            result = {
+                                "action": "updated",
+                                "test_name": cleaned_result['test_name'],
+                                "test_date": cleaned_result['test_date'],
+                                "record_id": record_id,
+                                "affected_rows": affected_rows,
+                                "fields_updated": len(changes_detected),
+                                "changes": changes_detected,
+                                "duplicate_records_found": len(existing_records),
+                                "message": f"Successfully updated {len(changes_detected)} field(s) for {cleaned_result['test_name']} on {cleaned_result['test_date']}"
+                            }
+                        else:
+                            # No changes needed - exact duplicate
+                            result = {
+                                "action": "duplicate",
+                                "test_name": cleaned_result['test_name'],
+                                "test_date": cleaned_result['test_date'],
+                                "record_id": record_id,
+                                "affected_rows": 0,
+                                "fields_updated": 0,
+                                "changes": [],
+                                "duplicate_records_found": len(existing_records),
+                                "message": f"No changes needed - identical record already exists for {cleaned_result['test_name']} on {cleaned_result['test_date']}"
+                            }
+                    else:
+                        # Insert new record
+                        insert_fields = ['user_id', 'test_name', 'test_date']
+                        insert_values = [cleaned_result['user_id'], cleaned_result['test_name'], 
+                                       cleaned_result['test_date']]
+                        insert_placeholders = ['%s', '%s', '%s']
+                        
+                        # Add optional fields that have values
+                        optional_fields = ['test_value', 'test_unit', 'reference_range', 'test_status',
+                                         'test_category', 'report_date', 'ordering_physician', 'test_notes',
+                                         'test_methodology', 'lab_address', 'lab_name']
+                        
+                        fields_inserted = []
+                        for field in optional_fields:
+                            if field in cleaned_result and cleaned_result[field] is not None:
+                                insert_fields.append(field)
+                                insert_values.append(cleaned_result[field])
+                                insert_placeholders.append('%s')
+                                fields_inserted.append({
+                                    'field': field,
+                                    'value': cleaned_result[field]
+                                })
+                        
+                        # Add timestamps using local timezone
+                        tz = settings.DEFAULT_TIMEZONE
+                        insert_fields.extend(['created_at', 'updated_at'])
+                        insert_placeholders.extend([f"timezone('{tz}', now())", f"timezone('{tz}', now())"])
+                        
+                        insert_query = f"""
+                            INSERT INTO {self.table_name} ({', '.join(insert_fields)})
+                            VALUES ({', '.join(insert_placeholders)})
+                            RETURNING id
+                        """
+                        cursor.execute(insert_query, insert_values)
+                        new_record_id = cursor.fetchone()[0]
+                        
+                        result = {
+                            "action": "inserted",
+                            "test_name": cleaned_result['test_name'],
+                            "test_date": cleaned_result['test_date'],
+                            "record_id": new_record_id,
+                            "affected_rows": 1,
+                            "fields_inserted": len(fields_inserted),
+                            "data": fields_inserted,
+                            "duplicate_records_found": 0,
+                            "message": f"Successfully inserted new record for {cleaned_result['test_name']} on {cleaned_result['test_date']} with {len(fields_inserted)} field(s)"
+                        }
                     
-                    result = {
-                        "action": "updated",
-                        "test_name": cleaned_result['test_name'],
-                        "test_date": cleaned_result['test_date'],
-                        "record_id": record_id,
-                        "affected_rows": affected_rows,
-                        "fields_updated": len(changes_detected),
-                        "changes": changes_detected,
-                        "duplicate_records_found": len(existing_records),
-                        "message": f"Successfully updated {len(changes_detected)} field(s) for {cleaned_result['test_name']} on {cleaned_result['test_date']}"
-                    }
-                else:
-                    # No changes needed - exact duplicate
-                    result = {
-                        "action": "duplicate",
-                        "test_name": cleaned_result['test_name'],
-                        "test_date": cleaned_result['test_date'],
-                        "record_id": record_id,
-                        "affected_rows": 0,
-                        "fields_updated": 0,
-                        "changes": [],
-                        "duplicate_records_found": len(existing_records),
-                        "message": f"No changes needed - identical record already exists for {cleaned_result['test_name']} on {cleaned_result['test_date']}"
-                    }
-            else:
-                # Insert new record
-                insert_fields = ['user_id', 'test_name', 'test_date']
-                insert_values = [cleaned_result['user_id'], cleaned_result['test_name'], 
-                               cleaned_result['test_date']]
-                insert_placeholders = ['%s', '%s', '%s']
-                
-                # Add optional fields that have values
-                optional_fields = ['test_value', 'test_unit', 'reference_range', 'test_status',
-                                 'test_category', 'report_date', 'ordering_physician', 'test_notes',
-                                 'test_methodology', 'lab_address', 'lab_name']
-                
-                fields_inserted = []
-                for field in optional_fields:
-                    if field in cleaned_result and cleaned_result[field] is not None:
-                        insert_fields.append(field)
-                        insert_values.append(cleaned_result[field])
-                        insert_placeholders.append('%s')
-                        fields_inserted.append({
-                            'field': field,
-                            'value': cleaned_result[field]
-                        })
-                
-                # Add timestamps
-                insert_fields.extend(['created_at', 'updated_at'])
-                insert_placeholders.extend(['NOW()', 'NOW()'])
-                
-                insert_query = f"""
-                    INSERT INTO {self.table_name} ({', '.join(insert_fields)})
-                    VALUES ({', '.join(insert_placeholders)})
-                    RETURNING id
-                """
-                cursor.execute(insert_query, insert_values)
-                new_record_id = cursor.fetchone()[0]
-                
-                result = {
-                    "action": "inserted",
-                    "test_name": cleaned_result['test_name'],
-                    "test_date": cleaned_result['test_date'],
-                    "record_id": new_record_id,
-                    "affected_rows": 1,
-                    "fields_inserted": len(fields_inserted),
-                    "data": fields_inserted,
-                    "duplicate_records_found": 0,
-                    "message": f"Successfully inserted new record for {cleaned_result['test_name']} on {cleaned_result['test_date']} with {len(fields_inserted)} field(s)"
-                }
-
-            conn.commit()
-            cursor.close()
-            conn.close()
+                    conn.commit()
             # Trigger coalesced labs aggregation (fire-and-forget)
             try:
                 asyncio.create_task(trigger_smart_aggregation(user_id=cleaned_result.get('user_id'), domains=["labs"]))
@@ -1360,13 +1327,7 @@ class LabAgentLangGraph:
             if not query.lower().startswith('select'):
                 return "Only SELECT queries are allowed."
 
-            conn = self.get_postgres_connection()
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute(query)
-            results = cursor.fetchall()
-            cursor.close()
-            conn.close()
-            return json.dumps(results, default=str)
+            return execute_query_safely_json(query)
         except Exception as e:
             return f"Query Error: {e}"
 
@@ -1378,25 +1339,7 @@ class LabAgentLangGraph:
         try:
             if not table_name:
                 table_name = self.table_name
-            conn = self.get_postgres_connection()
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute('''
-                SELECT column_name, data_type, is_nullable, column_default
-                FROM information_schema.columns
-                WHERE table_name = %s AND table_schema = 'public'
-                ORDER BY ordinal_position;
-            ''', (table_name,))
-            columns = cursor.fetchall()
-            cursor.close()
-            conn.close()
-            if not columns:
-                return f"No schema found for table '{table_name}'."
-            lines = [f"Schema for table '{table_name}':"]
-            for col in columns:
-                nullable = 'NULL' if col['is_nullable'] == 'YES' else 'NOT NULL'
-                default = f", DEFAULT: {col['column_default']}" if col['column_default'] else ''
-                lines.append(f"- {col['column_name']}: {col['data_type']} ({nullable}){default}")
-            return '\n'.join(lines)
+            return get_table_schema_safely(table_name)
         except Exception as e:
             return f"Schema Query Error for table '{table_name}': {e}"
 

@@ -32,6 +32,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from app.core.config import settings
+from app.core.database_utils import execute_query_safely_json, get_table_schema_safely, get_raw_db_connection
 from app.agentsv2.response_utils import format_agent_response, format_error_response
 
 # Import vitals configuration
@@ -304,13 +305,7 @@ class VitalsAgentLangGraph:
                     if re.search(pattern, clean_query):
                         return f"Query contains blocked keyword: {blocked.upper()}"
 
-                conn = self.get_postgres_connection()
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute(query)
-                results = cursor.fetchall()
-                cursor.close()
-                conn.close()
-                return json.dumps(results, default=str)
+                return execute_query_safely_json(query)
             except Exception as e:
                 return f"Query Error: {e}"
         
@@ -329,39 +324,12 @@ class VitalsAgentLangGraph:
             try:
                 if not table_name:
                     table_name = self.table_name
-                conn = self.get_postgres_connection()
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute('''
-                    SELECT column_name, data_type, is_nullable, column_default
-                    FROM information_schema.columns
-                    WHERE table_name = %s AND table_schema = 'public'
-                    ORDER BY ordinal_position;
-                ''', (table_name,))
-                columns = cursor.fetchall()
-                cursor.close()
-                conn.close()
-                if not columns:
-                    return f"No schema found for table '{table_name}'."
-                lines = [f"Schema for table '{table_name}':"]
-                for col in columns:
-                    nullable = 'NULL' if col['is_nullable'] == 'YES' else 'NOT NULL'
-                    default = f", DEFAULT: {col['column_default']}" if col['column_default'] else ''
-                    lines.append(f"- {col['column_name']}: {col['data_type']} ({nullable}){default}")
-                return '\n'.join(lines)
+                return get_table_schema_safely(table_name)
             except Exception as e:
                 return f"Schema Query Error for table '{table_name}': {e}"
         
         return [query_vitals_db, describe_vitals_table_schema]
 
-    def get_postgres_connection(self):
-        """Get PostgreSQL connection using settings"""
-        return psycopg2.connect(
-            host=settings.POSTGRES_SERVER,
-            port=settings.POSTGRES_PORT,
-            database=settings.POSTGRES_DB,
-            user=settings.POSTGRES_USER,
-            password=settings.POSTGRES_PASSWORD
-        )
 
     def log_execution_step(self, state: VitalsAgentState, step_name: str, status: str, details: Dict = None):
         """Log execution step with context"""
@@ -1149,10 +1117,10 @@ IMPORTANT:
         Insert vitals records using VitalsCRUD. Always returns a stats dict.
         """
         from app.crud.vitals import VitalsCRUD
-        from app.db.session import get_db
+        from app.core.database_utils import get_db_session
         from app.core.background_worker import trigger_smart_aggregation
         import asyncio
-        
+
         results = []
         stats = {
             "total_processed": 0,
@@ -1162,46 +1130,45 @@ IMPORTANT:
             "failed": 0,
             "results": []
         }
-        
+
         try:
-            # Get database session
-            db = next(get_db())
-            
-            for submission in vitals_submissions:
-                try:
-                    # Create the vitals record using CRUD
-                    stored_record = VitalsCRUD.create_raw_data(db, user_id, submission)
-                    
-                    # Fire-and-forget coalesced aggregation for vitals domain
+            # Use managed SQLAlchemy session (PostgreSQL-backed)
+            with get_db_session() as db:
+                for submission in vitals_submissions:
                     try:
-                        asyncio.create_task(trigger_smart_aggregation(user_id=user_id, domains=["vitals"]))
-                    except Exception:
-                        pass
-                    
-                    result = {
-                        "action": "inserted",
-                        "record_id": stored_record.id,
-                        "metric_type": submission.metric_type,
-                        "value": submission.value,
-                        "unit": submission.unit
-                    }
-                    results.append(result)
-                    stats["inserted"] += 1
-                    
-                except Exception as e:
-                    result = {
-                        "action": "failed", 
-                        "error": str(e),
-                        "metric_type": submission.metric_type if hasattr(submission, 'metric_type') else "unknown"
-                    }
-                    results.append(result)
-                    stats["failed"] += 1
-                
-                stats["total_processed"] += 1
-            
+                        # Create the vitals record using CRUD
+                        stored_record = VitalsCRUD.create_raw_data(db, user_id, submission)
+
+                        # Fire-and-forget coalesced aggregation for vitals domain
+                        try:
+                            asyncio.create_task(trigger_smart_aggregation(user_id=user_id, domains=["vitals"]))
+                        except Exception:
+                            pass
+
+                        result = {
+                            "action": "inserted",
+                            "record_id": stored_record.id,
+                            "metric_type": submission.metric_type,
+                            "value": submission.value,
+                            "unit": submission.unit
+                        }
+                        results.append(result)
+                        stats["inserted"] += 1
+
+                    except Exception as e:
+                        result = {
+                            "action": "failed",
+                            "error": str(e),
+                            "metric_type": submission.metric_type if hasattr(submission, 'metric_type') else "unknown"
+                        }
+                        results.append(result)
+                        stats["failed"] += 1
+
+                    stats["total_processed"] += 1
+
             stats["results"] = results
             return stats
-            
+
         except Exception as e:
             # If database session fails entirely
             return {
@@ -1212,9 +1179,6 @@ IMPORTANT:
                 "failed": len(vitals_submissions),
                 "results": [{"action": "failed", "error": f"Database session error: {str(e)}"}]
             }
-        finally:
-            if 'db' in locals():
-                db.close()
 
 
 

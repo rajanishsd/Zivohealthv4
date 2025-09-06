@@ -6,6 +6,7 @@ import Combine
 @available(iOS 16.0, *)
 struct NutritionView: View {
     @StateObject private var nutritionManager = NutritionManager.shared
+    @StateObject private var nutritionGoalsManager = NutritionGoalsManager.shared
     @State private var showingAddMeal = false
     @State private var selectedTab = 0
     @State private var selectedDate = Date()
@@ -54,6 +55,9 @@ struct NutritionView: View {
     @State private var showingMealDetail = false
     @State private var selectedMealForDetail: NutritionDataResponse?
     
+    // Goal setup view
+    @State private var navigateToGoalSetup = false
+    
     var body: some View {
             VStack(spacing: 0) {
                 // Main Content
@@ -98,8 +102,18 @@ struct NutritionView: View {
                     MealDetailView(meal: meal)
                 }
             }
+            // Navigation to Nutrition Goal Setup (push, not sheet)
+            .background(
+                NavigationLink(
+                    destination: NutritionGoalSetupView(),
+                    isActive: $navigateToGoalSetup,
+                    label: { EmptyView() }
+                )
+                .hidden()
+            )
             .onAppear {
             nutritionManager.loadTodaysData()
+            nutritionGoalsManager.loadGoalsData()
             // Load meals for today when view appears
             loadMealsForDate(selectedDate)
         }
@@ -338,57 +352,88 @@ struct NutritionView: View {
                 Image(systemName: "target")
                     .foregroundColor(.green)
                     .font(.title2)
-            Text("Daily Goals Progress")
-                    .font(.title3)
-                    .fontWeight(.semibold)
+                
+                if let summary = nutritionGoalsManager.activeGoalSummary, summary.hasActiveGoal {
+                    Text("Daily Goals Progress")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                } else {
+                    Text("Nutrition Goals")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                }
+                
                 Spacer()
+                
+                if nutritionGoalsManager.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                }
             }
             
-            VStack(spacing: 12) {
-                // Calories progress
-                nutritionProgressRow(
-                    title: "Calories",
-                    current: nutritionManager.todaysCalories,
-                    goal: 2000,
-                    unit: "cal",
-                    color: .orange
-                )
-                
-                // Protein progress
-                nutritionProgressRow(
-                    title: "Protein",
-                    current: nutritionManager.todaysProtein,
-                    goal: 150,
-                    unit: "g",
-                    color: .red
-                )
-                
-                // Carbs progress
-                nutritionProgressRow(
-                    title: "Carbs",
-                    current: nutritionManager.todaysCarbs,
-                    goal: 250,
-                    unit: "g",
-                    color: .blue
-                )
-                
-                // Fat progress
-                nutritionProgressRow(
-                    title: "Fat",
-                    current: nutritionManager.todaysFat,
-                    goal: 65,
-                    unit: "g",
-                    color: .yellow
-                )
-                
-                // Fiber progress
-                nutritionProgressRow(
-                    title: "Fiber",
-                    current: nutritionManager.todaysFiber,
-                    goal: 25,
-                    unit: "g",
-                    color: .green
-                )
+            if let summary = nutritionGoalsManager.activeGoalSummary, summary.hasActiveGoal {
+                // Show progress for active goal
+                if nutritionGoalsManager.progressItems.isEmpty {
+                    Text("Loading progress...")
+                        .foregroundColor(.secondary)
+                        .padding(.vertical)
+                } else {
+                    VStack(spacing: 12) {
+                        ForEach(nutritionGoalsManager.progressItems.prefix(5)) { item in
+                            nutritionGoalProgressRow(item: item)
+                        }
+                        
+                        if nutritionGoalsManager.progressItems.count > 5 {
+                            Text("+ \(nutritionGoalsManager.progressItems.count - 5) more nutrients")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.top, 4)
+                        }
+                        
+                        // Placeholder for current plan navigation to chat/history
+                        HStack {
+                            Image(systemName: "text.bubble")
+                                .foregroundColor(.blue)
+                            Text("Current plan conversation")
+                                .font(.subheadline)
+                            Spacer()
+                            Button(action: {
+                                // Navigate to Chat tab to view history/plan
+                                NotificationCenter.default.post(name: Notification.Name("SwitchToChatTab"), object: nil)
+                            }) {
+                                Text("Open")
+                                    .font(.subheadline)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .padding(.top, 8)
+                    }
+                }
+            } else {
+                // Show "Set Goal" state
+                VStack(spacing: 12) {
+                    Image(systemName: "target")
+                        .font(.title)
+                        .foregroundColor(.gray)
+                    
+                    Text("No active nutrition goal")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    Button("Create/Modify Nutrition Goal") {
+                        navigateToGoalSetup = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                .padding(.vertical, 8)
+            }
+            
+            if let errorMessage = nutritionGoalsManager.errorMessage {
+                Text("Error: \(errorMessage)")
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .padding(.top, 4)
             }
         }
         .padding()
@@ -420,6 +465,66 @@ struct NutritionView: View {
                 }
             }
             .frame(height: 6)
+        }
+    }
+    
+    private func nutritionGoalProgressRow(item: ProgressItem) -> some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text(item.displayName)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                
+                if item.priority == "primary" {
+                    Image(systemName: "star.fill")
+                        .font(.caption2)
+                        .foregroundColor(.yellow)
+                }
+                
+                Spacer()
+                
+                HStack(spacing: 4) {
+                    if let current = item.currentValue {
+                        Text("\(Int(current))")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    } else {
+                        Text("--")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Text("/ \(item.targetDisplayText)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(height: 6)
+                        .cornerRadius(3)
+                    
+                    Rectangle()
+                        .fill(item.progressColor)
+                        .frame(width: geometry.size.width * item.progressValue, height: 6)
+                        .cornerRadius(3)
+                }
+            }
+            .frame(height: 6)
+            
+            // Status indicator
+            if let status = item.status {
+                HStack {
+                    Spacer()
+                    Text(item.statusText)
+                        .font(.caption2)
+                        .foregroundColor(item.progressColor)
+                        .fontWeight(.medium)
+                }
+            }
         }
     }
     

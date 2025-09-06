@@ -189,7 +189,7 @@ aws ssm get-command-invocation --profile "$AWS_PROFILE" --region "$AWS_REGION" \
   
 
   python3 /Users/rajanishsd/Documents/ZivohealthPlatform/migration.py \
-  --dump "/Users/rajanishsd/Documents/ZivohealthPlatform/local_data.dump" \
+   --dump "/Users/rajanishsd/Documents/ZivohealthPlatform" \
   --table public.loinc_pg_collection \
   --host localhost --port 5432 --dbname zivohealth_dev --user zivo --password 'zivo_890' \
   --sslmode require --chunk-size 200000 --truncate-before --disable-triggers --statement-timeout-ms 0

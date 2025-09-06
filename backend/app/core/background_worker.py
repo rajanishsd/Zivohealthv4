@@ -9,6 +9,7 @@ from datetime import datetime, date, timedelta
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
+from app.core.database_utils import get_db_session
 from app.crud.vitals import VitalsCRUD
 from app.crud.nutrition import nutrition_data as NutritionCRUD
 from app.models.vitals_data import VitalsRawData
@@ -162,8 +163,7 @@ class SmartDelayedAggregationWorker:
 
     async def process_batch(self) -> int:
         """Process a batch of pending aggregation data"""
-        db = SessionLocal()
-        try:
+        with get_db_session() as db:
             # Get pending entries for requested systems only
             vitals_entries = []
             nutrition_entries = []
@@ -201,8 +201,6 @@ class SmartDelayedAggregationWorker:
                 processed_count += await self._perform_lab_categorization_and_aggregation(db)
             
             return processed_count
-        finally:
-            db.close()
 
     async def _process_vitals_batch(self, db: Session, entries: List[VitalsRawData]) -> int:
         """Process a batch of vitals entries"""
@@ -405,8 +403,7 @@ async def trigger_aggregation_from_data_submission(user_id: int = None):
     
     # Use different delays for initial vs incremental loads
     # Check if this looks like a bulk initial load
-    db = SessionLocal()
-    try:
+    with get_db_session() as db:
         pending_count = len(VitalsCRUD.get_pending_aggregation_entries(db, limit=1000))
         if pending_count > 500:
             # Looks like bulk initial load - use longer delay
@@ -416,8 +413,6 @@ async def trigger_aggregation_from_data_submission(user_id: int = None):
             # Incremental load - use shorter delay
             delay_seconds = settings.VITALS_AGGREGATION_DELAY_INCREMENTAL
             logger.info(f"🔄 [SmartWorker] Detected incremental load ({pending_count} pending) - using {delay_seconds}s delay")
-    finally:
-        db.close()
 
     # Trigger with appropriate delay
     await trigger_smart_aggregation(user_id, delay_seconds)
@@ -451,8 +446,7 @@ async def run_worker_process(domains: list = None):
     logger.info("🚀 [WorkerProcess] Starting background aggregation worker")
     
     # Check if there's any work to do first - check BOTH vitals and nutrition
-    db = SessionLocal()
-    try:
+    with get_db_session() as db:
         vitals_pending = 0
         nutrition_pending = 0
         labs_pending = 0
@@ -481,8 +475,6 @@ async def run_worker_process(domains: list = None):
             from app.crud.lab_categorization import lab_categorization
             total_labs_pending = len(lab_categorization.get_pending_categorization_entries(db, limit=100000))
         logger.info(f"📊 [WorkerProcess] Found {total_vitals_pending:,} vitals + {total_nutrition_pending:,} nutrition + {total_labs_pending:,} labs = {total_vitals_pending + total_nutrition_pending + total_labs_pending:,} total pending entries")
-    finally:
-        db.close()
     
     worker = SmartDelayedAggregationWorker(batch_size=100, allowed_domains=set(domains) if domains else None)  # Small batches for separate process
     

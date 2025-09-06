@@ -4,6 +4,7 @@ from datetime import datetime, date, timedelta
 from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
+from app.core.database_utils import get_db_session
 from app.crud.healthkit import HealthKitCRUD
 from app.models.healthkit_data import HealthKitMetricType, HealthKitRawData
 from app.schemas.healthkit import HealthKitDataSubmission
@@ -15,7 +16,7 @@ class HealthKitBackendManager:
     """Backend service for managing HealthKit data sync and aggregation"""
     
     def __init__(self):
-        self.db = SessionLocal()
+          # Remove persistent database connection
         self.sync_intervals = {
             "full_sync": timedelta(hours=6),  # Full sync every 6 hours
             "incremental_sync": timedelta(minutes=15),  # Incremental sync every 15 minutes
@@ -80,7 +81,7 @@ class HealthKitBackendManager:
         
         # This would typically be called by mobile apps submitting new data
         # For now, we'll just update aggregations for recent data
-        with SessionLocal() as db:
+        with get_db_session() as db:
             # Get all users with recent sync activity
             recent_syncs = db.query(HealthKitRawData.user_id).filter(
                 HealthKitRawData.created_at >= now_local() - timedelta(hours=1)
@@ -96,7 +97,7 @@ class HealthKitBackendManager:
         """Run daily aggregation for all users and metrics"""
         logger.info("Running daily HealthKit aggregation")
         
-        with SessionLocal() as db:
+        with get_db_session() as db:
             # Get all users with HealthKit data
             users_with_data = db.query(HealthKitRawData.user_id).distinct().all()
             
@@ -325,7 +326,7 @@ class HealthKitBackendManager:
         """Clean up old raw data and maintain data retention policy"""
         logger.info("Running HealthKit data cleanup")
         
-        with SessionLocal() as db:
+        with get_db_session() as db:
             # Delete raw data older than 90 days
             cutoff_date = now_local() - timedelta(days=90)
             
@@ -339,8 +340,8 @@ class HealthKitBackendManager:
                 logger.info(f"Cleaned up {deleted_count} old HealthKit raw data records")
     
     def close(self):
-        """Close database connection"""
-        self.db.close()
+        """Close database connection - no longer needed with context managers"""
+        pass
 
 # Global instance
 healthkit_manager = HealthKitBackendManager()

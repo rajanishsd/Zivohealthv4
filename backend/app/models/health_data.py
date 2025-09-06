@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
 from app.db.base import Base
+from app.utils.timezone import local_now_db_expr, local_now_db_func
 
 # Legacy VitalSign model - commented out as it's replaced by the new vitals system
 # class VitalSign(Base):
@@ -74,8 +75,8 @@ class LabReport(Base):
     categorization_status = Column(String(20), default='pending', nullable=False, index=True)  # pending, categorized, insufficient
     failure_reason = Column(String(255), nullable=True)  # Reason for insufficient data
     
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=local_now_db_expr())
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func())
 
     # Relationships
     user = relationship("User")
@@ -111,8 +112,8 @@ class LabReportCategorized(Base):
     # Status tracking
     aggregation_status = Column(String(20), default='pending', nullable=False, index=True)  # pending, complete
     
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=local_now_db_expr())
+    updated_at = Column(DateTime, server_default=local_now_db_expr(), onupdate=local_now_db_func())
     
     # Primary key and table args
     __table_args__ = (

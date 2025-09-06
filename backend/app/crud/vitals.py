@@ -16,7 +16,7 @@ from app.models.vitals_data import (
     VitalsRawCategorized
 )
 from app.schemas.vitals import VitalDataSubmission
-from app.utils.timezone import now_local
+from app.utils.timezone import now_local, to_local_naive
 import calendar
 import json
 import logging
@@ -33,8 +33,8 @@ class VitalsCRUD:
             metric_type=data.metric_type,
             value=data.value,
             unit=data.unit,
-            start_date=data.start_date,
-            end_date=data.end_date,
+            start_date=to_local_naive(data.start_date),
+            end_date=to_local_naive(data.end_date),
             data_source=data.data_source,
             notes=data.notes,
             source_device=data.source_device,
@@ -58,8 +58,8 @@ class VitalsCRUD:
                 'metric_type': data.metric_type,
                 'value': data.value,
                 'unit': data.unit,
-                'start_date': data.start_date,
-                'end_date': data.end_date,
+                'start_date': to_local_naive(data.start_date),
+                'end_date': to_local_naive(data.end_date),
                 'data_source': data.data_source,
                 'notes': data.notes,
                 'source_device': data.source_device,
@@ -71,7 +71,8 @@ class VitalsCRUD:
             # Use PostgreSQL's INSERT ... ON CONFLICT DO NOTHING to handle duplicates
             stmt = insert(VitalsRawData).values(insert_data)
             stmt = stmt.on_conflict_do_nothing(
-                constraint='uq_vitals_raw_data_no_duplicates'
+                index_elements=['user_id', 'metric_type', 'unit', 'start_date', 'data_source', 
+                   text("COALESCE(notes, '')")]
             )
 
             # Execute the upsert
@@ -109,8 +110,8 @@ class VitalsCRUD:
                     metric_type=data.metric_type,
                     value=data.value,
                     unit=data.unit,
-                    start_date=data.start_date,
-                    end_date=data.end_date,
+                    start_date=to_local_naive(data.start_date),
+                    end_date=to_local_naive(data.end_date),
                     data_source=data.data_source,
                     notes=data.notes,
                     source_device=data.source_device,
@@ -270,7 +271,7 @@ class VitalsCRUD:
         # Group data by metric type and hour
         hourly_groups = {}
         for entry in categorized_data_query:
-            hour_start = entry.start_date.replace(minute=0, second=0, microsecond=0)
+            hour_start = to_local_naive(entry.start_date).replace(minute=0, second=0, microsecond=0)
             key = (entry.metric_type, hour_start)
             
             if key not in hourly_groups:
@@ -295,7 +296,7 @@ class VitalsCRUD:
         new_aggregates = []
         for (metric_type, hour_start), categorized_entries in hourly_groups.items():
             sources = list(set([r.data_source for r in categorized_entries]))
-            latest_entry = max(categorized_entries, key=lambda x: x.start_date)
+            latest_entry = max(categorized_entries, key=lambda x: to_local_naive(x.start_date))
             
             # Get LOINC code from the latest entry (all entries in group should have same LOINC code)
             loinc_code = latest_entry.loinc_code
@@ -438,7 +439,7 @@ class VitalsCRUD:
                     except (json.JSONDecodeError, TypeError):
                         pass
             
-            latest_entry = max(hourly_data, key=lambda x: x.hour_start)
+            latest_entry = max(hourly_data, key=lambda x: to_local_naive(x.hour_start))
             
             # Check if daily aggregate already exists
             existing = db.query(VitalsDailyAggregate).filter(
