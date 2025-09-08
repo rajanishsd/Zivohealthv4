@@ -198,6 +198,38 @@ async def persist_assistant_message_and_notify(session_id: int, message_in: Chat
 
             total_count = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
             await connection_manager.notify_message_added(session_id, message_schema, total_count)
+
+            # Additionally emit a completion-style status with the same payload so
+            # UIs that only listen for completion events also append the message.
+            try:
+                import json as _json
+                message_data = {
+                    "message_type": "new_message",
+                    "new_message": {
+                        "id": message.id,
+                        "role": message.role,
+                        "content": message.content,
+                        "timestamp": message.created_at.isoformat() if message.created_at else None,
+                        "filePath": message.file_path,
+                        "fileType": message.file_type,
+                        "fileName": None,
+                    },
+                    "message_count": total_count,
+                    "last_message_id": message.id,
+                }
+                await connection_manager.send_status_update(
+                    session_id,
+                    ChatStatusMessage(
+                        session_id=session_id,
+                        status="complete",
+                        message=_json.dumps(message_data),
+                        progress=1.0,
+                        agent_name="System"
+                    )
+                )
+            except Exception:
+                # If the compatibility event fails, ignore silently
+                pass
         except Exception:
             pass
 

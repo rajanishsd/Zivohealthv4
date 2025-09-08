@@ -69,6 +69,7 @@ class ChatViewModel: ObservableObject {
     // Streaming and WebSocket tasks
     private var statusTask: Task<Void, Never>?
     private var streamingTask: Task<Void, Never>?
+    private var activeStatusSessionId: Int?
 
     private init() {
         // Private initializer to enforce singleton pattern
@@ -969,8 +970,14 @@ class ChatViewModel: ObservableObject {
     }
 
     private func startStatusUpdates(sessionId: Int) {
-        // Cancel previous status task
+        // Avoid duplicate WS connections for the same session
+        if let activeId = activeStatusSessionId, activeId == sessionId, statusTask != nil {
+            return
+        }
+
+        // Cancel previous status task (if any) and mark active session id
         statusTask?.cancel()
+        activeStatusSessionId = sessionId
         
         statusTask = Task {
             // Clean start; rely on WS events only
@@ -1047,10 +1054,8 @@ class ChatViewModel: ObservableObject {
                                 print("⚠️ [ChatViewModel] Failed to parse status payload: \(error)")
                             }
                         }
-                        // Fallback: if nothing got appended from payload, reload from backend
-                        if !appendedFromPayload {
-                            Task { await self.reloadLatestMessages() }
-                        }
+                        // Always reconcile with backend to ensure UI reflects the latest persisted state
+                        Task { await self.reloadLatestMessages() }
                         // Update UI flags for completion status
                         if statusText == "complete" {
                             self.currentStatus = "Complete"
@@ -1104,6 +1109,12 @@ class ChatViewModel: ObservableObject {
                         self.isAnalyzingFile = false
                     }
                     continue
+                }
+            }
+            // When the loop exits, clear active session marker
+            await MainActor.run {
+                if self.activeStatusSessionId == sessionId {
+                    self.activeStatusSessionId = nil
                 }
             }
         }

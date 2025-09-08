@@ -45,7 +45,18 @@ class NutritionGoalsManager: ObservableObject {
         request.allHTTPHeaderFields = getAuthHeaders()
         
         URLSession.shared.dataTaskPublisher(for: request)
-            .map(\.data)
+            .tryMap { output -> Data in
+                if let http = output.response as? HTTPURLResponse {
+                    print("🌐 [NutritionGoalsManager] /current status: \(http.statusCode)")
+                    print("📩 [NutritionGoalsManager] /current headers: \(http.allHeaderFields)")
+                }
+                if let body = String(data: output.data, encoding: .utf8) {
+                    print("🧾 [NutritionGoalsManager] /current raw: \(body)")
+                } else {
+                    print("🧾 [NutritionGoalsManager] /current raw: <non-utf8 \(output.data.count) bytes>")
+                }
+                return output.data
+            }
             .decode(type: ActiveGoalSummary.self, decoder: JSONDecoder.nutritionGoalsDecoder)
             .receive(on: DispatchQueue.main)
             .sink(
@@ -62,6 +73,10 @@ class NutritionGoalsManager: ObservableObject {
                 receiveValue: { [weak self] summary in
                     self?.activeGoalSummary = summary
                     print("✅ [NutritionGoalsManager] Loaded active goal summary: \(summary.hasActiveGoal)")
+                    // Immediately load progress if there is an active goal
+                    if summary.hasActiveGoal {
+                        self?.loadActiveGoalProgress()
+                    }
                 }
             )
             .store(in: &cancellables)
@@ -99,6 +114,11 @@ class NutritionGoalsManager: ObservableObject {
             return
         }
         
+        let startStr = queryItems.first(where: { $0.name == "start_date" })?.value ?? ""
+        let endStr = queryItems.first(where: { $0.name == "end_date" })?.value ?? ""
+        print("🔄 [NutritionGoalsManager] Loading goal progress: timeframe=\(timeframe), start=\(startStr), end=\(endStr)")
+        print("🌐 [NutritionGoalsManager] GET \(url.absoluteString)")
+
         isLoading = true
         errorMessage = nil
         
@@ -107,7 +127,18 @@ class NutritionGoalsManager: ObservableObject {
         request.allHTTPHeaderFields = getAuthHeaders()
         
         URLSession.shared.dataTaskPublisher(for: request)
-            .map(\.data)
+            .tryMap { output -> Data in
+                if let http = output.response as? HTTPURLResponse {
+                    print("🌐 [NutritionGoalsManager] /progress/active status: \(http.statusCode)")
+                    print("📩 [NutritionGoalsManager] /progress/active headers: \(http.allHeaderFields)")
+                }
+                if let body = String(data: output.data, encoding: .utf8) {
+                    print("🧾 [NutritionGoalsManager] /progress/active raw: \(body.prefix(2000))")
+                } else {
+                    print("🧾 [NutritionGoalsManager] /progress/active raw: <non-utf8 \(output.data.count) bytes>")
+                }
+                return output.data
+            }
             .decode(type: ProgressResponse.self, decoder: JSONDecoder.nutritionGoalsDecoder)
             .receive(on: DispatchQueue.main)
             .sink(
@@ -124,6 +155,10 @@ class NutritionGoalsManager: ObservableObject {
                 receiveValue: { [weak self] response in
                     self?.progressItems = response.items
                     print("✅ [NutritionGoalsManager] Loaded progress items: \(response.items.count)")
+                    // Sample a few items for visibility
+                    for item in response.items.prefix(5) {
+                        print("🔎 [NutritionGoalsManager] item key=\(item.nutrientKey) current=\(item.currentValue?.description ?? "nil") min=\(item.targetMin?.description ?? "nil") max=\(item.targetMax?.description ?? "nil") status=\(item.status ?? "nil") percent=\(item.percentOfTarget?.description ?? "nil")")
+                    }
                 }
             )
             .store(in: &cancellables)
@@ -217,10 +252,29 @@ class NutritionGoalsManager: ObservableObject {
 extension JSONDecoder {
     static var nutritionGoalsDecoder: JSONDecoder {
         let decoder = JSONDecoder()
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'"
-        formatter.timeZone = TimeZone(abbreviation: "UTC")
-        decoder.dateDecodingStrategy = .formatted(formatter)
+        // Be flexible: accept date-only and timestamp variants
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let dateString = try container.decode(String.self)
+
+            let formats = [
+                "yyyy-MM-dd",
+                "yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'",
+                "yyyy-MM-dd'T'HH:mm:ss'Z'",
+                "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+            ]
+
+            for format in formats {
+                let formatter = DateFormatter()
+                formatter.dateFormat = format
+                formatter.timeZone = TimeZone(abbreviation: "UTC")
+                if let date = formatter.date(from: dateString) {
+                    return date
+                }
+            }
+
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported date format: \(dateString)")
+        }
         return decoder
     }
 }

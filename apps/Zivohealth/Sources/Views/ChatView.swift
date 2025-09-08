@@ -28,6 +28,7 @@ struct ChatView: View {
     @State private var showingFilePicker = false
     @State private var selectedImage: UIImage?
     @State private var selectedFileURL: URL?
+    @State private var keyboardHeight: CGFloat = 0
 
     // Computed property to create ChatSessionWithMessages for the header
     private var currentSession: ChatSessionWithMessages? {
@@ -132,7 +133,7 @@ struct ChatView: View {
                     }
                     .padding(.horizontal, 12) // Explicit horizontal padding for safe area
                     .padding(.vertical, 8)
-                    .padding(.bottom, 90) // Add bottom padding to prevent overlap with input area
+                    .padding(.bottom, 90 + keyboardHeight) // Add bottom padding to prevent overlap with input area and keyboard
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(UIColor.systemBackground))
@@ -172,6 +173,22 @@ struct ChatView: View {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             withAnimation(.easeInOut(duration: 0.3)) {
                                 proxy.scrollTo("status", anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+                .onChange(of: keyboardHeight) { height in
+                    // Auto-scroll when keyboard appears
+                    if height > 0 {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                if let lastMessageId = lastMessageId {
+                                    proxy.scrollTo(lastMessageId, anchor: .bottom)
+                                } else if viewModel.isStreaming {
+                                    proxy.scrollTo("streaming", anchor: .bottom)
+                                } else {
+                                    proxy.scrollTo("status", anchor: .bottom)
+                                }
                             }
                         }
                     }
@@ -357,6 +374,22 @@ struct ChatView: View {
             if viewModel.isVerificationPending {
                 // Note: checkVerificationStatus is private, handle verification status checking here if needed
                 print("🔄 [ChatView] App became active, verification is pending")
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+            // Adjust bottom padding to account for keyboard height
+            if let userInfo = notification.userInfo,
+               let frame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                let screenHeight = UIScreen.main.bounds.height
+                let height = max(0, screenHeight - frame.origin.y)
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    keyboardHeight = height
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(.easeInOut(duration: 0.25)) {
+                keyboardHeight = 0
             }
         }
     }

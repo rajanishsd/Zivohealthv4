@@ -8,12 +8,102 @@ import sys
 import os
 import json
 from datetime import datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 
 # Add the backend directory to the Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
-from app.agentsv2.nutrition_goal_workflow import run_nutritional_goal_workflow
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+except ImportError:
+    print("Warning: python-dotenv not installed, using system environment variables only")
+
+# Mock database connection before importing
+class MockDBConnection:
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        pass
+    def cursor(self, **kwargs):
+        return MockCursor()
+
+class MockCursor:
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        pass
+    def execute(self, query, params=None):
+        pass
+    def fetchall(self):
+        # Return mock nutrient catalog data
+        return [
+            {"id": 1, "key": "calories", "display_name": "Calories", "unit": "kcal", "category": "energy"},
+            {"id": 2, "key": "protein_g", "display_name": "Protein", "unit": "g", "category": "macronutrient"},
+            {"id": 3, "key": "carbs_g", "display_name": "Carbohydrates", "unit": "g", "category": "macronutrient"},
+            {"id": 4, "key": "fat_g", "display_name": "Fat", "unit": "g", "category": "macronutrient"},
+            {"id": 5, "key": "fiber_g", "display_name": "Fiber", "unit": "g", "category": "macronutrient"},
+            {"id": 6, "key": "calcium_mg", "display_name": "Calcium", "unit": "mg", "category": "mineral"},
+            {"id": 7, "key": "iron_mg", "display_name": "Iron", "unit": "mg", "category": "mineral"},
+            {"id": 8, "key": "vitamin_c_mg", "display_name": "Vitamin C", "unit": "mg", "category": "vitamin"},
+        ]
+    def fetchone(self):
+        return {"id": 999}
+    def executemany(self, sql, values):
+        pass
+    @property
+    def rowcount(self):
+        return 1
+
+def mock_get_raw_db_connection():
+    return MockDBConnection()
+
+# Mock settings
+class MockSettings:
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "sk-test-key")
+    CUSTOMER_AGENT_MODEL = "gpt-4o-mini"
+    DEFAULT_AI_MODEL = "gpt-4o-mini"
+    NUTRITION_AGENT_MODEL = "gpt-4o-mini"
+    NUTRITION_VISION_MODEL = "gpt-4o"
+    ALGORITHM = "HS256"
+    SECRET_KEY = "test-secret-key"
+    PROJECT_NAME = "Test Project"
+    VERSION = "1.0.0"
+    PROJECT_VERSION = "1.0.0"
+    API_V1_STR = "/api/v1"
+    SERVER_HOST = "localhost"
+    SERVER_PORT = 8000
+    POSTGRES_SERVER = "localhost"
+    POSTGRES_PORT = 5432
+    POSTGRES_USER = "test"
+    POSTGRES_PASSWORD = "test"
+    POSTGRES_DB = "test"
+    ACCESS_TOKEN_EXPIRE_MINUTES = 30
+    REDIS_HOST = "localhost"
+    REDIS_PORT = 6379
+    REDIS_DB = 0
+    AWS_DEFAULT_REGION = "us-east-1"
+    AWS_REGION = "us-east-1"
+    AWS_S3_BUCKET = "test-bucket"
+    OCR_PROVIDER = "test"
+    OCR_TIMEOUT = 30
+    OCR_MAX_FILE_SIZE = 10485760
+    CORS_ORIGINS = ["*"]
+    WS_MESSAGE_QUEUE = "test-queue"
+
+# Mock the specific models that cause mapper initialization errors
+class MockNutritionGoal:
+    pass
+
+class MockNutritionMealPlan:
+    pass
+
+class MockNutritionGoalTarget:
+    pass
+
+class MockUserNutrientFocus:
+    pass
 
 # Mock responses for different types of questions
 MOCK_RESPONSES = {
@@ -21,46 +111,53 @@ MOCK_RESPONSES = {
     "gender": "male",
     "height": "175",
     "weight": "80",
-    "health_status": "Generally healthy, no major issues",
-    "medical_history": "None",
-    "family_history": "Father has diabetes",
-    "medications": "Multivitamin daily",
-    "allergies": "None",
-    "lab_reports": "Recent blood work shows normal levels",
-    "primary_goal": "Lose weight and build muscle",
-    "secondary_goals": "Improve energy levels and sleep quality",
-    "timeframe": "6 months",
-    "daily_routine": "Office job, 9-5, moderate stress",
     "activity_level": "Moderate - gym 3 times per week",
+    "timeframe": "6 months",
+    "dietary_preference": "Non-vegetarian",
+    "allergies": "None",
+    "lab_reports": "No recent lab reports",
+    "primary_goal": "Lose 10kg and gain muscle mass",
+    "secondary_goals": "Improve energy levels and sleep quality",
+    "daily_routine": "Office job, 9-5, gym after work",
     "exercise_type": "Weight training and cardio",
     "exercise_frequency": "3 times per week, 1 hour each",
-    "work_type": "Desk job",
+    "work_type": "Software engineer, mostly sedentary",
     "meal_pattern": "3 meals and 2 snacks per day",
-    "typical_foods": "Rice, vegetables, chicken, eggs",
-    "dietary_preference": "Non-vegetarian",
-    "food_likes": "Spicy food, Indian cuisine",
-    "food_dislikes": "Very sweet desserts",
-    "budget": "Moderate budget for healthy food",
-    "cooking": "Cook at home mostly, eat out 2-3 times per week",
-    "substances": "Occasional alcohol, no smoking, 2-3 cups coffee daily",
+    "typical_foods": "Rice, chicken, vegetables, eggs",
+    "food_likes": "Chicken, fish, vegetables, fruits",
+    "food_dislikes": "Spicy food, very sweet desserts",
+    "budget": "Moderate budget for groceries",
+    "cooking": "Cook at home most days, eat out on weekends",
+    "substances": "Occasional alcohol, no smoking, moderate caffeine",
     "water_intake": "2-3 liters per day",
-    "motivation": "High motivation to change",
-    "emotional_eating": "Sometimes stress eat",
+    "motivation": "High motivation to make changes",
+    "emotional_eating": "Sometimes eat when stressed",
     "dieting_history": "Tried keto before, lost weight but gained it back",
     "support_system": "Family is supportive",
-    "dietary_restrictions": "None",
-    "travel": "Occasional business travel",
-    "food_availability": "Good access to fresh produce",
-    "health_concerns": "Want to improve overall fitness"
+    "dietary_restrictions": "No specific restrictions"
 }
 
-async def mock_ask_user_question(question: str, session_id: int, user_id: str) -> str:
-    """Mock function to simulate user responses to questions"""
-    print(f"🤖 Agent asked: {question}")
-    
-    # Try to match question to a response
+# Mock function for ask_user_question
+def mock_ask_user_question(question: str, session_id: int, user_id: str) -> str:
+    """Mock function that returns predefined responses based on question content."""
     question_lower = question.lower()
     
+    # Check for confirmation-related questions first
+    if "accept" in question_lower or ("plan" in question_lower and ("review" in question_lower or "summary" in question_lower)):
+        # This is the confirmation question - simulate user requesting changes first, then accepting
+        if not hasattr(mock_ask_user_question, 'first_confirm'):
+            mock_ask_user_question.first_confirm = True
+            print(f"🔄 [CONFIRMATION] User is being asked to confirm the nutrition plan")
+            print(f"🤖 Agent asked: {question}")
+            response = "I want to reduce calories to 1800 and increase protein to 150g per day"
+            print(f"👤 User responded: {response}")
+            return response
+        else:
+            response = "Yes, this revised plan looks perfect! I accept it."
+            print(f"👤 User responded: {response}")
+            return response
+    
+    # Handle other question types
     if "age" in question_lower:
         response = MOCK_RESPONSES["age"]
     elif "gender" in question_lower:
@@ -69,20 +166,12 @@ async def mock_ask_user_question(question: str, session_id: int, user_id: str) -
         response = MOCK_RESPONSES["height"]
     elif "weight" in question_lower:
         response = MOCK_RESPONSES["weight"]
-    elif "waist" in question_lower and "circumference" in question_lower:
-        response = "85"
-    elif "hip" in question_lower and "circumference" in question_lower:
-        response = "95"
-    elif "neck" in question_lower and "circumference" in question_lower:
-        response = "38"
-    elif "health status" in question_lower or "current health" in question_lower:
-        response = MOCK_RESPONSES["health_status"]
-    elif "medical history" in question_lower or "past medical" in question_lower:
-        response = MOCK_RESPONSES["medical_history"]
-    elif "family history" in question_lower:
-        response = MOCK_RESPONSES["family_history"]
-    elif "medication" in question_lower:
-        response = MOCK_RESPONSES["medications"]
+    elif "activity" in question_lower:
+        response = MOCK_RESPONSES["activity_level"]
+    elif "timeframe" in question_lower:
+        response = MOCK_RESPONSES["timeframe"]
+    elif "dietary preference" in question_lower:
+        response = MOCK_RESPONSES["dietary_preference"]
     elif "allerg" in question_lower:
         response = MOCK_RESPONSES["allergies"]
     elif "lab" in question_lower or "blood test" in question_lower:
@@ -91,8 +180,6 @@ async def mock_ask_user_question(question: str, session_id: int, user_id: str) -
         response = MOCK_RESPONSES["primary_goal"]
     elif "secondary" in question_lower:
         response = MOCK_RESPONSES["secondary_goals"]
-    elif "timeframe" in question_lower:
-        response = MOCK_RESPONSES["timeframe"]
     elif "start" in question_lower and ("plan" in question_lower or "nutrition" in question_lower):
         response = "I want to start immediately"
     elif "target completion" in question_lower or "completion date" in question_lower:
@@ -111,8 +198,6 @@ async def mock_ask_user_question(question: str, session_id: int, user_id: str) -
         response = MOCK_RESPONSES["meal_pattern"]
     elif "typical food" in question_lower:
         response = MOCK_RESPONSES["typical_foods"]
-    elif "dietary preference" in question_lower:
-        response = MOCK_RESPONSES["dietary_preference"]
     elif "like" in question_lower and "dislike" in question_lower:
         response = f"Likes: {MOCK_RESPONSES['food_likes']}, Dislikes: {MOCK_RESPONSES['food_dislikes']}"
     elif "budget" in question_lower:
@@ -133,44 +218,61 @@ async def mock_ask_user_question(question: str, session_id: int, user_id: str) -
         response = MOCK_RESPONSES["support_system"]
     elif "restriction" in question_lower:
         response = MOCK_RESPONSES["dietary_restrictions"]
-    elif "travel" in question_lower:
-        response = MOCK_RESPONSES["travel"]
-    elif "availability" in question_lower:
-        response = MOCK_RESPONSES["food_availability"]
-    elif "concern" in question_lower:
-        response = MOCK_RESPONSES["health_concerns"]
     else:
-        response = "I don't have specific information about that, but I'm generally healthy and motivated to improve my nutrition."
+        response = "I don't have specific information about that"
     
+    print(f"🤖 Agent asked: {question}")
     print(f"👤 User responded: {response}")
     return response
 
+# Wrapper to adapt chat_sessions.ask_user_question_and_wait signature
+def mock_ask_user_question_and_wait(session_id: int, user_id: str, question: str, timeout_sec: float = 300.0) -> str:
+    return mock_ask_user_question(question, session_id, user_id)
+
+# Create a global mock function that can be imported
+import app.agentsv2.customer_workflow
+app.agentsv2.customer_workflow.ask_user_question = mock_ask_user_question
+
+# Apply mocks before importing - this is critical for the confirmation agent
+with patch('app.core.database_utils.get_raw_db_connection', mock_get_raw_db_connection), \
+     patch('app.core.config.settings', MockSettings()), \
+     patch('app.models.nutrition_goals.NutritionGoal', MockNutritionGoal), \
+     patch('app.models.nutrition_goals.NutritionGoalTarget', MockNutritionGoalTarget), \
+     patch('app.models.nutrition_data.NutritionMealPlan', MockNutritionMealPlan), \
+     patch('app.agentsv2.nutrition_goal_workflow.ask_user_question', side_effect=mock_ask_user_question), \
+     patch('app.agentsv2.customer_workflow.ask_user_question', side_effect=mock_ask_user_question), \
+     patch('app.api.v1.endpoints.chat_sessions.ask_user_question_and_wait', side_effect=mock_ask_user_question_and_wait):
+    from app.agentsv2.nutrition_goal_workflow import run_nutritional_goal_workflow
+
 async def test_nutrition_goal_workflow():
-    """Test the nutrition goal workflow with sample data"""
+    """Test the complete nutrition goal workflow"""
     
-    # Sample test data
-    test_request_data = {
-        "original_prompt": "I want to lose weight and build muscle",
-        "goal_name": "Weight Loss and Muscle Building",
-        "goal_description": "Lose 10kg and gain muscle mass",
-        "notes": "I'm a 30-year-old male who wants to get in shape"
-    }
-    
-    # Test user ID and session ID
+    # Test data
     user_id = 1
     session_id = 1
+    test_request_data = {
+        "objective": "I want to lose weight and build muscle",
+        "use_stub_answers": True,
+        "stub_answers": []
+    }
     
     print("=" * 60)
-    print("TESTING NUTRITION GOAL WORKFLOW")
+    print("NUTRITION GOAL WORKFLOW TEST")
     print("=" * 60)
-    print(f"User ID: {user_id}")
-    print(f"Session ID: {session_id}")
-    print(f"Request Data: {json.dumps(test_request_data, indent=2)}")
+    print("This test will simulate the complete workflow:")
+    print("   1. Data collection and user survey")
+    print("   2. Nutrition plan preparation")
+    print("   3. Plan confirmation with user")
+    print("   4. Plan revision (if requested)")
+    print("   5. Final acceptance and goal creation")
     print("=" * 60)
     
     try:
         # Mock the ask_user_question function at the module level where it's imported
-        with patch('app.agentsv2.nutrition_goal_workflow.ask_user_question', side_effect=mock_ask_user_question):
+        with patch('app.agentsv2.nutrition_goal_workflow.ask_user_question', side_effect=mock_ask_user_question), \
+             patch('app.agentsv2.customer_workflow.ask_user_question', side_effect=mock_ask_user_question), \
+             patch('app.api.v1.endpoints.chat_sessions.ask_user_question_and_wait', side_effect=mock_ask_user_question_and_wait), \
+             patch('app.core.database_utils.get_raw_db_connection', mock_get_raw_db_connection):
             # Run the workflow
             print("Starting nutrition goal workflow...")
             result = await run_nutritional_goal_workflow(
@@ -218,16 +320,31 @@ async def test_nutrition_goal_workflow():
             set_result = data.get('set_goal_result', {})
             if set_result:
                 print(json.dumps(set_result, indent=2, default=str))
+            
+            # Check if confirmation loop was triggered
+            print("\n" + "-" * 40)
+            print("CONFIRMATION LOOP ANALYSIS")
+            print("-" * 40)
+            if hasattr(mock_ask_user_question, 'first_confirm'):
+                print("✅ Confirmation loop was triggered")
+                print("   - User was asked to confirm the nutrition plan")
+                print("   - User requested changes first, then accepted")
+            else:
+                print("❌ Confirmation loop was NOT triggered")
+                print("   This might indicate the agent didn't ask for confirmation")
         
         print("\n" + "=" * 60)
         print("TEST COMPLETED")
         print("=" * 60)
         
     except Exception as e:
-        print(f"\nERROR: {str(e)}")
+        print(f"❌ Test failed with error: {e}")
         import traceback
         traceback.print_exc()
 
 if __name__ == "__main__":
-    # Run the test
+    # Reset the first_confirm flag for clean test runs
+    if hasattr(mock_ask_user_question, 'first_confirm'):
+        delattr(mock_ask_user_question, 'first_confirm')
+    
     asyncio.run(test_nutrition_goal_workflow())

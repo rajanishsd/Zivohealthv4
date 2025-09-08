@@ -1,6 +1,6 @@
 from typing import List, Optional
-from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, Query
+from datetime import date, timedelta
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.api import deps
@@ -42,9 +42,16 @@ def list_catalog(
 
 @router.get("/current", response_model=ActiveGoalSummaryOut)
 def get_current_goal_summary(
+    response: Response,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ):
+    try:
+        response.headers["X-NutritionGoals-Debug-Module"] = __name__
+        response.headers["X-NutritionGoals-Debug-File"] = __file__
+    except Exception:
+        pass
+    
     goal = crud.nutrition_goals.get_active_for_user(db, current_user.id)
     if not goal:
         return ActiveGoalSummaryOut(has_active_goal=False)
@@ -52,17 +59,40 @@ def get_current_goal_summary(
     primary = sum(1 for t in goal.targets if t.priority == "primary" and t.is_active)
     secondary = sum(1 for t in goal.targets if t.priority == "secondary" and t.is_active)
     timeframes = sorted(list({t.timeframe for t in goal.targets if t.is_active}))
+    
+    # Get focus nutrients for this goal
+    focus_nutrients = crud.user_nutrient_focus.list_for_user(db, current_user.id)
+    # Filter focus nutrients that belong to this specific goal
+    # Handle both cases: goal_id is set or goal_id is None (backward compatibility)
+    goal_focus_nutrients = [f for f in focus_nutrients if f.goal_id == goal.id or f.goal_id is None]
 
-    return ActiveGoalSummaryOut(
+    # Create goal response with objective_code for backward compatibility
+    goal_data = goal.__dict__.copy()
+    goal_data['objective_code'] = goal.goal_name.lower().replace(' ', '_')  # Derive from goal name
+    
+    # Convert datetimes to date-only for mobile app compatibility (YYYY-MM-DD)
+    if 'effective_at' in goal_data and goal_data['effective_at']:
+        goal_data['effective_at'] = goal_data['effective_at'].date() if hasattr(goal_data['effective_at'], 'date') else goal_data['effective_at']
+    if 'expires_at' in goal_data and goal_data['expires_at']:
+        goal_data['expires_at'] = goal_data['expires_at'].date() if hasattr(goal_data['expires_at'], 'date') else goal_data['expires_at']
+    
+    response = ActiveGoalSummaryOut(
         has_active_goal=True,
-        goal=NutritionGoalOut.model_validate(goal),
+        goal=NutritionGoalOut.model_validate(goal_data),
         targets_summary={
             "total": primary + secondary,
             "primary": primary,
             "secondary": secondary,
             "timeframes": timeframes,
         },
+        focus_nutrients=[UserNutrientFocusOut(
+            nutrient_id=f.nutrient_id,
+            nutrient_key=f.nutrient.key,
+            priority=f.priority,
+            is_active=f.is_active,
+        ) for f in goal_focus_nutrients],
     )
+    return response
 
 
 @router.get("/goals", response_model=List[NutritionGoalOut])
@@ -72,7 +102,18 @@ def list_goals(
     current_user: User = Depends(deps.get_current_active_user),
 ):
     items = crud.nutrition_goals.list_for_user(db, current_user.id, status=status)
-    return [NutritionGoalOut.model_validate(i) for i in items]
+    # Add objective_code for backward compatibility and convert to date-only
+    result = []
+    for item in items:
+        item_data = item.__dict__.copy()
+        item_data['objective_code'] = item.goal_name.lower().replace(' ', '_')
+        # Convert datetimes to date-only for mobile app compatibility (YYYY-MM-DD)
+        if 'effective_at' in item_data and item_data['effective_at']:
+            item_data['effective_at'] = item_data['effective_at'].date() if hasattr(item_data['effective_at'], 'date') else item_data['effective_at']
+        if 'expires_at' in item_data and item_data['expires_at']:
+            item_data['expires_at'] = item_data['expires_at'].date() if hasattr(item_data['expires_at'], 'date') else item_data['expires_at']
+        result.append(NutritionGoalOut.model_validate(item_data))
+    return result
 
 
 @router.get("/goals/{goal_id}")
@@ -101,8 +142,17 @@ def get_goal_with_targets(
             nutrient=NutritionGoalTargetNutrient(id=nutrient.id, key=nutrient.key, display_name=nutrient.display_name),
         ))
 
+    # Add objective_code for backward compatibility and convert to date-only
+    goal_data = goal.__dict__.copy()
+    goal_data['objective_code'] = goal.goal_name.lower().replace(' ', '_')
+    # Convert datetimes to date-only for mobile app compatibility (YYYY-MM-DD)
+    if 'effective_at' in goal_data and goal_data['effective_at']:
+        goal_data['effective_at'] = goal_data['effective_at'].date() if hasattr(goal_data['effective_at'], 'date') else goal_data['effective_at']
+    if 'expires_at' in goal_data and goal_data['expires_at']:
+        goal_data['expires_at'] = goal_data['expires_at'].date() if hasattr(goal_data['expires_at'], 'date') else goal_data['expires_at']
+    
     return {
-        "goal": NutritionGoalOut.model_validate(goal),
+        "goal": NutritionGoalOut.model_validate(goal_data),
         "targets": targets,
     }
 
@@ -144,12 +194,18 @@ def list_user_focus(
 
 @router.get("/progress/active", response_model=ProgressResponseOut)
 def get_active_goal_progress(
+    response: Response,
     timeframe: str = Query("daily"),
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ):
+    try:
+        response.headers["X-NutritionGoals-Debug-Module"] = __name__
+        response.headers["X-NutritionGoals-Debug-File"] = __file__
+    except Exception:
+        pass
     goal = crud.nutrition_goals.get_active_for_user(db, current_user.id)
     if not goal:
         return ProgressResponseOut(objective_code=None, timeframe=timeframe, start_date=start_date or date.today(), end_date=end_date or date.today(), items=[])
@@ -181,30 +237,50 @@ def get_active_goal_progress(
     for t in goal.targets:
         if not t.is_active:
             continue
-        key = t.nutrient.key
+        # Prefer explicit aggregate field override when provided; fall back to key when null
+        key = t.nutrient.aggregate_field or t.nutrient.key
         unit = t.nutrient.unit
         display_name = t.nutrient.display_name
         col_name = f"{prefix}{key}"
         current_value = None
         if aggregate_row is not None and hasattr(aggregate_row, col_name):
             current_value = getattr(aggregate_row, col_name)
+        # Fallback: if no aggregate in the requested window, try the most recent daily aggregate in the last 7 days
+        if current_value is None and timeframe == "daily":
+            fallback_start = (end_date or date.today()) - timedelta(days=7)
+            aggregates_fb = crud_nutrition.nutrition_daily_aggregate.get_by_user_date_range(db, user_id=current_user.id, start_date=fallback_start, end_date=end_date or date.today())
+            if aggregates_fb:
+                latest = aggregates_fb[-1]
+                if hasattr(latest, col_name):
+                    current_value = getattr(latest, col_name)
 
         # Compute status
         status = "no_data"
         percent = None
-        if current_value is not None:
-            if t.target_type == "exact" and t.target_min is not None:
+        # Normalize/derive an effective target type in case data contains an unexpected value (e.g., "daily")
+        allowed_types = {"exact", "min", "max", "range"}
+        effective_type = t.target_type if t.target_type in allowed_types else None
+        if effective_type is None:
+            if t.target_min is not None and t.target_max is not None:
+                effective_type = "exact" if abs(t.target_max - t.target_min) < 1e-6 else "range"
+            elif t.target_min is not None:
+                effective_type = "min"
+            elif t.target_max is not None:
+                effective_type = "max"
+
+        if current_value is not None and effective_type is not None:
+            if effective_type == "exact" and t.target_min is not None:
                 target = t.target_min
                 tolerance = 0.05 * target if target else 0
                 status = "within" if abs(current_value - target) <= tolerance else ("below" if current_value < target else "above")
                 percent = (current_value / target) if target else None
-            elif t.target_type == "min" and t.target_min is not None:
+            elif effective_type == "min" and t.target_min is not None:
                 status = "below" if current_value < t.target_min else "above"
                 percent = (current_value / t.target_min) if t.target_min else None
-            elif t.target_type == "max" and t.target_max is not None:
+            elif effective_type == "max" and t.target_max is not None:
                 status = "within" if current_value <= t.target_max else "above"
                 percent = (current_value / t.target_max) if t.target_max else None
-            elif t.target_type == "range" and t.target_min is not None and t.target_max is not None:
+            elif effective_type == "range" and t.target_min is not None and t.target_max is not None:
                 status = "within" if (t.target_min <= current_value <= t.target_max) else ("below" if current_value < t.target_min else "above")
                 target = (t.target_min + t.target_max) / 2.0
                 percent = (current_value / target) if target else None
@@ -214,7 +290,8 @@ def get_active_goal_progress(
             display_name=display_name,
             unit=unit,
             priority=t.priority,
-            target_type=t.target_type,
+            # Return the normalized target type so clients don't see unexpected values like "daily"
+            target_type=effective_type or t.target_type,
             target_min=t.target_min,
             target_max=t.target_max,
             current_value=current_value,
@@ -222,10 +299,15 @@ def get_active_goal_progress(
             status=status,
         ))
 
-    return ProgressResponseOut(
-        objective_code=None,
+
+    # Derive objective_code from goal name for consistency
+    objective_code = goal.goal_name.lower().replace(' ', '_') if goal else None
+    
+    response = ProgressResponseOut(
+        objective_code=objective_code,
         timeframe=timeframe,
         start_date=start_date or date.today(),
         end_date=end_date or date.today(),
         items=items,
     )
+    return response

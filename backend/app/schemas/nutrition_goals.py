@@ -38,8 +38,9 @@ class NutritionGoalOut(BaseModel):
     goal_name: str
     goal_description: Optional[str] = None
     status: str
-    effective_at: datetime
-    expires_at: Optional[datetime] = None
+    effective_at: date
+    expires_at: Optional[date] = None
+    objective_code: Optional[str] = None  # For backward compatibility with mobile app
 
     class Config:
         from_attributes = True
@@ -66,6 +67,7 @@ class ActiveGoalSummaryOut(BaseModel):
     has_active_goal: bool
     goal: Optional[NutritionGoalOut] = None
     targets_summary: Optional[dict] = None
+    focus_nutrients: Optional[List["UserNutrientFocusOut"]] = None
 
 
 class DefaultTargetOut(BaseModel):
@@ -104,3 +106,7 @@ class ProgressResponseOut(BaseModel):
     start_date: date
     end_date: date
     items: List[ProgressItemOut]
+
+
+# Rebuild models to resolve forward references
+ActiveGoalSummaryOut.model_rebuild()

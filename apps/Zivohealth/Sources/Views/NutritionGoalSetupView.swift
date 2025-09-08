@@ -100,8 +100,9 @@ struct NutritionGoalSetupView: View {
         
         // Prepare prefilled message or placeholder and push ChatView in same navigation stack
         if objective.code == "custom" {
-            pendingDraft = ""
-            pendingPlaceholder = "I want to start a {define your own nutrition goal} plan. Please set nutrition goals accordingly."
+            let message = "I want to start a {define your own nutrition goal} plan. Please set nutrition goals accordingly."
+            pendingDraft = message
+            pendingPlaceholder = nil
         } else {
             let message = "I want to start a \(objective.displayName) plan. Please set nutrition goals accordingly."
             pendingDraft = message

@@ -114,6 +114,10 @@ struct NutritionView: View {
             .onAppear {
             nutritionManager.loadTodaysData()
             nutritionGoalsManager.loadGoalsData()
+            // Ensure progress fetch triggers on first render when goal already active
+            if nutritionGoalsManager.activeGoalSummary?.hasActiveGoal == true {
+                nutritionGoalsManager.loadActiveGoalProgress()
+            }
             // Load meals for today when view appears
             loadMealsForDate(selectedDate)
         }
@@ -354,7 +358,8 @@ struct NutritionView: View {
                     .font(.title2)
                 
                 if let summary = nutritionGoalsManager.activeGoalSummary, summary.hasActiveGoal {
-                    Text("Daily Goals Progress")
+                    // Show goal name if available; fallback to generic title
+                    Text(summary.goal?.goalName ?? "Nutrition Goals")
                         .font(.title3)
                         .fontWeight(.semibold)
                 } else {
@@ -364,6 +369,48 @@ struct NutritionView: View {
                 }
                 
                 Spacer()
+                
+                // Show different UI based on goal status
+                if let summary = nutritionGoalsManager.activeGoalSummary, summary.hasActiveGoal {
+                    // Goal exists - show 3-dot menu to modify
+                    Menu {
+                        Button("Modify Goal Plan") {
+                            navigateToGoalSetup = true
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "gearshape.fill")
+                                .font(.caption)
+                            Text("Modify")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(6)
+                    }
+                } else {
+                    // No goal - show prominent button to create
+                    Button(action: {
+                        navigateToGoalSetup = true
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.caption)
+                            Text("Set Goal")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.blue)
+                        .cornerRadius(6)
+                    }
+                    .buttonStyle(.plain)
+                }
                 
                 if nutritionGoalsManager.isLoading {
                     ProgressView()
@@ -382,31 +429,6 @@ struct NutritionView: View {
                         ForEach(nutritionGoalsManager.progressItems.prefix(5)) { item in
                             nutritionGoalProgressRow(item: item)
                         }
-                        
-                        if nutritionGoalsManager.progressItems.count > 5 {
-                            Text("+ \(nutritionGoalsManager.progressItems.count - 5) more nutrients")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .padding(.top, 4)
-                        }
-                        
-                        // Placeholder for current plan navigation to chat/history
-                        HStack {
-                            Image(systemName: "text.bubble")
-                                .foregroundColor(.blue)
-                            Text("Current plan conversation")
-                                .font(.subheadline)
-                            Spacer()
-                            Button(action: {
-                                // Navigate to Chat tab to view history/plan
-                                NotificationCenter.default.post(name: Notification.Name("SwitchToChatTab"), object: nil)
-                            }) {
-                                Text("Open")
-                                    .font(.subheadline)
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        .padding(.top, 8)
                     }
                 }
             } else {
@@ -420,11 +442,10 @@ struct NutritionView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     
-                    Button("Create/Modify Nutrition Goal") {
-                        navigateToGoalSetup = true
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                    Text("Tap 'Set Goal' above to create your nutrition plan")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
                 }
                 .padding(.vertical, 8)
             }
