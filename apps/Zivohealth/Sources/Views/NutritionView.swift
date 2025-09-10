@@ -57,6 +57,8 @@ struct NutritionView: View {
     
     // Goal setup view
     @State private var navigateToGoalSetup = false
+    @State private var navigateToGoalDetail = false
+    @State private var navigateToManagePlans = false
     
     var body: some View {
             VStack(spacing: 0) {
@@ -372,16 +374,23 @@ struct NutritionView: View {
                 
                 // Show different UI based on goal status
                 if let summary = nutritionGoalsManager.activeGoalSummary, summary.hasActiveGoal {
-                    // Goal exists - show 3-dot menu to modify
+                    // Goal exists - show options menu
                     Menu {
-                        Button("Modify Goal Plan") {
+                        Button("View Plan Details") {
+                            nutritionGoalsManager.loadCurrentGoalDetail()
+                            navigateToGoalDetail = true
+                        }
+                        Button("Manage Plans") {
+                            navigateToManagePlans = true
+                        }
+                        Button("Create New Plan") {
                             navigateToGoalSetup = true
                         }
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "gearshape.fill")
                                 .font(.caption)
-                            Text("Modify")
+                            Text("Options")
                                 .font(.caption)
                                 .fontWeight(.medium)
                         }
@@ -458,6 +467,31 @@ struct NutritionView: View {
             }
         }
         .padding()
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if nutritionGoalsManager.activeGoalSummary?.hasActiveGoal == true {
+                nutritionGoalsManager.loadCurrentGoalDetail()
+                navigateToGoalDetail = true
+            } else {
+                navigateToGoalSetup = true
+            }
+        }
+        .background(
+            NavigationLink(
+                destination: NutritionGoalDetailView(),
+                isActive: $navigateToGoalDetail,
+                label: { EmptyView() }
+            )
+            .hidden()
+        )
+        .background(
+            NavigationLink(
+                destination: ManageNutritionPlansView(),
+                isActive: $navigateToManagePlans,
+                label: { EmptyView() }
+            )
+            .hidden()
+        )
     }
     
     private func nutritionProgressRow(title: String, current: Double, goal: Double, unit: String, color: Color) -> some View {

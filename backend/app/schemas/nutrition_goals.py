@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime, date
 
 # Reuse timeframe semantics consistent with nutrition
@@ -50,6 +50,7 @@ class NutritionGoalTargetNutrient(BaseModel):
     id: int
     key: str
     display_name: str
+    category: str
 
 
 class NutritionGoalTargetOut(BaseModel):
@@ -110,3 +111,24 @@ class ProgressResponseOut(BaseModel):
 
 # Rebuild models to resolve forward references
 ActiveGoalSummaryOut.model_rebuild()
+
+
+# --- Detail View Schemas ---
+class MealPlanSectionOut(BaseModel):
+    options: Optional[List[Dict[str, Any]]] = None
+    recommended_option: Optional[int] = None
+    total_calories_kcal: Optional[int] = None
+
+
+class NutritionMealPlanOut(BaseModel):
+    breakfast: Optional[MealPlanSectionOut] = None
+    lunch: Optional[MealPlanSectionOut] = None
+    dinner: Optional[MealPlanSectionOut] = None
+    snacks: Optional[MealPlanSectionOut] = None
+    total_calories_kcal: Optional[int] = None
+
+
+class NutritionGoalDetailOut(BaseModel):
+    goal: NutritionGoalOut
+    targets: List[NutritionGoalTargetOut]
+    meal_plan: Optional[NutritionMealPlanOut] = None

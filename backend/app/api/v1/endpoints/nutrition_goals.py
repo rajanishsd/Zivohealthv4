@@ -7,6 +7,8 @@ from app.api import deps
 from app.models.user import User
 from app.crud import nutrition_goals as crud
 from app.crud import nutrition as crud_nutrition
+from app.models.nutrition_data import NutritionMealPlan
+from app.models.nutrition_goals import UserNutrientFocus, NutritionGoal
 from app.schemas.nutrition_goals import (
     NutritionObjectiveOut,
     NutrientCatalogOut,
@@ -18,6 +20,7 @@ from app.schemas.nutrition_goals import (
     UserNutrientFocusOut,
     ProgressItemOut,
     ProgressResponseOut,
+    NutritionGoalDetailOut,
 )
 
 router = APIRouter()
@@ -139,7 +142,7 @@ def get_goal_with_targets(
             target_max=t.target_max,
             priority=t.priority,
             is_active=t.is_active,
-            nutrient=NutritionGoalTargetNutrient(id=nutrient.id, key=nutrient.key, display_name=nutrient.display_name),
+            nutrient=NutritionGoalTargetNutrient(id=nutrient.id, key=nutrient.key, display_name=nutrient.display_name, category=nutrient.category),
         ))
 
     # Add objective_code for backward compatibility and convert to date-only
@@ -155,6 +158,155 @@ def get_goal_with_targets(
         "goal": NutritionGoalOut.model_validate(goal_data),
         "targets": targets,
     }
+
+
+@router.get("/current/detail", response_model=NutritionGoalDetailOut)
+def get_current_goal_detail(
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    goal = crud.nutrition_goals.get_active_for_user(db, current_user.id)
+    if not goal:
+        raise HTTPException(status_code=404, detail="No active goal")
+
+    # Build targets list with normalized target_type values
+    targets: List[NutritionGoalTargetOut] = []
+    for t in goal.targets:
+        if not t.is_active:
+            continue
+        nutrient = t.nutrient
+        # Normalize/derive effective target type when unexpected value (e.g., "daily")
+        allowed_types = {"exact", "min", "max", "range"}
+        effective_type = t.target_type if t.target_type in allowed_types else None
+        if effective_type is None:
+            if t.target_min is not None and t.target_max is not None:
+                effective_type = "exact" if abs(t.target_max - t.target_min) < 1e-6 else "range"
+            elif t.target_min is not None:
+                effective_type = "min"
+            elif t.target_max is not None:
+                effective_type = "max"
+        targets.append(NutritionGoalTargetOut(
+            id=t.id,
+            timeframe=t.timeframe,
+            target_type=effective_type or t.target_type,
+            target_min=t.target_min,
+            target_max=t.target_max,
+            priority=t.priority,
+            is_active=t.is_active,
+            nutrient=NutritionGoalTargetNutrient(id=nutrient.id, key=nutrient.key, display_name=nutrient.display_name, category=nutrient.category),
+        ))
+
+    # Normalize goal fields for mobile compatibility (objective_code and date-only)
+    goal_data = goal.__dict__.copy()
+    goal_data['objective_code'] = goal.goal_name.lower().replace(' ', '_')
+    if 'effective_at' in goal_data and goal_data['effective_at']:
+        goal_data['effective_at'] = goal_data['effective_at'].date() if hasattr(goal_data['effective_at'], 'date') else goal_data['effective_at']
+    if 'expires_at' in goal_data and goal_data['expires_at']:
+        goal_data['expires_at'] = goal_data['expires_at'].date() if hasattr(goal_data['expires_at'], 'date') else goal_data['expires_at']
+
+    # Fetch meal plan JSON record if exists
+    meal_plan_row = db.query(crud_nutrition.NutritionMealPlan).filter(crud_nutrition.NutritionMealPlan.goal_id == goal.id).order_by(crud_nutrition.NutritionMealPlan.id.desc()).first() if hasattr(crud_nutrition, 'NutritionMealPlan') else None
+
+    # Fallback to ORM import if not available via crud module
+    if meal_plan_row is None:
+        try:
+            from app.models.nutrition_data import NutritionMealPlan as ORMMealPlan
+            meal_plan_row = db.query(ORMMealPlan).filter(ORMMealPlan.goal_id == goal.id).order_by(ORMMealPlan.id.desc()).first()
+        except Exception:
+            meal_plan_row = None
+
+    meal_plan: dict | None = None
+    if meal_plan_row is not None:
+        import json as _json
+        def parse_json_field(value):
+            try:
+                return _json.loads(value) if value else None
+            except Exception:
+                return None
+        meal_plan = {
+            "breakfast": parse_json_field(getattr(meal_plan_row, 'breakfast', None)),
+            "lunch": parse_json_field(getattr(meal_plan_row, 'lunch', None)),
+            "dinner": parse_json_field(getattr(meal_plan_row, 'dinner', None)),
+            "snacks": parse_json_field(getattr(meal_plan_row, 'snacks', None)),
+            "total_calories_kcal": getattr(meal_plan_row, 'total_calories_kcal', None),
+        }
+
+    return NutritionGoalDetailOut(
+        goal=NutritionGoalOut.model_validate(goal_data),
+        targets=targets,
+        meal_plan=meal_plan,
+    )
+
+
+@router.patch("/goals/{goal_id}/activate")
+def activate_goal(
+    goal_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    # Ensure the goal belongs to the user
+    goal = crud.nutrition_goals.get_with_targets(db, goal_id, current_user.id)
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    # Perform atomic status switch using direct UPDATEs to avoid stale ORM states
+    from datetime import datetime
+    # Deactivate all current actives for this user
+    db.query(NutritionGoal).filter(NutritionGoal.user_id == current_user.id, NutritionGoal.status == "active").update({"status": "inactive"}, synchronize_session=False)
+    # Activate requested goal
+    db.query(NutritionGoal).filter(NutritionGoal.id == goal.id, NutritionGoal.user_id == current_user.id).update({"status": "active", "effective_at": datetime.utcnow()}, synchronize_session=False)
+    db.commit()
+    # Refresh goal instance
+    goal = crud.nutrition_goals.get_with_targets(db, goal_id, current_user.id)
+
+    # Return updated active goal summary
+    primary = sum(1 for t in goal.targets if t.priority == "primary" and t.is_active)
+    secondary = sum(1 for t in goal.targets if t.priority == "secondary" and t.is_active)
+    timeframes = sorted(list({t.timeframe for t in goal.targets if t.is_active}))
+
+    goal_data = goal.__dict__.copy()
+    goal_data['objective_code'] = goal.goal_name.lower().replace(' ', '_')
+    if 'effective_at' in goal_data and goal_data['effective_at']:
+        goal_data['effective_at'] = goal_data['effective_at'].date() if hasattr(goal_data['effective_at'], 'date') else goal_data['effective_at']
+    if 'expires_at' in goal_data and goal_data['expires_at']:
+        goal_data['expires_at'] = goal_data['expires_at'].date() if hasattr(goal_data['expires_at'], 'date') else goal_data['expires_at']
+
+    return ActiveGoalSummaryOut(
+        has_active_goal=True,
+        goal=NutritionGoalOut.model_validate(goal_data),
+        targets_summary={
+            "total": primary + secondary,
+            "primary": primary,
+            "secondary": secondary,
+            "timeframes": timeframes,
+        },
+        focus_nutrients=[],
+    )
+
+
+@router.delete("/goals/{goal_id}")
+def delete_goal(
+    goal_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    # Verify goal ownership
+    goal = crud.nutrition_goals.get_with_targets(db, goal_id, current_user.id)
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    # Prevent deleting active goal without confirmation; client is expected to switch first
+    if goal.status == "active":
+        raise HTTPException(status_code=400, detail="Cannot delete active goal. Activate another goal first.")
+
+    # Delete user focus rows for this goal to avoid FK orphans
+    db.query(UserNutrientFocus).filter(UserNutrientFocus.goal_id == goal.id).delete(synchronize_session=False)
+    # Delete meal plans for this goal
+    db.query(NutritionMealPlan).filter(NutritionMealPlan.goal_id == goal.id).delete(synchronize_session=False)
+    # Deleting the goal cascades to targets via ORM relationship
+    db.delete(goal)
+    db.commit()
+    return {"success": True}
 
 
 @router.get("/defaults", response_model=List[DefaultTargetOut])

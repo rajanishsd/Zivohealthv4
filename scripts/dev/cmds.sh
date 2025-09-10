@@ -43,7 +43,7 @@ curl -sS -m 10 http://127.0.0.1/health || true
 sudo vim /opt/zivohealth/.env
 
 
-
+sudo docker compose -f /opt/zivohealth/docker-compose.yml logs --tail 200 api || true
 
 
 rebuild

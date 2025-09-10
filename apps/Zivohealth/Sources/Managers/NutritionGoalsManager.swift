@@ -9,6 +9,9 @@ class NutritionGoalsManager: ObservableObject {
     @Published var progressItems: [ProgressItem] = []
     @Published var objectives: [NutritionObjective] = []
     @Published var nutrientCatalog: [NutrientCatalog] = []
+    @Published var currentGoalDetail: NutritionGoalDetail?
+    @Published var inactiveGoals: [NutritionGoal] = []
+    @Published var allGoals: [NutritionGoal] = []
     
     @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
     
@@ -245,6 +248,159 @@ class NutritionGoalsManager: ObservableObject {
                 self?.loadActiveGoalProgress()
             }
         }
+    }
+
+    /// Load current active goal details including targets and meal plan
+    func loadCurrentGoalDetail() {
+        guard let url = URL(string: "\(baseURL)/current/detail") else {
+            self.errorMessage = "Invalid URL"
+            return
+        }
+
+        isLoading = true
+        errorMessage = nil
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.allHTTPHeaderFields = getAuthHeaders()
+
+        URLSession.shared.dataTaskPublisher(for: request)
+            .tryMap { output -> Data in
+                if let http = output.response as? HTTPURLResponse {
+                    print("🌐 [NutritionGoalsManager] /current/detail status: \(http.statusCode)")
+                }
+                return output.data
+            }
+            .decode(type: NutritionGoalDetail.self, decoder: JSONDecoder.nutritionGoalsDecoder)
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { [weak self] completion in
+                    self?.isLoading = false
+                    if case .failure(let error) = completion {
+                        self?.errorMessage = "Failed to load goal detail: \(error.localizedDescription)"
+                        print("❌ [NutritionGoalsManager] Failed to load goal detail: \(error)")
+                    }
+                },
+                receiveValue: { [weak self] detail in
+                    self?.currentGoalDetail = detail
+                    print("✅ [NutritionGoalsManager] Loaded goal detail with \(detail.targets.count) targets")
+                }
+            )
+            .store(in: &cancellables)
+    }
+
+    /// Load inactive goals list for switching
+    func loadInactiveGoals() {
+        guard let url = URL(string: "\(baseURL)/goals?status=inactive") else {
+            self.errorMessage = "Invalid URL"
+            return
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.allHTTPHeaderFields = getAuthHeaders()
+        URLSession.shared.dataTaskPublisher(for: request)
+            .map(\.data)
+            .decode(type: [NutritionGoal].self, decoder: JSONDecoder.nutritionGoalsDecoder)
+            .receive(on: DispatchQueue.main)
+            .sink(receiveCompletion: { [weak self] completion in
+                if case .failure(let error) = completion {
+                    self?.errorMessage = "Failed to load inactive goals: \(error.localizedDescription)"
+                }
+            }, receiveValue: { [weak self] goals in
+                self?.inactiveGoals = goals
+            })
+            .store(in: &cancellables)
+    }
+
+    /// Load all goals (active and inactive)
+    func loadAllGoals() {
+        guard let url = URL(string: "\(baseURL)/goals") else {
+            self.errorMessage = "Invalid URL"
+            return
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.allHTTPHeaderFields = getAuthHeaders()
+        URLSession.shared.dataTaskPublisher(for: request)
+            .map(\.data)
+            .decode(type: [NutritionGoal].self, decoder: JSONDecoder.nutritionGoalsDecoder)
+            .receive(on: DispatchQueue.main)
+            .sink(receiveCompletion: { [weak self] completion in
+                if case .failure(let error) = completion {
+                    self?.errorMessage = "Failed to load goals: \(error.localizedDescription)"
+                }
+            }, receiveValue: { [weak self] goals in
+                self?.allGoals = goals
+            })
+            .store(in: &cancellables)
+    }
+
+    /// Activate a previous goal
+    func activateGoal(goalId: Int, completion: @escaping (Bool) -> Void) {
+        print("🌐 [NutritionGoalsManager] Activating goal \(goalId)")
+        guard let url = URL(string: "\(baseURL)/goals/\(goalId)/activate") else { 
+            print("🌐 [NutritionGoalsManager] ERROR: Invalid URL for goal \(goalId)")
+            completion(false); return 
+        }
+        print("🌐 [NutritionGoalsManager] URL: \(url)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.allHTTPHeaderFields = getAuthHeaders()
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                if let http = response as? HTTPURLResponse {
+                    print("🌐 [NutritionGoalsManager] Response status: \(http.statusCode)")
+                    if (200...299).contains(http.statusCode) {
+                        print("🌐 [NutritionGoalsManager] Activation successful, reloading data")
+                        self.loadActiveGoalSummary()
+                        self.loadCurrentGoalDetail()
+                        self.loadAllGoals()
+                        self.loadInactiveGoals()
+                        completion(true)
+                    } else {
+                        print("🌐 [NutritionGoalsManager] Activation failed with status: \(http.statusCode)")
+                        self.errorMessage = "Activation failed with status: \(http.statusCode)"
+                        completion(false)
+                    }
+                } else {
+                    print("🌐 [NutritionGoalsManager] ERROR: \(error?.localizedDescription ?? "Unknown error")")
+                    self.errorMessage = error?.localizedDescription
+                    completion(false)
+                }
+            }
+        }.resume()
+    }
+
+    /// Delete an inactive goal
+    func deleteGoal(goalId: Int, completion: @escaping (Bool) -> Void) {
+        print("🗑️ [NutritionGoalsManager] DELETING goal \(goalId)")
+        guard let url = URL(string: "\(baseURL)/goals/\(goalId)") else { 
+            print("🗑️ [NutritionGoalsManager] ERROR: Invalid URL for goal \(goalId)")
+            completion(false); return 
+        }
+        print("🗑️ [NutritionGoalsManager] DELETE URL: \(url)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.allHTTPHeaderFields = getAuthHeaders()
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                if let http = response as? HTTPURLResponse {
+                    print("🗑️ [NutritionGoalsManager] DELETE Response status: \(http.statusCode)")
+                    if http.statusCode == 200 {
+                        self.loadInactiveGoals()
+                        completion(true)
+                    } else {
+                        print("🗑️ [NutritionGoalsManager] DELETE failed with status: \(http.statusCode)")
+                        self.errorMessage = error?.localizedDescription
+                        completion(false)
+                    }
+                } else {
+                    print("🗑️ [NutritionGoalsManager] DELETE ERROR: \(error?.localizedDescription ?? "Unknown error")")
+                    self.errorMessage = error?.localizedDescription
+                    completion(false)
+                }
+            }
+        }.resume()
     }
 }
 

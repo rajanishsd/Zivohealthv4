@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -26,6 +26,7 @@
 		22ED174EAF03D714B4A9458F /* ZivoHealthApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 294935B6E923D37F4F09B90D /* ZivoHealthApp.swift */; };
 		2DABB889043362A8BF44C216 /* VitalsSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00669A95E8E6AAB6F40BD1F /* VitalsSyncManager.swift */; };
 		2E82CD86EBADB6AD0CA6CFDF /* LabReportsAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADF32113FC5D3A58C965EE19 /* LabReportsAPIService.swift */; };
+		2EFD6709AE043E2D5DB04600 /* NutritionGoalDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DAEAE7C7022DA797B93CEB1 /* NutritionGoalDetailView.swift */; };
 		2FE07C9EDFC64072F29EC9C4 /* ChatHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 065F56C6159414749B50B0F7 /* ChatHistoryView.swift */; };
 		3182A15DA05073ECCEF4E429 /* SimpleDynamicBiomarkersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B5E6FE5615603350FA778AF /* SimpleDynamicBiomarkersView.swift */; };
 		348B4987672BF7CDD53E5D1E /* VitalsSyncProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F57F70E926353D5312153F /* VitalsSyncProgress.swift */; };
@@ -101,7 +102,7 @@
 
 /* Begin PBXFileReference section */
 		02C4CF13276FC42367ED8931 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
-		040F2D8FFAF4146C11813244 /* ZivoHealth.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ZivoHealth.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		040F2D8FFAF4146C11813244 /* ZivoHealth.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZivoHealth.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		05FEBCB2B0141D23ECDE8704 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
 		065F56C6159414749B50B0F7 /* ChatHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryView.swift; sourceTree = "<group>"; };
 		087F05A6FAB6926BD5398C44 /* BackendVitalsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendVitalsManager.swift; sourceTree = "<group>"; };
@@ -112,6 +113,7 @@
 		32BA03E3702F3149E66543D2 /* KidneyFunctionTestsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KidneyFunctionTestsView.swift; sourceTree = "<group>"; };
 		35024D5191AEBE316AA7D0E2 /* PatientDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatientDetailView.swift; sourceTree = "<group>"; };
 		39352E7610A18558ABDA4343 /* RoleSelectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoleSelectionView.swift; sourceTree = "<group>"; };
+		3B6511722E6FE6E600A18351 /* ZivoHealth.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZivoHealth.entitlements; sourceTree = "<group>"; };
 		3BA8111F228B9DA9D1CB848E /* CardiacMarkersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardiacMarkersView.swift; sourceTree = "<group>"; };
 		430DEE78B83DA8E378F15D54 /* ImagePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePickerView.swift; sourceTree = "<group>"; };
 		4740BB412B3880168CEB48EB /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -135,6 +137,7 @@
 		6B7B7C2D66A918B7B11C2DF2 /* PatientListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatientListView.swift; sourceTree = "<group>"; };
 		6C80084FFAD549D63E79F04B /* AppointmentViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppointmentViewModel.swift; sourceTree = "<group>"; };
 		6C990F50BD1D54DA0511A5F3 /* AddMealView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddMealView.swift; sourceTree = "<group>"; };
+		6DAEAE7C7022DA797B93CEB1 /* NutritionGoalDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionGoalDetailView.swift; sourceTree = "<group>"; };
 		6F941D169575EFE413F6EA05 /* ConsultationOptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConsultationOptionsView.swift; sourceTree = "<group>"; };
 		7502D973B001844447A98135 /* HealthMetricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthMetricsView.swift; sourceTree = "<group>"; };
 		7546A35463F933F3A0A01EA6 /* LipidProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LipidProfileView.swift; sourceTree = "<group>"; };
@@ -264,6 +267,7 @@
 				6525FB7CF2BC7D54BD4C809B /* MealDetailView.swift */,
 				996146302D47AEED2DEFE7F2 /* MedicationsView.swift */,
 				D02302579CD2EEF84A73344F /* NutritionChartViews.swift */,
+				6DAEAE7C7022DA797B93CEB1 /* NutritionGoalDetailView.swift */,
 				DC204CE3C3085B925ED8D319 /* NutritionGoalSetupView.swift */,
 				5B6838F0F1289B92C39B9483 /* NutritionView.swift */,
 				8A0483B8D690AED292CCE15A /* OthersView.swift */,
@@ -329,6 +333,7 @@
 		7DD21C2CADE5B80EC28AF8EC = {
 			isa = PBXGroup;
 			children = (
+				3B6511722E6FE6E600A18351 /* ZivoHealth.entitlements */,
 				1BF1C218BE662A5E20E976FF /* Sources */,
 				F9AA7CB0EF09E0E307D34269 /* Products */,
 			);
@@ -430,7 +435,6 @@
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
 					B089602FE23A6A872591020B = {
-						DevelopmentTeam = "${DEVELOPMENT_TEAM}";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -449,7 +453,6 @@
 				0A8D2DD33D85AF5BF1F22061 /* XCRemoteSwiftPackageReference "Alamofire" */,
 				3F6394B640B75AEC01645793 /* XCRemoteSwiftPackageReference "client-sdk-swift" */,
 			);
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -548,6 +551,7 @@
 				C8C2536C8B0792D72C24D9A2 /* NutritionAPIService.swift in Sources */,
 				8B762E860366B407F707D743 /* NutritionChartViews.swift in Sources */,
 				389CC3BF7951ADFB58EC76B9 /* NutritionData.swift in Sources */,
+				2EFD6709AE043E2D5DB04600 /* NutritionGoalDetailView.swift in Sources */,
 				1265CB6300514CBEDD713FD1 /* NutritionGoalSetupView.swift in Sources */,
 				CC86E5DB8BF14A5D64B01A61 /* NutritionGoalsManager.swift in Sources */,
 				794D7D4410BCCA859FB5EA5E /* NutritionGoalsModels.swift in Sources */,
@@ -592,10 +596,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ZivoHealth.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "${DEVELOPMENT_TEAM}";
+				DEVELOPMENT_TEAM = 83B85QRG5R;
 				ENABLE_BITCODE = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ZivoHealth;
@@ -753,10 +758,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ZivoHealth.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "${DEVELOPMENT_TEAM}";
+				DEVELOPMENT_TEAM = 83B85QRG5R;
 				ENABLE_BITCODE = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = ZivoHealth;

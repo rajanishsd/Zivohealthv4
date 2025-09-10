@@ -16,7 +16,7 @@ AWS_PROFILE_DEFAULT="zivohealth"
 AWS_REGION_DEFAULT="us-east-1"
 MULTI_ARCH=false
 ALSO_LATEST=true
-SET_SSM=false
+SET_SSM=true
 SSM_PARAM_NAME=""
 
 AWS_PROFILE="$AWS_PROFILE_DEFAULT"
@@ -35,7 +35,8 @@ print_usage() {
   echo "  --multi-arch          Build linux/amd64 and linux/arm64 (default: amd64 only)"
   echo "  --no-latest           Do not also push ':latest' (default: push both TAG and latest)"
   echo "  --also-latest         Back-compat flag; has no effect since latest is default"
-  echo "  --set-ssm-tag         Update the deploy watcher SSM parameter to TAG"
+  echo "  --no-ssm-tag          Do not update the deploy watcher SSM parameter (default: update SSM)"
+  echo "  --set-ssm-tag         Back-compat flag; has no effect since SSM update is default"
   echo "  -s SSM_PARAM_NAME     SSM parameter name for image tag (overrides TF output)"
   echo "  -h                    Show help"
 }
@@ -57,6 +58,8 @@ while [[ $# -gt 0 ]]; do
       ALSO_LATEST=false; shift ;;
     --also-latest)
       ALSO_LATEST=true; shift ;;
+    --no-ssm-tag)
+      SET_SSM=false; shift ;;
     --set-ssm-tag)
       SET_SSM=true; shift ;;
     -s)

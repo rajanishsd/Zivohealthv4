@@ -77,7 +77,7 @@ def upgrade() -> None:
     op.create_index('idx_goal_target_nutrient', 'nutrition_goal_targets', ['nutrient_id'], unique=False)
 
     op.create_table(
-        'user_nutrient_focus',
+        '   ',
         sa.Column('id', sa.Integer(), primary_key=True),
         sa.Column('user_id', sa.Integer(), sa.ForeignKey('users.id'), nullable=False),
         sa.Column('nutrient_id', sa.Integer(), sa.ForeignKey('nutrition_nutrient_catalog.id'), nullable=False),
