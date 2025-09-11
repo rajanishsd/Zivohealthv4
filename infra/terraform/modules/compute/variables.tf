@@ -12,13 +12,13 @@ variable "aws_region" { type = string }
 variable "valid_api_keys_override" {
   type        = string
   description = "JSON array of API keys to inject into .env (overrides SSM)"
-  default     = null
+  default     = ""
 }
 
 variable "app_secret_key_override" {
   type        = string
   description = "App secret key for HMAC to inject into .env (overrides SSM)"
-  default     = null
+  default     = ""
 }
 
 variable "enable_ssh_tunnel" {

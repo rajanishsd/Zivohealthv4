@@ -418,6 +418,9 @@ public class NetworkService: ObservableObject {
         print("   Doctor Token: \(doctorAuthToken.isEmpty ? "Empty" : "Exists (\(doctorAuthToken.count) chars)")")
         print("   Current Credentials: \(currentCredentials.email)")
         print("   API Endpoint: \(apiEndpoint)")
+        print("   AppConfig Environment: \(AppConfig.Environment.current)")
+        print("   AppConfig Default Endpoint: \(AppConfig.defaultAPIEndpoint)")
+        print("   Base URL: \(baseURL)")
     }
 
     // MARK: - App Lifecycle Management
@@ -468,6 +471,13 @@ public class NetworkService: ObservableObject {
         
         // Update baseURL will be computed lazily on next request
         print("✅ [NetworkService] Endpoint change handled successfully")
+    }
+    
+    public func forceUpdateEndpoint() {
+        print("🔄 [NetworkService] Forcing endpoint update to: \(AppConfig.defaultAPIEndpoint)")
+        apiEndpoint = AppConfig.defaultAPIEndpoint
+        handleEndpointChange()
+        print("✅ [NetworkService] Endpoint forcefully updated to: \(apiEndpoint)")
     }
     
     private func startReconnectionTimer() {
@@ -1815,4 +1825,76 @@ struct UserResponse: Codable {
         case fullName = "full_name"
         case isActive = "is_active"
     }
+}
+
+// MARK: - Password Reset Extension
+extension NetworkService {
+    
+    // Request password reset
+    func requestPasswordReset(email: String) async throws -> String {
+        print("🔐 [NetworkService] Requesting password reset for email: \(email)")
+        
+        let body: [String: Any] = [
+            "email": email
+        ]
+        
+        do {
+            let data = try await post("/auth/forgot-password", body: body, requiresAuth: false)
+            let response = try decoder.decode(PasswordResetResponse.self, from: data)
+            print("✅ [NetworkService] Password reset request sent successfully")
+            return response.message
+        } catch {
+            print("❌ [NetworkService] Error requesting password reset: \(error)")
+            throw error
+        }
+    }
+    
+    // Verify reset token
+    func verifyResetToken(token: String) async throws -> Bool {
+        print("🔐 [NetworkService] Verifying reset token")
+        
+        do {
+            let data = try await get("/auth/verify-reset-token/\(token)", requiresAuth: false)
+            let response = try decoder.decode(TokenVerificationResponse.self, from: data)
+            print("✅ [NetworkService] Token verification completed: \(response.valid)")
+            return response.valid
+        } catch {
+            print("❌ [NetworkService] Error verifying reset token: \(error)")
+            throw error
+        }
+    }
+    
+    // Reset password with token
+    func resetPassword(token: String, newPassword: String) async throws -> String {
+        print("🔐 [NetworkService] Resetting password with token")
+        
+        let body: [String: Any] = [
+            "token": token,
+            "new_password": newPassword
+        ]
+        
+        do {
+            let data = try await post("/auth/reset-password", body: body, requiresAuth: false)
+            let response = try decoder.decode(PasswordResetSuccessResponse.self, from: data)
+            print("✅ [NetworkService] Password reset successfully")
+            return response.message
+        } catch {
+            print("❌ [NetworkService] Error resetting password: \(error)")
+            throw error
+        }
+    }
+}
+
+// MARK: - Password Reset Response Types
+struct PasswordResetResponse: Codable {
+    let message: String
+}
+
+struct TokenVerificationResponse: Codable {
+    let valid: Bool
+    let message: String
+}
+
+struct PasswordResetSuccessResponse: Codable {
+    let message: String
 }

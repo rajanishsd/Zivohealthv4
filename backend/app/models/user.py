@@ -17,4 +17,5 @@ class User(Base):
 
     # Relationships
     chat_sessions = relationship("ChatSession", back_populates="user")
-    patient_appointments = relationship("Appointment", foreign_keys="Appointment.patient_id", back_populates="patient") 
+    patient_appointments = relationship("Appointment", foreign_keys="Appointment.patient_id", back_populates="patient")
+    password_reset_tokens = relationship("PasswordResetToken", back_populates="user") 

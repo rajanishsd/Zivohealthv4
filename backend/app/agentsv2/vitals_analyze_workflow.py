@@ -25,7 +25,7 @@ from langgraph.graph import StateGraph, END, START
 from langchain_openai import ChatOpenAI
 from app.core.config import settings
 from app.utils.timezone import now_local, isoformat_now
-from configurations.vitals_config import VITALS_TABLES, PRIMARY_VITALS_TABLE
+from app.configurations.vitals_config import VITALS_TABLES, PRIMARY_VITALS_TABLE
 import psycopg2
 from psycopg2.extras import RealDictCursor
 

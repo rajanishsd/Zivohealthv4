@@ -23,6 +23,9 @@ class Doctor(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
+    # Relationships
+    password_reset_tokens = relationship("PasswordResetToken", back_populates="doctor")
+
 class ConsultationRequest(Base):
     __tablename__ = "consultation_requests"
 

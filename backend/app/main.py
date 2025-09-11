@@ -155,10 +155,58 @@ async def lifespan(app: FastAPI):
     
     logger.info("✅ ZivoHealth Backend shutdown complete")
 
+def validate_configuration():
+    """
+    Validate that all required configuration is present before starting the application.
+    """
+    logger.info(f"Validating application configuration for {settings.ENVIRONMENT} environment...")
+    
+    # Validate email configuration
+    required_email_settings = [
+        "SMTP_SERVER", "SMTP_PORT", "SMTP_USERNAME", 
+        "SMTP_PASSWORD", "FROM_EMAIL", "FRONTEND_URL"
+    ]
+    
+    missing_settings = []
+    for setting in required_email_settings:
+        if not getattr(settings, setting, None):
+            missing_settings.append(setting)
+    
+    if missing_settings:
+        error_msg = f"Missing required email configuration: {', '.join(missing_settings)}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    # Validate password reset app directory
+    if not os.path.exists(settings.PASSWORD_RESET_APP_DIR):
+        error_msg = f"Password reset app directory not found: {settings.PASSWORD_RESET_APP_DIR}"
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+    
+    # Environment-specific validations
+    if settings.is_production:
+        logger.info("🔒 Production environment detected - applying strict validations")
+        if not settings.FRONTEND_URL.startswith('https://'):
+            raise ValueError("Production requires HTTPS for FRONTEND_URL")
+        if settings.SMTP_SERVER in ['smtp.gmail.com', 'localhost']:
+            raise ValueError("Production should not use development SMTP servers")
+    elif settings.is_development:
+        logger.info("🛠️ Development environment detected - applying development validations")
+        if settings.FRONTEND_URL.startswith('https://') and 'localhost' not in settings.FRONTEND_URL:
+            logger.warning("Development environment should typically use HTTP and localhost")
+    elif settings.is_staging:
+        logger.info("🧪 Staging environment detected")
+    
+    logger.info(f"✅ Configuration validation passed for {settings.ENVIRONMENT} environment")
+
+
 def create_application() -> FastAPI:
     """Create and configure the FastAPI application"""
     
     logger.info("Starting create_application()")
+    
+    # Validate configuration before proceeding
+    validate_configuration()
     
     app = FastAPI(
         title=settings.PROJECT_NAME,
@@ -176,14 +224,15 @@ def create_application() -> FastAPI:
     if settings.REQUIRE_API_KEY:
         app.add_middleware(APIKeyMiddleware)
     
-    # CORS Middleware
+    # CORS Middleware - Environment-specific origins
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
+        allow_origins=settings.allowed_cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
+    logger.info(f"CORS configured for {settings.ENVIRONMENT} environment with origins: {settings.allowed_cors_origins}")
     
     # GZip Middleware for response compression
     app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -226,6 +275,11 @@ def create_application() -> FastAPI:
     
     app.mount("/data", StaticFiles(directory="data"), name="data")
     logger.info("Static files mounted at /data for serving uploads")
+    
+    # Mount password reset app (directory already validated in validate_configuration)
+    reset_password_dir = settings.PASSWORD_RESET_APP_DIR
+    app.mount("/reset-password", StaticFiles(directory=reset_password_dir, html=True), name="reset-password")
+    logger.info(f"Password reset app mounted at /reset-password from {reset_password_dir}")
     
     logger.info("create_application() completed successfully")
     

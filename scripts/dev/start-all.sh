@@ -170,6 +170,32 @@ start_backend() {
     fi
 }
 
+# Function to build Password Reset App
+build_password_reset_app() {
+    print_status "Building password reset app..."
+    
+    # Check if password reset app directory exists
+    if [ ! -d "backend/password-reset-app" ]; then
+        print_warning "Password reset app directory not found, skipping build..."
+        return 0
+    fi
+    
+    # Use existing build script
+    if [ -f "backend/scripts/build_password_reset_app.sh" ]; then
+        print_status "Using password reset app build script..."
+        if ./backend/scripts/build_password_reset_app.sh > /dev/null 2>&1; then
+            print_success "Password reset app built successfully"
+            return 0
+        else
+            print_warning "Password reset app build failed, continuing..."
+            return 0  # Don't fail the entire startup process
+        fi
+    else
+        print_warning "Password reset app build script not found, skipping..."
+        return 0
+    fi
+}
+
 # Function to start Dashboard
 start_dashboard() {
     print_status "Starting React dashboard..."
@@ -214,7 +240,11 @@ start_service() {
         "redis")
             start_redis
             ;;
+        "password-reset"|"reset-app")
+            build_password_reset_app
+            ;;
         "backend")
+            build_password_reset_app  # Build reset app before backend
             start_backend
             ;;
         "dashboard")
@@ -222,14 +252,38 @@ start_service() {
             ;;
         *)
             print_error "Unknown service: $service"
-            print_status "Available services: postgresql, redis, backend, dashboard"
+            print_status "Available services: postgresql, redis, password-reset, backend, dashboard"
             exit 1
             ;;
     esac
 }
 
+# Function to set environment configuration
+set_environment() {
+    local env=${1:-development}
+    
+    print_status "Setting up $env environment configuration..."
+    
+    # Check if environment-specific config exists
+    if [ -f "backend/.env.$env" ]; then
+        cp "backend/.env.$env" "backend/.env"
+        print_success "$env environment configuration activated"
+    else
+        print_warning "No .env.$env file found, using existing .env configuration"
+    fi
+}
+
 # Main execution
 main() {
+    # Check for environment-specific start
+    if [ "$1" = "dev" ] || [ "$1" = "development" ]; then
+        set_environment "development"
+        shift  # Remove the environment argument
+    elif [ "$1" = "prod" ] || [ "$1" = "production" ]; then
+        set_environment "production"
+        shift  # Remove the environment argument
+    fi
+    
     # Check for service-specific start
     if [ ! -z "$1" ]; then
         print_status "Starting $1 service..."
@@ -247,9 +301,14 @@ main() {
                 "redis")
                     echo "🌐 Redis: localhost:6379"
                     ;;
+                "password-reset"|"reset-app")
+                    echo "🌐 Password Reset App: Built and ready"
+                    echo "🌐 Reset Page: https://zivohealth.ai/reset-password"
+                    ;;
                 "backend")
                     echo "🌐 Backend API: http://localhost:8000"
                     echo "🌐 API Docs: http://localhost:8000/docs"
+                    echo "🌐 Password Reset App: Built and ready"
                     ;;
                 "dashboard")
                     echo "🌐 Dashboard: http://localhost:3000"
@@ -283,14 +342,18 @@ main() {
     fi
     echo ""
     
-    # Step 3: Start Backend
+    # Step 3: Build Password Reset App
+    build_password_reset_app
+    echo ""
+    
+    # Step 4: Start Backend
     if ! start_backend; then
         print_error "Failed to start Backend, aborting..."
         exit 1
     fi
     echo ""
     
-    # Step 4: Start Dashboard
+    # Step 5: Start Dashboard
     start_dashboard
     echo ""
     
@@ -333,8 +396,9 @@ main() {
     echo ""
     echo "📝 To stop all services: ./scripts/stop-all.sh"
     echo "🔄 To restart all services: ./scripts/restart-all.sh"
-    echo "💡 To start individual services: ./scripts/start-all.sh [service]"
-    echo "   Available services: postgresql, redis, backend, dashboard"
+    echo "💡 To start with specific environment: ./scripts/start-all.sh [dev|prod]"
+    echo "💡 To start individual services: ./scripts/start-all.sh [dev|prod] [service]"
+    echo "   Available services: postgresql, redis, password-reset, backend, dashboard"
     echo "📊 To view dashboard logs: ./backend/scripts/logs_dashboard.sh"
 }
 

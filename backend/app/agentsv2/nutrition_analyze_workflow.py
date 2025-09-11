@@ -25,7 +25,7 @@ sys.path.insert(0, str(backend_path))
 from langgraph.graph import StateGraph, END, START
 from langchain_openai import ChatOpenAI
 from app.core.config import settings
-from configurations.nutrition_config import NUTRITION_TABLES, PRIMARY_NUTRITION_TABLE
+from app.configurations.nutrition_config import NUTRITION_TABLES, PRIMARY_NUTRITION_TABLE
 import psycopg2
 from psycopg2.extras import RealDictCursor
 

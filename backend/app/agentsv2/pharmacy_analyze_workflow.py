@@ -25,7 +25,7 @@ from langgraph.graph import StateGraph, END, START
 from langchain_openai import ChatOpenAI
 from app.core.config import settings
 from app.utils.timezone import now_local, isoformat_now
-from configurations.pharmacy_config import PHARMACY_TABLES, PRIMARY_PHARMACY_TABLE
+from app.configurations.pharmacy_config import PHARMACY_TABLES, PRIMARY_PHARMACY_TABLE
 import psycopg2
 from psycopg2.extras import RealDictCursor
 

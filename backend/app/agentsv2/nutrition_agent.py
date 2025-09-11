@@ -38,7 +38,7 @@ from app.utils.timezone import now_local, isoformat_now
 from app.core.background_worker import trigger_smart_aggregation
 
 # Import nutrition configuration
-from configurations.nutrition_config import NUTRITION_TABLES, PRIMARY_NUTRITION_TABLE
+from app.configurations.nutrition_config import NUTRITION_TABLES, PRIMARY_NUTRITION_TABLE
 
 # LangSmith tracing imports
 from langsmith import Client

@@ -258,7 +258,58 @@ async def assess_user_intent(state: CustomerState) -> CustomerState:
             user_id = state.get("user_id")
             return await ask_user_question(question, session_id, user_id)
         
-        # Create a ReAct agent with the tool
+        # Helper to fetch most recent uploaded file for this session
+        def _get_recent_session_file() -> Optional[Dict[str, Any]]:
+            session_id = state.get("session_id")
+            if not session_id:
+                return None
+            try:
+                with SessionLocal() as db:
+                    msgs = crud.chat_message.get_session_messages(db=db, session_id=session_id, skip=0, limit=100)
+                for m in reversed(msgs or []):
+                    try:
+                        file_path_val = getattr(m, "file_path", None)
+                        file_type_val = getattr(m, "file_type", None)
+                        if file_path_val and file_type_val:
+                            original_name_val = Path(file_path_val).name if file_path_val else None
+                            return {
+                                "file_path": file_path_val,
+                                "file_type": file_type_val,
+                                "original_name": original_name_val
+                            }
+                    except Exception:
+                        pass
+            except Exception:
+                return None
+            return None
+
+        # Tool to retrieve the most recent uploaded file for the current session and update state
+        @tool
+        async def get_recent_session_file_tool() -> dict:
+            """Get the most recently uploaded file for the current chat session.
+            Use ONLY when ALL of the following conditions are met:
+            - state.uploaded_file is missing or empty
+            - AND the user explicitly asks to "use the previous file", "last file", "same file",
+              or mentions a network issue and asks to refer to the previous upload/context
+            - Do NOT call this tool in normal flows or to guess context.
+
+            Side effects:
+            - If a file is found, this will set state.uploaded_file to the recovered metadata.
+
+            Returns: {found: bool, uploaded_file?: dict, reason?: str}
+            """
+            try:
+                meta = _get_recent_session_file()
+                if meta:
+                    state["uploaded_file"] = meta
+                    return {"found": True, "uploaded_file": meta}
+                return {"found": False, "reason": "No prior uploaded file found for this session."}
+            except Exception as e:
+                return {"found": False, "reason": str(e)}
+
+        # Note: Do NOT proactively populate from history. Use get_recent_session_file_tool only under explicit user instruction.
+
+        # Create a ReAct agent with the tools
         
         llm = ChatOpenAI(model=settings.CUSTOMER_AGENT_MODEL, openai_api_key=settings.OPENAI_API_KEY)
         
@@ -436,6 +487,10 @@ async def assess_user_intent(state: CustomerState) -> CustomerState:
         - "Using ask_clarifying_question to redirect user from non-health request about flight booking to valid healthcare input, as this is outside our healthcare app scope"
         - "Calling ask_clarifying_question because user wants to 'analyze document' but no file was provided, which is required for document processing workflow"
 
+        Example reasoning for get_recent_session_file_tool:
+        - "Calling get_recent_session_file_tool because the user said 'use the previous file' and no uploaded file is present in state"
+        - "Calling get_recent_session_file_tool due to user indicating a network issue and asking to 'refer to the previous upload'"
+
         RULES:
         1. If request is COMPLETELY UNRELATED TO HEALTH → Use ask_clarifying_question tool to correct the user and ask for valid health input
         2. If request mentions file operations but NO FILE provided → Mark as incomplete, ask for file
@@ -446,6 +501,7 @@ async def assess_user_intent(state: CustomerState) -> CustomerState:
         7. NEVER ask multiple questions at once - only use the ask_clarifying_question tool ONCE per assessment
         8. For meal/nutrition requests with files, use time context intelligently - don't ask unnecessary timing questions
         9. ALWAYS provide clear reasoning when making any tool call as specified in the TOOL CALLING REASONING REQUIREMENTS section above
+        10. Only call get_recent_session_file_tool when: (a) no file is present in state.uploaded_file, AND (b) the user explicitly asks to use the previous/last/same file, or mentions a network issue and asks to refer to the previous upload. Do NOT call it otherwise.
 
         INVALID INPUT HANDLING:
         For non-health requests, use the ask_clarifying_question tool to correct the user:
@@ -478,7 +534,7 @@ async def assess_user_intent(state: CustomerState) -> CustomerState:
         # Create agent for assessment
         agent = create_react_agent(
             model=llm,
-            tools=[ask_clarifying_question]
+            tools=[ask_clarifying_question, get_recent_session_file_tool]
         )
         
         # Create messages with system prompt
@@ -931,8 +987,18 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         
         # Get image path from state if available (images only)
         final_image_path = state.get("file_path", None) if state.get("is_image") else None
-        file_name =state["uploaded_file"].get("original_name")
-        file_type = state["uploaded_file"].get("file_type")
+        
+        # Safely get file information from uploaded_file
+        uploaded_file = state.get("uploaded_file")
+        if uploaded_file is None:
+            return {
+                "action": "error",
+                "details": "No file uploaded. Please upload a document to process.",
+                "requires_user_input": True
+            }
+        
+        file_name = uploaded_file.get("original_name")
+        file_type = uploaded_file.get("file_type")
         result = await process_file_async(user_id, file_name, file_type, final_image_path, final_image_base64, final_source_file_path,  analysis_only)
         
         # Extract key information from the result
@@ -947,8 +1013,8 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         # Persisted path should be the durable reference (S3 URI if enabled); prefer uploaded file_path from state
         persisted_path = None
         try:
-            if state.get("uploaded_file"):
-                persisted_path = state["uploaded_file"].get("file_path") or file_path
+            if uploaded_file:
+                persisted_path = uploaded_file.get("file_path") or file_path
         except Exception:
             persisted_path = file_path
         state["source_file_path"] = persisted_path

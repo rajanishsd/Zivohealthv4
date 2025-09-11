@@ -25,7 +25,7 @@ from langgraph.graph import StateGraph, END, START
 from langchain_openai import ChatOpenAI
 from app.core.config import settings
 from app.utils.timezone import now_local, isoformat_now
-from configurations.lab_config import LAB_TABLES, PRIMARY_LAB_TABLE, ALL_LAB_TABLES, AGGREGATION_TABLES
+from app.configurations.lab_config import LAB_TABLES, PRIMARY_LAB_TABLE, ALL_LAB_TABLES, AGGREGATION_TABLES
 import psycopg2
 from psycopg2.extras import RealDictCursor
 

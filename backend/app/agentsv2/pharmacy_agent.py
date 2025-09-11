@@ -36,7 +36,7 @@ from app.utils.timezone import now_local, isoformat_now
 from app.agentsv2.response_utils import format_agent_response, format_error_response
 
 # Import pharmacy configuration
-from configurations.pharmacy_config import PHARMACY_TABLES, PRIMARY_PHARMACY_TABLE
+from app.configurations.pharmacy_config import PHARMACY_TABLES, PRIMARY_PHARMACY_TABLE
 
 # LangSmith tracing imports
 from langsmith import Client

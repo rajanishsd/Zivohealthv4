@@ -122,7 +122,18 @@ class CRUDNutritionData(CRUDBase[NutritionRawData, NutritionDataCreate, Nutritio
 
     def aggregate_daily_data(self, db: Session, user_id: int, target_date: date) -> int:
         """Aggregate nutrition data for a specific user and date"""
-        # Get all nutrition data for the target date that needs processing
+        # First check if there are any records for the date
+        all_data = db.query(self.model).filter(
+            and_(
+                self.model.user_id == user_id,
+                self.model.meal_date == target_date
+            )
+        ).all()
+
+        if not all_data:
+            return 0  # No records for this date
+        
+        # Get nutrition data that needs processing
         pending_data = db.query(self.model).filter(
             and_(
                 self.model.user_id == user_id,
@@ -132,16 +143,7 @@ class CRUDNutritionData(CRUDBase[NutritionRawData, NutritionDataCreate, Nutritio
         ).all()
 
         if not pending_data:
-            return 0
-        
-        # For accurate aggregation, get ALL records for the date (including completed ones)
-        # This ensures we don't lose data when aggregation runs multiple times per day
-        all_data = db.query(self.model).filter(
-            and_(
-                self.model.user_id == user_id,
-                self.model.meal_date == target_date
-            )
-        ).all()
+            return 0  # No pending records to process
         
         # Use all_data for calculations to ensure completeness
         raw_data = all_data

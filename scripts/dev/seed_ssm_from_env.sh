@@ -65,8 +65,18 @@ put_param() {
     return 0
   fi
   echo "Setting $name ($type)"
-  aws ssm put-parameter "${AWS_PROFILE_ARG[@]}" "${AWS_REGION_ARG[@]}" \
-    --name "$name" --type "$type" --value "$value" --overwrite >/dev/null
+  
+  # Build AWS command with optional profile and region
+  local aws_cmd="aws ssm put-parameter"
+  if [[ ${#AWS_PROFILE_ARG[@]} -gt 0 ]]; then
+    aws_cmd="$aws_cmd ${AWS_PROFILE_ARG[*]}"
+  fi
+  if [[ ${#AWS_REGION_ARG[@]} -gt 0 ]]; then
+    aws_cmd="$aws_cmd ${AWS_REGION_ARG[*]}"
+  fi
+  aws_cmd="$aws_cmd --name \"$name\" --type \"$type\" --value \"$value\" --overwrite"
+  
+  eval "$aws_cmd" >/dev/null
 }
 
 ns() { echo "/$PROJECT/$ENVIRONMENT/$1"; }
@@ -80,10 +90,85 @@ put_param "$(ns livekit/api_key)" SecureString "$(get_env_value LIVEKIT_API_KEY)
 put_param "$(ns livekit/api_secret)" SecureString "$(get_env_value LIVEKIT_API_SECRET)"
 put_param "$(ns app/secret_key)" SecureString "$(get_env_value SECRET_KEY)"
 
+# Email Configuration (Secrets)
+put_param "$(ns email/smtp_password)" SecureString "$(get_env_value SMTP_PASSWORD)"
+
+
+# API Security (Secrets)
+put_param "$(ns api/valid_api_keys)" SecureString "$(get_env_value VALID_API_KEYS)"
+put_param "$(ns app/app_secret_key)" SecureString "$(get_env_value APP_SECRET_KEY)"
+
+# Database Configuration (Secrets)
+put_param "$(ns db/password)" SecureString "$(get_env_value POSTGRES_PASSWORD)"
+
 # Non-secrets
 put_param "$(ns langsmith/project)" String "$(get_env_value LANGCHAIN_PROJECT)"
 put_param "$(ns langsmith/endpoint)" String "$(get_env_value LANGCHAIN_ENDPOINT)"
 put_param "$(ns livekit/url)" String "$(get_env_value LIVEKIT_URL)"
+
+# 
+ Configuration (Non-secrets)
+put_param "$(ns email/smtp_server)" String "$(get_env_value SMTP_SERVER)"
+put_param "$(ns email/smtp_port)" String "$(get_env_value SMTP_PORT)"
+put_param "$(ns email/smtp_username)" String "$(get_env_value SMTP_USERNAME)"
+put_param "$(ns email/from_email)" String "$(get_env_value FROM_EMAIL)"
+put_param "$(ns email/frontend_url)" String "$(get_env_value FRONTEND_URL)"
+put_param "$(ns email/password_reset_token_expiry_minutes)" String "$(get_env_value PASSWORD_RESET_TOKEN_EXPIRY_MINUTES)"
+
+# AWS Configuration (Non-secrets)
+put_param "$(ns aws/default_region)" String "$(get_env_value AWS_DEFAULT_REGION)"
+put_param "$(ns aws/region)" String "$(get_env_value AWS_REGION)"
+put_param "$(ns aws/s3_bucket)" String "$(get_env_value AWS_S3_BUCKET)"
+put_param "$(ns aws/uploads_s3_prefix)" String "$(get_env_value UPLOADS_S3_PREFIX)"
+
+# API Security (Non-secrets)
+put_param "$(ns api/require_api_key)" String "$(get_env_value REQUIRE_API_KEY)"
+put_param "$(ns api/require_app_signature)" String "$(get_env_value REQUIRE_APP_SIGNATURE)"
+
+# Server Configuration
+put_param "$(ns server/host)" String "$(get_env_value SERVER_HOST)"
+put_param "$(ns server/port)" String "$(get_env_value SERVER_PORT)"
+put_param "$(ns server/process_pending_on_startup)" String "$(get_env_value PROCESS_PENDING_ON_STARTUP)"
+
+# Database Configuration (Non-secrets)
+put_param "$(ns db/server)" String "$(get_env_value POSTGRES_SERVER)"
+put_param "$(ns db/port)" String "$(get_env_value POSTGRES_PORT)"
+put_param "$(ns db/user)" String "$(get_env_value POSTGRES_USER)"
+put_param "$(ns db/name)" String "$(get_env_value POSTGRES_DB)"
+
+# Redis Configuration
+put_param "$(ns redis/host)" String "$(get_env_value REDIS_HOST)"
+put_param "$(ns redis/port)" String "$(get_env_value REDIS_PORT)"
+put_param "$(ns redis/db)" String "$(get_env_value REDIS_DB)"
+
+# OCR Configuration
+put_param "$(ns ocr/provider)" String "$(get_env_value OCR_PROVIDER)"
+put_param "$(ns ocr/timeout)" String "$(get_env_value OCR_TIMEOUT)"
+put_param "$(ns ocr/max_file_size)" String "$(get_env_value OCR_MAX_FILE_SIZE)"
+
+# CORS Configuration
+put_param "$(ns cors/origins)" String "$(get_env_value CORS_ORIGINS)"
+
+# WebSocket Configuration
+put_param "$(ns websocket/message_queue)" String "$(get_env_value WS_MESSAGE_QUEUE)"
+
+# Vitals Configuration
+put_param "$(ns vitals/batch_size)" String "$(get_env_value VITALS_BATCH_SIZE)"
+put_param "$(ns vitals/aggregation_delay_bulk)" String "$(get_env_value VITALS_AGGREGATION_DELAY_BULK)"
+put_param "$(ns vitals/aggregation_delay_incremental)" String "$(get_env_value VITALS_AGGREGATION_DELAY_INCREMENTAL)"
+
+# Project Information
+put_param "$(ns project/name)" String "$(get_env_value PROJECT_NAME)"
+put_param "$(ns project/version)" String "$(get_env_value VERSION)"
+put_param "$(ns project/project_version)" String "$(get_env_value PROJECT_VERSION)"
+put_param "$(ns project/api_v1_str)" String "$(get_env_value API_V1_STR)"
+
+# Security Configuration
+put_param "$(ns security/algorithm)" String "$(get_env_value ALGORITHM)"
+put_param "$(ns security/access_token_expire_minutes)" String "$(get_env_value ACCESS_TOKEN_EXPIRE_MINUTES)"
+
+# Password Reset App Configuration
+put_param "$(ns app/password_reset_app_dir)" String "$(get_env_value PASSWORD_RESET_APP_DIR)"
 
 # Model configs
 put_param "$(ns models/default_ai_model)" String "$(get_env_value DEFAULT_AI_MODEL)"

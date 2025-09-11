@@ -83,6 +83,57 @@ LIVEKIT_URL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/$
 LIVEKIT_API_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/livekit/api_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 LIVEKIT_API_SECRET=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/livekit/api_secret" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 
+# Create a script to fetch all SSM parameters and update .env
+cat > /opt/zivohealth/update_env_from_ssm.sh <<'SSM_SCRIPT'
+#!/bin/bash
+set -e
+
+PROJECT=${PROJECT}
+ENVIRONMENT=${ENVIRONMENT}
+AWS_REGION=${AWS_REGION}
+
+# Function to get SSM parameter with fallback
+get_ssm_param() {
+  local name="$$1"
+  local default="$$2"
+  local decrypt="$${3:-false}"
+  
+  if [ "$$decrypt" = "true" ]; then
+    aws --region $$AWS_REGION ssm get-parameter --with-decryption --name "$$name" --query "Parameter.Value" --output text 2>/dev/null || echo "$$default"
+  else
+    aws --region $$AWS_REGION ssm get-parameter --name "$$name" --query "Parameter.Value" --output text 2>/dev/null || echo "$$default"
+  fi
+}
+
+# Get all configuration from SSM
+SMTP_SERVER=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/smtp_server" "")
+SMTP_PORT=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/smtp_port" "")
+SMTP_USERNAME=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/smtp_username" "")
+SMTP_PASSWORD=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/smtp_password" "" true)
+FROM_EMAIL=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/from_email" "")
+FRONTEND_URL=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/frontend_url" "")
+PASSWORD_RESET_BASE_URL=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/password_reset_base_url" "")
+PASSWORD_RESET_TOKEN_EXPIRY_MINUTES=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/password_reset_token_expiry_minutes" "")
+
+# Add email configuration to .env if not already present
+if ! grep -q "SMTP_SERVER" /opt/zivohealth/.env; then
+  echo "" >> /opt/zivohealth/.env
+  echo "# Email Configuration" >> /opt/zivohealth/.env
+  echo "SMTP_SERVER=$$SMTP_SERVER" >> /opt/zivohealth/.env
+  echo "SMTP_PORT=$$SMTP_PORT" >> /opt/zivohealth/.env
+  echo "SMTP_USERNAME=$$SMTP_USERNAME" >> /opt/zivohealth/.env
+  echo "SMTP_PASSWORD=$$SMTP_PASSWORD" >> /opt/zivohealth/.env
+  echo "FROM_EMAIL=$$FROM_EMAIL" >> /opt/zivohealth/.env
+  echo "FRONTEND_URL=$$FRONTEND_URL" >> /opt/zivohealth/.env
+  echo "PASSWORD_RESET_BASE_URL=$$PASSWORD_RESET_BASE_URL" >> /opt/zivohealth/.env
+  echo "PASSWORD_RESET_TOKEN_EXPIRY_MINUTES=$$PASSWORD_RESET_TOKEN_EXPIRY_MINUTES" >> /opt/zivohealth/.env
+fi
+SSM_SCRIPT
+
+chmod +x /opt/zivohealth/update_env_from_ssm.sh
+/opt/zivohealth/update_env_from_ssm.sh
+
+
 # Secret key: fetch from SSM if available, otherwise generate a random one for this instance
 SECRET_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/app/secret_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 if [ -z "$SECRET_KEY" ]; then
@@ -109,55 +160,7 @@ else
   echo "{\"api_keys\": [$GEN_KEY]}" > /opt/zivohealth/generated_api_keys.json || true
 fi
 
-# --- AI Model Config from SSM with sensible defaults ---
-DEFAULT_AI_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/default_ai_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-BASE_AGENT_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/base_agent_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-BASE_AGENT_TEMPERATURE=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/base_agent_temperature" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-LAB_AGENT=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/lab_agent_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-LAB_AGENT_TEMPERATURE=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/lab_agent_temperature" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-CUSTOMER_AGENT_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/customer_agent_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-CUSTOMER_AGENT_TEMPERATURE=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/customer_agent_temperature" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-MEDICAL_DOCTOR_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/medical_doctor_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-MEDICAL_DOCTOR_TEMPERATURE=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/medical_doctor_temperature" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-DOCUMENT_WORKFLOW_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/document_workflow_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-DOCUMENT_WORKFLOW_TEMPERATURE=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/document_workflow_temperature" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-OPENAI_CLIENT_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/openai_client_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-LAB_AGGREGATION_AGENT_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/lab_aggregation_agent_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-LAB_AGGREGATION_AGENT_TEMPERATURE=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/lab_aggregation_agent_temperature" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-NUTRITION_VISION_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/nutrition_vision_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-NUTRITION_AGENT_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/nutrition_agent_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-VITALS_VISION_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/vitals_vision_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-VITALS_AGENT_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/vitals_agent_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-PRESCRIPTION_CLINICAL_AGENT_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/prescription_clinical_agent_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-PRESCRIPTION_CLINICAL_VISION_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/prescription_clinical_vision_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-PRESCRIPTION_CLINICAL_VISION_MAX_TOKENS=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/prescription_clinical_vision_max_tokens" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-PHARMACY_AGENT_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/pharmacy_agent_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-PHARMACY_VISION_MODEL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/models/pharmacy_vision_model" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-
-# Defaults mirroring backend/.env if SSM unset
-[ -z "$DEFAULT_AI_MODEL" ] && DEFAULT_AI_MODEL="gpt-4o-mini"
-[ -z "$BASE_AGENT_MODEL" ] && BASE_AGENT_MODEL="o4-mini"
-[ -z "$BASE_AGENT_TEMPERATURE" ] && BASE_AGENT_TEMPERATURE="1"
-[ -z "$LAB_AGENT" ] && LAB_AGENT="o4-mini"
-[ -z "$LAB_AGENT_TEMPERATURE" ] && LAB_AGENT_TEMPERATURE="1"
-[ -z "$CUSTOMER_AGENT_MODEL" ] && CUSTOMER_AGENT_MODEL="gpt-4o-mini"
-[ -z "$CUSTOMER_AGENT_TEMPERATURE" ] && CUSTOMER_AGENT_TEMPERATURE="0.3"
-[ -z "$MEDICAL_DOCTOR_MODEL" ] && MEDICAL_DOCTOR_MODEL="gpt-4o-mini"
-[ -z "$MEDICAL_DOCTOR_TEMPERATURE" ] && MEDICAL_DOCTOR_TEMPERATURE="0.1"
-[ -z "$DOCUMENT_WORKFLOW_MODEL" ] && DOCUMENT_WORKFLOW_MODEL="gpt-4o-mini"
-[ -z "$DOCUMENT_WORKFLOW_TEMPERATURE" ] && DOCUMENT_WORKFLOW_TEMPERATURE="0.1"
-[ -z "$OPENAI_CLIENT_MODEL" ] && OPENAI_CLIENT_MODEL="gpt-4o-mini"
-[ -z "$LAB_AGGREGATION_AGENT_MODEL" ] && LAB_AGGREGATION_AGENT_MODEL="o4-mini"
-[ -z "$LAB_AGGREGATION_AGENT_TEMPERATURE" ] && LAB_AGGREGATION_AGENT_TEMPERATURE="0.1"
-[ -z "$NUTRITION_VISION_MODEL" ] && NUTRITION_VISION_MODEL="gpt-4.1-mini"
-[ -z "$NUTRITION_AGENT_MODEL" ] && NUTRITION_AGENT_MODEL="o4-mini"
-[ -z "$VITALS_VISION_MODEL" ] && VITALS_VISION_MODEL="gpt-4.1-mini"
-[ -z "$VITALS_AGENT_MODEL" ] && VITALS_AGENT_MODEL="o4-mini"
-[ -z "$PRESCRIPTION_CLINICAL_AGENT_MODEL" ] && PRESCRIPTION_CLINICAL_AGENT_MODEL="o4-mini"
-[ -z "$PRESCRIPTION_CLINICAL_VISION_MODEL" ] && PRESCRIPTION_CLINICAL_VISION_MODEL="gpt-4.1-mini"
-[ -z "$PRESCRIPTION_CLINICAL_VISION_MAX_TOKENS" ] && PRESCRIPTION_CLINICAL_VISION_MAX_TOKENS="4000"
-[ -z "$PHARMACY_AGENT_MODEL" ] && PHARMACY_AGENT_MODEL="o4-mini"
-[ -z "$PHARMACY_VISION_MODEL" ] && PHARMACY_VISION_MODEL="gpt-4.1-mini"
+# AI Model Configuration will be added by the update script
 
 cat > /opt/zivohealth/.env <<ENV
 # Project Information
@@ -190,7 +193,6 @@ ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 VALID_API_KEYS=$${VALID_API_KEYS}
 REQUIRE_API_KEY=true
-# Default to not requiring HMAC app signature to avoid breaking clients; enable later if needed
 REQUIRE_APP_SIGNATURE=false
 
 # AWS
@@ -230,30 +232,7 @@ LIVEKIT_URL=$${LIVEKIT_URL}
 LIVEKIT_API_KEY=$${LIVEKIT_API_KEY}
 LIVEKIT_API_SECRET=$${LIVEKIT_API_SECRET}
 
-# AI Model Configuration
-DEFAULT_AI_MODEL=$${DEFAULT_AI_MODEL}
-BASE_AGENT_MODEL=$${BASE_AGENT_MODEL}
-BASE_AGENT_TEMPERATURE=$${BASE_AGENT_TEMPERATURE}
-LAB_AGENT=$${LAB_AGENT}
-LAB_AGENT_TEMPERATURE=$${LAB_AGENT_TEMPERATURE}
-CUSTOMER_AGENT_MODEL=$${CUSTOMER_AGENT_MODEL}
-CUSTOMER_AGENT_TEMPERATURE=$${CUSTOMER_AGENT_TEMPERATURE}
-MEDICAL_DOCTOR_MODEL=$${MEDICAL_DOCTOR_MODEL}
-MEDICAL_DOCTOR_TEMPERATURE=$${MEDICAL_DOCTOR_TEMPERATURE}
-DOCUMENT_WORKFLOW_MODEL=$${DOCUMENT_WORKFLOW_MODEL}
-DOCUMENT_WORKFLOW_TEMPERATURE=$${DOCUMENT_WORKFLOW_TEMPERATURE}
-OPENAI_CLIENT_MODEL=$${OPENAI_CLIENT_MODEL}
-LAB_AGGREGATION_AGENT_MODEL=$${LAB_AGGREGATION_AGENT_MODEL}
-LAB_AGGREGATION_AGENT_TEMPERATURE=$${LAB_AGGREGATION_AGENT_TEMPERATURE}
-NUTRITION_VISION_MODEL=$${NUTRITION_VISION_MODEL}
-NUTRITION_AGENT_MODEL=$${NUTRITION_AGENT_MODEL}
-VITALS_VISION_MODEL=$${VITALS_VISION_MODEL}
-VITALS_AGENT_MODEL=$${VITALS_AGENT_MODEL}
-PRESCRIPTION_CLINICAL_AGENT_MODEL=$${PRESCRIPTION_CLINICAL_AGENT_MODEL}
-PRESCRIPTION_CLINICAL_VISION_MODEL=$${PRESCRIPTION_CLINICAL_VISION_MODEL}
-PRESCRIPTION_CLINICAL_VISION_MAX_TOKENS=$${PRESCRIPTION_CLINICAL_VISION_MAX_TOKENS}
-PHARMACY_AGENT_MODEL=$${PHARMACY_AGENT_MODEL}
-PHARMACY_VISION_MODEL=$${PHARMACY_VISION_MODEL}
+# Email Configuration and AI Model Configuration will be added by the update script
 ENV
 
 # Ensure compose image variables are available from .env as well
@@ -275,6 +254,13 @@ api.zivohealth.ai {
 
 zivohealth.ai, www.zivohealth.ai {
   encode zstd gzip
+  
+  # Route password reset requests to backend API
+  handle /reset-password* {
+    reverse_proxy api:8000
+  }
+  
+  # Serve all other requests as static files
   root * /srv/www
   file_server
 }
@@ -303,4 +289,19 @@ UNIT
 
 systemctl daemon-reload
 systemctl enable --now zivohealth.service
+
+# Wait for services to start
+sleep 30
+
+# Deploy password reset app
+echo "🚀 Deploying password reset app..."
+mkdir -p /srv/www
+docker cp zivohealth-api-1:/app/www/reset-password /srv/www/ || echo "⚠️ Password reset app not found in container"
+chown -R root:root /srv/www/reset-password
+chmod -R 755 /srv/www/reset-password
+
+# Restart Caddy to pick up the new files
+docker restart zivohealth-caddy-1
+
+echo "✅ Password reset app deployment completed!"
 

@@ -20,10 +20,10 @@ struct ZivoHealthApp: App {
             ContentView()
                 .tint(.zivoRed)
                 .onAppear {
-                    // Seed default endpoint on first launch if empty
-                    if apiEndpoint.isEmpty {
-                        apiEndpoint = AppConfig.defaultAPIEndpoint
-                    }
+                    // Force endpoint to match AppConfig on every launch
+                    print("🔄 [App] Forcing endpoint update to: \(AppConfig.defaultAPIEndpoint)")
+                    apiEndpoint = AppConfig.defaultAPIEndpoint
+                    NetworkService.shared.forceUpdateEndpoint()
                     
                     // Environment-aware endpoint validation
                     validateAndUpdateEndpoint()

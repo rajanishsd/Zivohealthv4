@@ -1,4 +1,5 @@
 from .user import User
+from .password_reset_token import PasswordResetToken
 from .doctor import Doctor, ConsultationRequest
 from .chat_session import ChatSession, ChatMessage, Prescription
 from .clinical_notes import ClinicalNotes
@@ -28,7 +29,15 @@ from .nutrition_data import (
     NutritionSyncStatus,
     NutritionDataSource,
     MealType,
-    DishType
+    DishType,
+    NutritionMealPlan
+)
+from .nutrition_goals import (
+    NutritionObjective,
+    NutritionNutrientCatalog,
+    NutritionGoal,
+    NutritionGoalTarget,
+    UserNutrientFocus
 )
 from .pharmacy_data import (
     PharmacyRawData,

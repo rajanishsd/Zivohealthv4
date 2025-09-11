@@ -320,10 +320,21 @@ struct DoctorPasswordResetView: View {
 
     private func submit() {
         isSubmitting = true
-        // Placeholder UX; backend endpoint not implemented yet
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            message = "If this email exists, a reset link has been sent."
-            isSubmitting = false
+        message = nil
+        
+        Task {
+            do {
+                let responseMessage = try await NetworkService.shared.requestPasswordReset(email: email)
+                await MainActor.run {
+                    message = responseMessage
+                    isSubmitting = false
+                }
+            } catch {
+                await MainActor.run {
+                    message = "Failed to send reset link. Please try again."
+                    isSubmitting = false
+                }
+            }
         }
     }
 }

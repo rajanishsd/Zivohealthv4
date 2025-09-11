@@ -71,9 +71,18 @@ restart_service() {
                 exit 1
             fi
             ;;
+        "password-reset"|"reset-app")
+            print_status "Building password reset app..."
+            if [ -f "./scripts/dev/start-all.sh" ]; then
+                ./scripts/dev/start-all.sh "password-reset"
+            else
+                print_error "Start script not found!"
+                exit 1
+            fi
+            ;;
         *)
             print_error "Unknown service: $service"
-            print_status "Available services: postgresql, redis, backend, dashboard"
+            print_status "Available services: postgresql, redis, password-reset, backend, dashboard"
             exit 1
             ;;
     esac
@@ -124,7 +133,7 @@ main() {
     echo ""
     echo "💡 Tip: You can restart individual services with:"
     echo "   ./scripts/dev/restart-all.sh [service]"
-    echo "   Available services: postgresql, redis, backend, dashboard"
+    echo "   Available services: postgresql, redis, password-reset, backend, dashboard"
 }
 
 # Run main function

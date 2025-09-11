@@ -20,7 +20,7 @@ from langgraph.graph import  StateGraph, END, START
 from langchain_openai import ChatOpenAI
 from app.core.config import settings
 from app.core.database_utils import execute_query_safely_json, get_table_schema_safely, get_raw_db_connection
-from configurations.lab_config import LAB_TABLES, PRIMARY_LAB_TABLE, ALL_LAB_TABLES, AGGREGATION_TABLES
+from app.configurations.lab_config import LAB_TABLES, PRIMARY_LAB_TABLE, ALL_LAB_TABLES, AGGREGATION_TABLES
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv

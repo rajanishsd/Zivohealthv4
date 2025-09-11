@@ -84,7 +84,7 @@ class APIKeyMiddleware:
         """
         Determine if authentication should be skipped for this path
         """
-        # Skip auth for health checks and documentation
+        # Skip auth for health checks, documentation, and password reset
         skip_paths = [
             "/health",
             "/docs",
@@ -92,7 +92,11 @@ class APIKeyMiddleware:
             "/openapi.json",
             "/api/v1/docs",
             "/api/v1/redoc",
-            "/api/v1/openapi.json"
+            "/api/v1/openapi.json",
+            "/reset-password",
+            "/api/v1/auth/forgot-password",
+            "/api/v1/auth/reset-password",
+            "/api/v1/auth/verify-reset-token"
         ]
         
         return any(path.startswith(skip_path) for skip_path in skip_paths)

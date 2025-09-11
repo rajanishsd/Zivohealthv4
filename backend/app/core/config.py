@@ -1,11 +1,20 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator, model_validator
 import os
 from urllib.parse import quote_plus
 from pathlib import Path
+from enum import Enum
+
+class Environment(str, Enum):
+    DEVELOPMENT = "development"
+    STAGING = "staging"
+    PRODUCTION = "production"
 
 class Settings(BaseSettings):
+    # Environment Configuration
+    ENVIRONMENT: Environment = Environment.DEVELOPMENT
+    
     # Project Information
     PROJECT_NAME: str
     VERSION: str  
@@ -216,6 +225,90 @@ class Settings(BaseSettings):
     YOUTUBE_MAX_REQUESTS_PER_MINUTE: int = 10  # Maximum requests per minute
     YOUTUBE_BACKOFF_DELAY_MIN: float = 30.0  # Minimum backoff delay on rate limit
     YOUTUBE_BACKOFF_DELAY_MAX: float = 60.0  # Maximum backoff delay on rate limit
+
+    # Email Configuration for Password Reset (Required)
+    SMTP_SERVER: str  # SMTP server (e.g., smtp.zoho.in)
+    SMTP_PORT: str  # SMTP port (e.g., 587)
+    SMTP_USERNAME: str  # SMTP username
+    SMTP_PASSWORD: str  # SMTP password
+    FROM_EMAIL: str  # From email address
+    FRONTEND_URL: str  # Frontend URL for reset links
+    PASSWORD_RESET_BASE_URL: Optional[str] = None  # Base URL for password reset links (defaults to FRONTEND_URL)
+    PASSWORD_RESET_TOKEN_EXPIRY_MINUTES: str = "30"  # Token expiry in minutes
+    
+    # Derived API URL for React app (automatically generated from FRONTEND_URL)
+    @property
+    def api_url_for_react_app(self) -> str:
+        """Generate API URL for React app based on FRONTEND_URL"""
+        return f"{self.FRONTEND_URL}/api/v1"
+    
+    # Password Reset App Configuration
+    PASSWORD_RESET_APP_DIR: str  # Directory for password reset app
+
+    # Environment-specific properties
+    @property
+    def is_development(self) -> bool:
+        return self.ENVIRONMENT == Environment.DEVELOPMENT
+    
+    @property
+    def is_staging(self) -> bool:
+        return self.ENVIRONMENT == Environment.STAGING
+    
+    @property
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT == Environment.PRODUCTION
+    
+    @property
+    def debug_mode(self) -> bool:
+        return self.is_development
+    
+    @property
+    def require_https(self) -> bool:
+        return self.is_production
+    
+    @property
+    def cors_origins_development(self) -> List[str]:
+        return [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://192.168.0.106:3000",
+            "http://192.168.0.106:8000"
+        ]
+    
+    @property
+    def cors_origins_production(self) -> List[str]:
+        return [
+            "https://zivohealth.ai",
+            "https://www.zivohealth.ai",
+            "https://app.zivohealth.ai"
+        ]
+    
+    @property
+    def allowed_cors_origins(self) -> List[str]:
+        if self.is_development:
+            return self.cors_origins_development
+        elif self.is_staging:
+            return self.cors_origins_development + self.cors_origins_production
+        else:  # production
+            return self.cors_origins_production
+
+    @model_validator(mode='after')
+    def validate_environment_config(self):
+        """Validate environment-specific configuration requirements"""
+        if self.is_production:
+            # Production-specific validations
+            if not self.FRONTEND_URL.startswith('https://'):
+                raise ValueError("FRONTEND_URL must use HTTPS in production")
+            
+            if self.SMTP_SERVER in ['smtp.gmail.com', 'localhost']:
+                raise ValueError("Production should not use development SMTP servers")
+        
+        elif self.is_development:
+            # Development-specific validations
+            if self.FRONTEND_URL.startswith('https://') and 'localhost' not in self.FRONTEND_URL:
+                raise ValueError("Development should use HTTP and localhost for FRONTEND_URL")
+        
+        return self
 
     model_config = SettingsConfigDict(case_sensitive=True, env_file=".env")
 

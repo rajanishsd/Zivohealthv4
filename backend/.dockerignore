@@ -22,5 +22,6 @@ build/
 .pyright/
 coverage/
 **/*.csv
-**/*.json
 **/*.md
+# Allow package.json and package-lock.json for React app
+!password-reset-app/package*.json

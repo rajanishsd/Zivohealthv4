@@ -12,6 +12,7 @@ from app.api.v1.endpoints import agents
 from app.api.v1.endpoints import lab_reports
 from app.api.v1.endpoints import files
 from app.api.v1.endpoints import video
+from app.api.v1.endpoints import password_reset
 from app.routes import audit
 from app.routes import dashboard
 
@@ -20,6 +21,7 @@ from app.routes import dashboard
 api_router = APIRouter()
 
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+api_router.include_router(password_reset.router, prefix="/auth", tags=["auth"])
 api_router.include_router(chat_sessions.router, prefix="/chat-sessions", tags=["chat-sessions"])
 api_router.include_router(doctors.router, prefix="/doctors", tags=["doctors"])
 api_router.include_router(health.router, prefix="/health", tags=["health"])

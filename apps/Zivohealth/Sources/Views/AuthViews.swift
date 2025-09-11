@@ -108,6 +108,16 @@ struct PatientLoginView: View {
                     .controlSize(.regular)
                     .disabled(!isValid || isLoading)
 
+                    // Debug button to force endpoint update
+                    Button(action: {
+                        NetworkService.shared.forceUpdateEndpoint()
+                        NetworkService.shared.debugAuthenticationState()
+                    }) {
+                        Text("🔄 Force Local Endpoint")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+
                     HStack(spacing: 16) {
                         NavigationLink("Forgot Password?") { PatientPasswordResetView() }
                         Text("|").foregroundColor(.secondary)
@@ -232,9 +242,21 @@ struct PatientPasswordResetView: View {
 
     private func submit() {
         isSubmitting = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            message = "If this email exists, a reset link has been sent."
-            isSubmitting = false
+        message = nil
+        
+        Task {
+            do {
+                let responseMessage = try await NetworkService.shared.requestPasswordReset(email: email)
+                await MainActor.run {
+                    message = responseMessage
+                    isSubmitting = false
+                }
+            } catch {
+                await MainActor.run {
+                    message = "Failed to send reset link. Please try again."
+                    isSubmitting = false
+                }
+            }
         }
     }
 }

@@ -36,7 +36,7 @@ from app.core.database_utils import execute_query_safely_json, get_table_schema_
 from app.agentsv2.response_utils import format_agent_response, format_error_response
 
 # Import vitals configuration
-from configurations.vitals_config import VITALS_TABLES, PRIMARY_VITALS_TABLE
+from app.configurations.vitals_config import VITALS_TABLES, PRIMARY_VITALS_TABLE
 
 # Import vitals models and schemas
 from app.models.vitals_data import VitalMetricType, VitalDataSource
