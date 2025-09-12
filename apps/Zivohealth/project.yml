@@ -9,15 +9,26 @@ options:
 packages:
   Alamofire:
     url: https://github.com/Alamofire/Alamofire.git
-    from: 5.10.0
+    from: 5.10.2
   LiveKit:
     url: https://github.com/livekit/client-sdk-swift.git
-    from: 2.0.0
+    from: 2.7.2
+  GoogleSignIn:
+    url: https://github.com/google/GoogleSignIn-iOS.git
+    from: 9.0.0
 
 targets:
   ZivoHealth:
     type: application
     platform: iOS
+    info:
+      path: Info.plist
+      properties:
+        GIDClientID: 144471943832-qsmsessvagsqqmcap27oeh718beavb0h.apps.googleusercontent.com
+        CFBundleURLTypes:
+          - CFBundleURLName: GoogleSignIn
+            CFBundleURLSchemes:
+              - com.googleusercontent.apps.144471943832-qsmsessvagsqqmcap27oeh718beavb0h
     sources:
       - path: Sources
         excludes:
@@ -29,9 +40,11 @@ targets:
     resources:
       - path: Sources/Resources
         optional: true
+      - path: GoogleService-Info.plist
     dependencies:
       - package: Alamofire
       - package: LiveKit
+      - package: GoogleSignIn
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zivohealth.app

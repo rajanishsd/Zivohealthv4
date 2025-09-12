@@ -1,3 +1,5 @@
+const API_BASE = (process.env.REACT_APP_API_BASE_URL || '');
+const apiUrl = (path: string) => `${API_BASE}${path}`;
 import React, { useState, useEffect, useCallback } from 'react';
 import ReactFlow, {
   Edge,
@@ -202,8 +204,8 @@ const DynamicWorkflowVisualization: React.FC<DynamicWorkflowVisualizationProps> 
       try {
         // Fetch agent workflows and use cases concurrently
         const [workflows, cases] = await Promise.all([
-          fetch('http://localhost:8000/api/v1/agents/analyze').then(res => res.json()),
-          fetch('http://localhost:8000/api/v1/agents/use-cases').then(res => res.json())
+          fetch(apiUrl('/api/v1/agents/analyze')).then(res => res.json()),
+          fetch(apiUrl('/api/v1/agents/use-cases')).then(res => res.json())
         ]);
         
         setAgentWorkflows(workflows);
@@ -262,8 +264,8 @@ const DynamicWorkflowVisualization: React.FC<DynamicWorkflowVisualizationProps> 
     const fetchData = async () => {
       try {
         const [workflows, cases] = await Promise.all([
-          fetch('http://localhost:8000/api/v1/agents/analyze').then(res => res.json()),
-          fetch('http://localhost:8000/api/v1/agents/use-cases').then(res => res.json())
+          fetch(apiUrl('/api/v1/agents/analyze')).then(res => res.json()),
+          fetch(apiUrl('/api/v1/agents/use-cases')).then(res => res.json())
         ]);
         
         setAgentWorkflows(workflows);

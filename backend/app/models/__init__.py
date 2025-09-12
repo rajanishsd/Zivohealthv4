@@ -1,4 +1,6 @@
 from .user import User
+from .user_identity import UserIdentity
+from .login_event import LoginEvent
 from .password_reset_token import PasswordResetToken
 from .doctor import Doctor, ConsultationRequest
 from .chat_session import ChatSession, ChatMessage, Prescription

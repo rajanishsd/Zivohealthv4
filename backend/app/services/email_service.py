@@ -30,14 +30,6 @@ class EmailService:
         self.from_email = settings.FROM_EMAIL
         self.frontend_url = settings.FRONTEND_URL
         
-        # Debug email configuration
-        print(f"📧 [EmailService] Configuration:")
-        print(f"   SMTP Server: {self.smtp_server}")
-        print(f"   SMTP Port: {self.smtp_port}")
-        print(f"   Username: {self.smtp_username}")
-        print(f"   From Email: {self.from_email}")
-        print(f"   Frontend URL: {self.frontend_url}")
-        print(f"   Password configured: {'Yes' if self.smtp_password else 'No'}")
 
     def send_password_reset_email(self, to_email: str, reset_token: str, user_name: str = None, user_type: str = "user") -> bool:
         """
@@ -174,6 +166,108 @@ class EmailService:
                 print(f"📧 [DEV] Reset URL: {password_reset_base_url}/reset-password?token=...")
                 return True  # Return True in dev mode to not break the flow
             return False
+
+    def send_otp_email(self, to_email: str, otp_code: str, user_name: str = None) -> bool:
+        """
+        Send OTP code email to user
+        """
+        try:
+            # Create message
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = "Your ZivoHealth Login Code"
+            msg["From"] = self.from_email
+            msg["To"] = to_email
+
+            # Create HTML content
+            html_content = self._create_otp_email_html(otp_code, user_name or "User")
+            
+            # Create plain text content
+            text_content = self._create_otp_email_text(otp_code, user_name or "User")
+
+            # Attach parts
+            part1 = MIMEText(text_content, "plain")
+            part2 = MIMEText(html_content, "html")
+            msg.attach(part1)
+            msg.attach(part2)
+
+            # Send email
+            return self._send_email(msg, to_email)
+            
+        except Exception as e:
+            print(f"Error sending OTP email: {e}")
+            return False
+
+    def _create_otp_email_html(self, otp_code: str, user_name: str) -> str:
+        """Create HTML email content for OTP"""
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Your Login Code</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                .header {{ background-color: #e74c3c; color: white; padding: 20px; text-align: center; }}
+                .content {{ padding: 30px; background-color: #f9f9f9; }}
+                .otp-code {{ 
+                    display: inline-block; 
+                    background-color: #e74c3c; 
+                    color: white; 
+                    padding: 20px 30px; 
+                    font-size: 32px; 
+                    font-weight: bold; 
+                    letter-spacing: 5px; 
+                    border-radius: 8px; 
+                    margin: 20px 0; 
+                    text-align: center;
+                    font-family: 'Courier New', monospace;
+                }}
+                .footer {{ padding: 20px; text-align: center; color: #666; font-size: 12px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>ZivoHealth</h1>
+                </div>
+                <div class="content">
+                    <h2>Your Login Code</h2>
+                    <p>Hello {user_name},</p>
+                    <p>Use the following code to complete your login:</p>
+                    <div class="otp-code">{otp_code}</div>
+                    <p><strong>This code will expire in 10 minutes for security reasons.</strong></p>
+                    <p>If you didn't request this login code, please ignore this email.</p>
+                </div>
+                <div class="footer">
+                    <p>© 2025 ZivoHealth. All rights reserved.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+    def _create_otp_email_text(self, otp_code: str, user_name: str) -> str:
+        """Create plain text email content for OTP"""
+        return f"""
+        ZivoHealth - Your Login Code
+        
+        Hello {user_name},
+        
+        Use the following code to complete your login:
+        
+        {otp_code}
+        
+        This code will expire in 10 minutes for security reasons.
+        
+        If you didn't request this login code, please ignore this email.
+        
+        Best regards,
+        The ZivoHealth Team
+        
+        © 2025 ZivoHealth. All rights reserved.
+        """
 
 
 # Create global instance

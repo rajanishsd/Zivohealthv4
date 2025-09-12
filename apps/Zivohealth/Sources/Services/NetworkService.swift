@@ -196,6 +196,12 @@ public class NetworkService: ObservableObject {
             headers["Authorization"] = "Bearer \(authToken)"
         }
         
+        // Add device information headers for dual auth
+        headers["X-Device-Id"] = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
+        headers["X-Device-Model"] = UIDevice.current.model
+        headers["X-OS-Version"] = UIDevice.current.systemVersion
+        headers["X-App-Version"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+        
         // Add HMAC signature if enabled and app secret is available
         if enableHMAC && !appSecret.isEmpty && appSecret != "ZIVOHEALTH_APP_SECRET_HERE" {
             let timestamp = String(Int(Date().timeIntervalSince1970))
@@ -1039,7 +1045,7 @@ public extension NetworkService {
         print("🔐 [NetworkService] No valid auth token found for \(userMode), attempting authentication...")
         print("👤 [NetworkService] Will try to authenticate as: \(currentCredentials.email)")
         do {
-            let token = try await login(email: currentCredentials.email, password: currentCredentials.password)
+            let token = try await loginWithPassword(email: currentCredentials.email, password: currentCredentials.password)
             print("✅ [NetworkService] Successfully authenticated \(userMode) with token length: \(token.count)")
             return
         } catch {
@@ -1048,42 +1054,6 @@ public extension NetworkService {
         }
     }
 
-    func login(email: String, password: String) async throws -> String {
-        print("🔐 [NetworkService] Attempting login for \(userMode): \(email)")
-
-        let loginData = "username=\(email)&password=\(password)"
-        let body = loginData.data(using: .utf8)!
-
-        do {
-            let data = try await post("/auth/login", body: body, contentType: "application/x-www-form-urlencoded", requiresAuth: false)
-            print("✅ [NetworkService] Login successful for \(userMode)")
-
-            let tokenResponse = try decoder.decode(TokenResponse.self, from: data)
-            let token = tokenResponse.accessToken
-
-            print("🎫 [NetworkService] Received auth token for \(userMode) (length: \(token.count))")
-            print("🔑 [NetworkService] Token preview: \(token.prefix(20))...")
-
-            // Store the token and its expiration info
-            authToken = token
-            saveTokenInfo(tokenResponse)
-            // Persist refresh token when provided by backend
-            if let refresh = tokenResponse.refreshToken {
-                switch userMode {
-                case .patient:
-                    patientRefreshToken = refresh
-                case .doctor:
-                    doctorRefreshToken = refresh
-                }
-            }
-            print("💾 [NetworkService] Stored token and expiration info for \(userMode)")
-
-            return token
-        } catch {
-            print("❌ [NetworkService] Login failed for \(userMode): \(error)")
-            throw NetworkError.authenticationFailed
-        }
-    }
 
     func register(email: String, password: String, fullName: String) async throws -> String {
         print("📝 [NetworkService] Attempting registration for user: \(email)")
@@ -1103,7 +1073,7 @@ public extension NetworkService {
             print("👤 [NetworkService] Created user with ID: \(userResponse.id)")
 
             // Now login to get the token
-            return try await login(email: email, password: password)
+            return try await loginWithPassword(email: email, password: password)
         } catch {
             print("❌ [NetworkService] Registration failed: \(error)")
             throw error
@@ -1827,6 +1797,49 @@ struct UserResponse: Codable {
     }
 }
 
+// MARK: - Dual Auth Response Types
+struct EmailStartResponse: Codable {
+    let exists: Bool
+    let message: String
+}
+
+struct AuthResponse: Codable {
+    let tokens: AuthTokensResponse
+    let user: UserInfo
+}
+
+struct AuthTokensResponse: Codable {
+    let accessToken: String
+    let refreshToken: String
+    let tokenType: String
+    let userType: String
+    let expiresIn: Int
+    
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case refreshToken = "refresh_token"
+        case tokenType = "token_type"
+        case userType = "user_type"
+        case expiresIn = "expires_in"
+    }
+}
+
+struct UserInfo: Codable {
+    let id: Int
+    let email: String
+    let fullName: String?
+    let emailVerified: Bool
+    let lastLoginAt: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case email
+        case fullName = "full_name"
+        case emailVerified = "email_verified"
+        case lastLoginAt = "last_login_at"
+    }
+}
+
 // MARK: - Password Reset Extension
 extension NetworkService {
     
@@ -1897,4 +1910,223 @@ struct TokenVerificationResponse: Codable {
 
 struct PasswordResetSuccessResponse: Codable {
     let message: String
+}
+
+// MARK: - Dual Auth Extension
+extension NetworkService {
+    
+    // MARK: - Email Authentication Methods
+    
+    /// Check if email exists in the system
+    func checkEmailExists(email: String) async throws -> EmailStartResponse {
+        print("🔐 [NetworkService] Checking if email exists: \(email)")
+        
+        let body: [String: Any] = ["email": email]
+        
+        do {
+            let data = try await post("/auth/email/start", body: body, requiresAuth: false)
+            let response = try decoder.decode(EmailStartResponse.self, from: data)
+            print("✅ [NetworkService] Email check successful: exists=\(response.exists)")
+            return response
+        } catch {
+            print("❌ [NetworkService] Error checking email: \(error)")
+            throw error
+        }
+    }
+    
+    /// Login with email and password using dual auth
+    func loginWithPassword(email: String, password: String) async throws -> String {
+        print("🔐 [NetworkService] Attempting dual auth login with password: \(email)")
+        
+        let body: [String: Any] = [
+            "email": email,
+            "password": password
+        ]
+        
+        do {
+            let data = try await post("/auth/email/password", body: body, requiresAuth: false)
+            let response = try decoder.decode(AuthResponse.self, from: data)
+            
+            // Store tokens
+            authToken = response.tokens.accessToken
+            switch userMode {
+            case .patient:
+                patientRefreshToken = response.tokens.refreshToken
+            case .doctor:
+                doctorRefreshToken = response.tokens.refreshToken
+            }
+            
+            // Save token info
+            let tokenResponse = TokenResponse(
+                accessToken: response.tokens.accessToken,
+                tokenType: response.tokens.tokenType,
+                userType: response.tokens.userType,
+                expiresIn: response.tokens.expiresIn,
+                refreshToken: response.tokens.refreshToken
+            )
+            saveTokenInfo(tokenResponse)
+            
+            print("✅ [NetworkService] Dual auth login successful")
+            return response.tokens.accessToken
+        } catch {
+            print("❌ [NetworkService] Dual auth login failed: \(error)")
+            throw error
+        }
+    }
+    
+    /// Request OTP for email authentication
+    func requestOTP(email: String) async throws -> String {
+        print("🔐 [NetworkService] Requesting OTP for email: \(email)")
+        
+        let body: [String: Any] = ["email": email]
+        
+        do {
+            let data = try await post("/auth/email/otp/request", body: body, requiresAuth: false)
+            let response = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let message = response?["message"] as? String ?? "OTP sent successfully"
+            print("✅ [NetworkService] OTP request successful")
+            return message
+        } catch {
+            print("❌ [NetworkService] Error requesting OTP: \(error)")
+            throw error
+        }
+    }
+    
+    /// Verify OTP and login
+    func verifyOTP(email: String, code: String) async throws -> String {
+        print("🔐 [NetworkService] Verifying OTP for email: \(email)")
+        
+        let body: [String: Any] = [
+            "email": email,
+            "code": code
+        ]
+        
+        do {
+            let data = try await post("/auth/email/otp/verify", body: body, requiresAuth: false)
+            let response = try decoder.decode(AuthResponse.self, from: data)
+            
+            // Store tokens
+            authToken = response.tokens.accessToken
+            switch userMode {
+            case .patient:
+                patientRefreshToken = response.tokens.refreshToken
+            case .doctor:
+                doctorRefreshToken = response.tokens.refreshToken
+            }
+            
+            // Save token info
+            let tokenResponse = TokenResponse(
+                accessToken: response.tokens.accessToken,
+                tokenType: response.tokens.tokenType,
+                userType: response.tokens.userType,
+                expiresIn: response.tokens.expiresIn,
+                refreshToken: response.tokens.refreshToken
+            )
+            saveTokenInfo(tokenResponse)
+            
+            print("✅ [NetworkService] OTP verification successful")
+            return response.tokens.accessToken
+        } catch {
+            print("❌ [NetworkService] OTP verification failed: \(error)")
+            throw error
+        }
+    }
+    
+    /// Register with OTP (for new users)
+    func registerWithOTP(email: String, code: String, fullName: String) async throws -> String {
+        print("🔐 [NetworkService] Registering with OTP: \(email)")
+        
+        let body: [String: Any] = [
+            "email": email,
+            "code": code,
+            "full_name": fullName
+        ]
+        
+        do {
+            let data = try await post("/auth/email/otp/verify", body: body, requiresAuth: false)
+            let response = try decoder.decode(AuthResponse.self, from: data)
+            
+            // Store tokens
+            authToken = response.tokens.accessToken
+            switch userMode {
+            case .patient:
+                patientRefreshToken = response.tokens.refreshToken
+            case .doctor:
+                doctorRefreshToken = response.tokens.refreshToken
+            }
+            
+            // Save token info
+            let tokenResponse = TokenResponse(
+                accessToken: response.tokens.accessToken,
+                tokenType: response.tokens.tokenType,
+                userType: response.tokens.userType,
+                expiresIn: response.tokens.expiresIn,
+                refreshToken: response.tokens.refreshToken
+            )
+            saveTokenInfo(tokenResponse)
+            
+            print("✅ [NetworkService] OTP registration successful")
+            return response.tokens.accessToken
+        } catch {
+            print("❌ [NetworkService] OTP registration failed: \(error)")
+            throw error
+        }
+    }
+    
+    // MARK: - Google SSO Methods
+    
+    /// Sign in with Google using Google Sign-In SDK
+    func signInWithGoogle() async throws -> String {
+        print("🔐 [NetworkService] Google Sign-In requested")
+        
+        do {
+            // Use Google Sign-In service to get user and ID token
+            _ = try await GoogleSignInService.shared.signIn()
+            let idToken = try await GoogleSignInService.shared.getIdToken()
+            
+            // Verify the token with our backend
+            return try await verifyGoogleToken(idToken: idToken)
+            
+        } catch {
+            print("❌ [NetworkService] Google Sign-In failed: \(error)")
+            throw error
+        }
+    }
+    
+    /// Verify Google ID token (called after Google Sign-In SDK returns token)
+    func verifyGoogleToken(idToken: String) async throws -> String {
+        print("🔐 [NetworkService] Verifying Google ID token")
+        
+        let body: [String: Any] = ["id_token": idToken]
+        
+        do {
+            let data = try await post("/auth/google/verify", body: body, requiresAuth: false)
+            let response = try decoder.decode(AuthResponse.self, from: data)
+            
+            // Store tokens
+            authToken = response.tokens.accessToken
+            switch userMode {
+            case .patient:
+                patientRefreshToken = response.tokens.refreshToken
+            case .doctor:
+                doctorRefreshToken = response.tokens.refreshToken
+            }
+            
+            // Save token info
+            let tokenResponse = TokenResponse(
+                accessToken: response.tokens.accessToken,
+                tokenType: response.tokens.tokenType,
+                userType: response.tokens.userType,
+                expiresIn: response.tokens.expiresIn,
+                refreshToken: response.tokens.refreshToken
+            )
+            saveTokenInfo(tokenResponse)
+            
+            print("✅ [NetworkService] Google token verification successful")
+            return response.tokens.accessToken
+        } catch {
+            print("❌ [NetworkService] Google token verification failed: \(error)")
+            throw error
+        }
+    }
 }

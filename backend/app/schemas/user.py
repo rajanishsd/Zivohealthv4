@@ -9,6 +9,9 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
 
+class UserCreateGoogle(UserBase):
+    password: Optional[str] = None
+
 class UserUpdate(UserBase):
     password: Optional[str] = None
 

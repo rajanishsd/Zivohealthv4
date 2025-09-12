@@ -17,6 +17,11 @@ psutil==7.0.0
 # Email Service
 secure-smtplib>=0.1.1
 
+# Google OAuth
+google-auth>=2.23.0
+google-auth-oauthlib>=1.0.0
+google-auth-httplib2>=0.2.0
+
 # HTTP and Networking
 requests>=2.31.0
 

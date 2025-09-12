@@ -2,12 +2,28 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from app.core.security import get_password_hash, verify_password
 from app.models.user import User
-from app.schemas.user import UserCreate, UserUpdate
+from app.schemas.user import UserCreate, UserCreateGoogle, UserUpdate
 
 
 class CRUDUser:
     def create(self, db: Session, *, obj_in: UserCreate) -> User:
         hashed_password = get_password_hash(obj_in.password)
+        db_obj = User(
+            email=obj_in.email,
+            hashed_password=hashed_password,
+            full_name=obj_in.full_name,
+        )
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def create_google_user(self, db: Session, *, obj_in: UserCreateGoogle) -> User:
+        # For Google users, password is optional
+        hashed_password = None
+        if obj_in.password:
+            hashed_password = get_password_hash(obj_in.password)
+        
         db_obj = User(
             email=obj_in.email,
             hashed_password=hashed_password,

@@ -16,56 +16,20 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
-	<key>CFBundleVersion</key>
-	<string>1</string>
-	<key>UIApplicationSceneManifest</key>
-	<dict>
-		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
-		<key>UISceneConfigurations</key>
+	<key>CFBundleURLTypes</key>
+	<array>
 		<dict>
-			<key>UIWindowSceneSessionRoleApplication</key>
+			<key>CFBundleURLName</key>
+			<string>GoogleSignIn</string>
+			<key>CFBundleURLSchemes</key>
 			<array>
-				<dict>
-					<key>UISceneConfigurationName</key>
-					<string>Default Configuration</string>
-					<key>UISceneDelegateClassName</key>
-					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
-				</dict>
+				<string>com.googleusercontent.apps.144471943832-qsmsessvagsqqmcap27oeh718beavb0h</string>
 			</array>
 		</dict>
-	</dict>
-	<key>UILaunchStoryboardName</key>
-	<string>LaunchScreen</string>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSExceptionDomains</key>
-		<dict>
-			<key>cdnjs.cloudflare.com</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-				<key>NSExceptionMinimumTLSVersion</key>
-				<string>TLSv1.0</string>
-			</dict>
-			<key>cdn.jsdelivr.net</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-				<key>NSExceptionMinimumTLSVersion</key>
-				<string>TLSv1.0</string>
-			</dict>
-		</dict>
-	</dict>
-	<key>NSAppleEventsUsageDescription</key>
-	<string>This app uses 3D visualization for medical anatomy exploration.</string>
-	<key>NSHealthShareUsageDescription</key>
-	<string>ZivoHealth needs access to your health data to display your health metrics and provide personalized health insights.</string>
-	<key>NSHealthUpdateUsageDescription</key>
-	<string>ZivoHealth needs access to update your health data.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>ZivoHealth needs access to your camera to take photos and share them in chat conversations.</string>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>GIDClientID</key>
+	<string>144471943832-qsmsessvagsqqmcap27oeh718beavb0h.apps.googleusercontent.com</string>
 </dict>
 </plist>

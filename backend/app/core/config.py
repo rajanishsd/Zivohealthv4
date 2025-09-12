@@ -244,6 +244,17 @@ class Settings(BaseSettings):
     
     # Password Reset App Configuration
     PASSWORD_RESET_APP_DIR: str  # Directory for password reset app
+    
+    # Google OAuth Configuration
+    GOOGLE_CLIENT_ID: Optional[str] = None  # iOS client ID (no secret needed for mobile apps)
+    GOOGLE_WEB_CLIENT_ID: Optional[str] = None  # Web client ID for server-side verification
+    GOOGLE_WEB_CLIENT_SECRET: Optional[str] = None  # Web client secret for server-side verification
+    
+    # OTP Configuration
+    OTP_LENGTH: int = 6
+    OTP_EXPIRY_MINUTES: int = 10
+    OTP_MAX_ATTEMPTS: int = 5
+    OTP_RATE_LIMIT_PER_EMAIL: int = 5  # Max OTP requests per email per day
 
     # Environment-specific properties
     @property

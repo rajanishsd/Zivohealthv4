@@ -9,9 +9,9 @@ struct ContentView: View {
     var body: some View {
         if (patientAuthToken.isEmpty && userMode == .patient) {
             if #available(iOS 16.0, *) {
-                NavigationStack { PatientLoginView { } }
+                NavigationStack { DualLoginView { } }
             } else {
-                NavigationView { PatientLoginView { } }
+                NavigationView { DualLoginView { } }
             }
         } else if showingRoleSelection {
             // Show only role selection without bottom navigation

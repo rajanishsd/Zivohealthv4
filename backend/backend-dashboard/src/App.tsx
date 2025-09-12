@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import './App.css';
 import DynamicWorkflowVisualization from './components/DynamicWorkflowVisualization';
 
+// API base URL: use env override if provided, otherwise use relative URLs (same origin)
+const API_BASE = (process.env.REACT_APP_API_BASE_URL || '');
+const apiUrl = (path: string) => `${API_BASE}${path}`;
+
 interface UserSession {
   session_id: string;
   user_id: string;
@@ -94,6 +98,10 @@ function App() {
     username: '',
     password: ''
   });
+  const [loginMode, setLoginMode] = useState<'password' | 'otp'>('password');
+  const [otpCode, setOtpCode] = useState('');
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
+  const [forgotPasswordMessage, setForgotPasswordMessage] = useState('');
   const [loginError, setLoginError] = useState('');
   const [workflowAudits, setWorkflowAudits] = useState<WorkflowAuditEntry[]>([]);
   const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowAuditEntry | null>(null);
@@ -126,36 +134,98 @@ function App() {
     setLoginError('');
     
     try {
-      const formData = new FormData();
-      formData.append('username', loginForm.username);
-      formData.append('password', loginForm.password);
-      
-      const response = await fetch('http://localhost:8000/api/v1/auth/login', {
-        method: 'POST',
-        body: formData
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        const authState = {
-          isAuthenticated: true,
-          token: data.access_token,
-          user: data.user || { username: loginForm.username }
-        };
+      if (loginMode === 'password') {
+        const formData = new FormData();
+        formData.append('username', loginForm.username);
+        formData.append('password', loginForm.password);
         
-        setAuth(authState);
-        localStorage.setItem('dashboard_token', data.access_token);
-        localStorage.setItem('dashboard_user', JSON.stringify(authState.user));
+        const response = await fetch(apiUrl('/api/v1/auth/login'), {
+          method: 'POST',
+          body: formData
+        });
         
-        // Clear form
-        setLoginForm({ username: '', password: '' });
+        if (response.ok) {
+          const data = await response.json();
+          const authState = {
+            isAuthenticated: true,
+            token: data.access_token,
+            user: data.user || { username: loginForm.username }
+          };
+          
+          setAuth(authState);
+          localStorage.setItem('dashboard_token', data.access_token);
+          localStorage.setItem('dashboard_user', JSON.stringify(authState.user));
+          
+          setLoginForm({ username: '', password: '' });
+        } else {
+          const errorData = await response.json();
+          setLoginError(errorData.detail || 'Login failed');
+        }
       } else {
-        const errorData = await response.json();
-        setLoginError(errorData.detail || 'Login failed');
+        const response = await fetch(apiUrl('/api/v1/auth/email/otp/verify'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: loginForm.username, code: otpCode })
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const authState = {
+            isAuthenticated: true,
+            token: data.access_token,
+            user: data.user || { username: loginForm.username }
+          };
+          setAuth(authState);
+          localStorage.setItem('dashboard_token', data.access_token);
+          localStorage.setItem('dashboard_user', JSON.stringify(authState.user));
+          setLoginForm({ username: '', password: '' });
+          setOtpCode('');
+        } else {
+          const errorData = await response.json();
+          setLoginError(errorData.detail || 'OTP verification failed');
+        }
       }
     } catch (error) {
       setLoginError('Network error. Please try again.');
       console.error('Login error:', error);
+    }
+  };
+
+  const requestOtp = async () => {
+    setLoginError('');
+    try {
+      const response = await fetch(apiUrl('/api/v1/auth/email/otp/request'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginForm.username })
+      });
+      if (response.ok) {
+        setLoginMode('otp');
+      } else {
+        const errorData = await response.json();
+        setLoginError(errorData.detail || 'Failed to request OTP');
+      }
+    } catch (e) {
+      setLoginError('Network error requesting OTP');
+    }
+  };
+
+  const requestPasswordReset = async () => {
+    setForgotPasswordMessage('');
+    setLoginError('');
+    try {
+      const response = await fetch(apiUrl('/api/v1/auth/forgot-password'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotPasswordEmail || loginForm.username })
+      });
+      if (response.ok) {
+        setForgotPasswordMessage('If the email exists, a reset link was sent.');
+      } else {
+        setForgotPasswordMessage('If the email exists, a reset link was sent.');
+      }
+    } catch (e) {
+      setLoginError('Network error requesting password reset');
     }
   };
 
@@ -183,7 +253,7 @@ function App() {
     
     setIsRefreshing(prev => ({ ...prev, agent: true }));
     try {
-      const response = await fetch('http://localhost:8000/api/v1/chat-sessions/statistics', {
+      const response = await fetch(apiUrl('/api/v1/chat-sessions/statistics'), {
         headers: getAuthHeaders()
       });
       
@@ -216,7 +286,7 @@ function App() {
   const fetchSystemHealth = async () => {
     setIsRefreshing(prev => ({ ...prev, system: true }));
     try {
-      const response = await fetch('http://localhost:8000/dashboard/monitoring/system-health', {
+      const response = await fetch(apiUrl('/dashboard/monitoring/system-health'), {
         headers: getAuthHeaders()
       });
       
@@ -238,7 +308,7 @@ function App() {
   const fetchPerformanceOverview = async () => {
     setIsRefreshing(prev => ({ ...prev, app: true }));
     try {
-      const response = await fetch('http://localhost:8000/dashboard/metrics/overview', {
+      const response = await fetch(apiUrl('/dashboard/metrics/overview'), {
         headers: getAuthHeaders()
       });
       
@@ -273,7 +343,7 @@ function App() {
     
     setIsRefreshing(prev => ({ ...prev, audit: true }));
     try {
-      let url = `http://localhost:8000/api/v1/dashboard/workflow/requests?hours=${auditTimeRange}&limit=100`;
+      let url = apiUrl(`/api/v1/dashboard/workflow/requests?hours=${auditTimeRange}&limit=100`);
       if (userId) {
         url += `&user_id=${userId}`;
       }
@@ -296,7 +366,7 @@ function App() {
           // Fetch detailed workflow for each request
           try {
             const detailResponse = await fetch(
-              `http://localhost:8000/api/v1/dashboard/workflow/request/${req.id}`,
+              apiUrl(`/api/v1/dashboard/workflow/request/${req.id}`),
               { headers: getAuthHeaders() }
             );
             
@@ -974,16 +1044,31 @@ function App() {
               />
             </div>
             
-            <div className="form-group">
-              <label>Password:</label>
-              <input
-                type="password"
-                value={loginForm.password}
-                onChange={(e) => setLoginForm({...loginForm, password: e.target.value})}
-                placeholder="Enter your password"
-                required
-              />
-            </div>
+            {loginMode === 'password' && (
+              <div className="form-group">
+                <label>Password:</label>
+                <input
+                  type="password"
+                  value={loginForm.password}
+                  onChange={(e) => setLoginForm({...loginForm, password: e.target.value})}
+                  placeholder="Enter your password"
+                  required
+                />
+              </div>
+            )}
+
+            {loginMode === 'otp' && (
+              <div className="form-group">
+                <label>One-Time Password (OTP):</label>
+                <input
+                  type="text"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value)}
+                  placeholder="Enter the OTP sent to your email"
+                  required
+                />
+              </div>
+            )}
             
             {loginError && (
               <div className="error-message">
@@ -992,9 +1077,34 @@ function App() {
             )}
             
             <button type="submit" className="login-button">
-              Login
+              {loginMode === 'password' ? 'Login' : 'Verify OTP'}
             </button>
+
+            {loginMode === 'password' && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <button type="button" className="login-button" style={{ background: '#6c757d', width: '48%' }} onClick={requestOtp}>
+                  Login with OTP
+                </button>
+                <button type="button" className="login-button" style={{ background: '#17a2b8', width: '48%' }} onClick={requestPasswordReset}>
+                  Forgot Password
+                </button>
+              </div>
+            )}
+
+            {loginMode === 'otp' && (
+              <div style={{ marginTop: 10 }}>
+                <button type="button" className="login-button" style={{ background: '#6c757d' }} onClick={() => setLoginMode('password')}>
+                  Back to Password Login
+                </button>
+              </div>
+            )}
           </form>
+
+          {forgotPasswordMessage && (
+            <div className="demo-credentials" style={{ marginTop: 12 }}>
+              <p>{forgotPasswordMessage}</p>
+            </div>
+          )}
           
           <div className="demo-credentials">
             <p><strong>Demo Credentials:</strong></p>

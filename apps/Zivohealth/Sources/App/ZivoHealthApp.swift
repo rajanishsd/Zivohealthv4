@@ -13,6 +13,9 @@ struct ZivoHealthApp: App {
         
         UITabBar.appearance().standardAppearance = tabBarAppearance
         UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
+        
+        // Configure Google Sign-In
+        GoogleSignInService.shared.configureForAppDelegate()
     }
     
     var body: some Scene {
@@ -27,6 +30,11 @@ struct ZivoHealthApp: App {
                     
                     // Environment-aware endpoint validation
                     validateAndUpdateEndpoint()
+                    
+                    // Restore previous Google Sign-In session
+                    Task {
+                        await GoogleSignInService.shared.restorePreviousSignIn()
+                    }
                 }
                 .onChange(of: scenePhase) { newPhase in
                     handleScenePhaseChange(newPhase)

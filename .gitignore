@@ -113,3 +113,4 @@ backend/data/*.pid
 .cache/
 tmp/
 temp/
+backend/.env*
