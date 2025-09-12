@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 63;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -22,6 +22,7 @@
 		1D159B86A22A7331D339F8E4 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 11C8CF965BC7361CA8D63A43 /* LaunchScreen.storyboard */; };
 		1D5DBC2C0AAA93CDA6B74AC2 /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 553667075FDD2EB67A50B488 /* ChatMessage.swift */; };
 		1DEBF79537FE4265CA4A934F /* DoctorDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 841583EBB2C87C2F2BD777A9 /* DoctorDashboardView.swift */; };
+		1F8736ACF1845E7232CD7085 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 5F3FA00672B65814D62A6482 /* GoogleService-Info.plist */; };
 		1F8C369E0E5A0490E8A25874 /* DocumentPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57D73EAE8B9CC0028F38A931 /* DocumentPicker.swift */; };
 		22ED174EAF03D714B4A9458F /* ZivoHealthApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 294935B6E923D37F4F09B90D /* ZivoHealthApp.swift */; };
 		2DABB889043362A8BF44C216 /* VitalsSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00669A95E8E6AAB6F40BD1F /* VitalsSyncManager.swift */; };
@@ -75,6 +76,7 @@
 		A73937572CDFFB582B02632B /* MedicationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 996146302D47AEED2DEFE7F2 /* MedicationsView.swift */; };
 		AB2EDD3703C5183A08FC8315 /* LiverFunctionTestsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6B985040589AF30B68A3779 /* LiverFunctionTestsView.swift */; };
 		ABD851C7F2AEF2C5058AB225 /* VitaminMineralPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 789EE1A0D0319E9BB3DA1EE7 /* VitaminMineralPanelView.swift */; };
+		ADAD144730E6B939B5C13B07 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7CDB4CE97F9C8842D447B11 /* KeychainService.swift */; };
 		B4756A3C530BDBDF5904A7F9 /* VitalsDataProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6B0CCB3535E54C8253E725E /* VitalsDataProcessor.swift */; };
 		B68F30CAEC240799254584C8 /* Color+Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4909FAEC845E337E11EF03A7 /* Color+Brand.swift */; };
 		C56C63E10656078B53AA04BF /* NetworkService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD33A8D5E8AD0CB3474E947E /* NetworkService.swift */; };
@@ -106,7 +108,7 @@
 
 /* Begin PBXFileReference section */
 		02C4CF13276FC42367ED8931 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
-		040F2D8FFAF4146C11813244 /* ZivoHealth.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZivoHealth.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		040F2D8FFAF4146C11813244 /* ZivoHealth.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ZivoHealth.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		05FEBCB2B0141D23ECDE8704 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
 		065F56C6159414749B50B0F7 /* ChatHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryView.swift; sourceTree = "<group>"; };
 		087F05A6FAB6926BD5398C44 /* BackendVitalsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendVitalsManager.swift; sourceTree = "<group>"; };
@@ -133,6 +135,7 @@
 		5B6838F0F1289B92C39B9483 /* NutritionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionView.swift; sourceTree = "<group>"; };
 		5C123B11CB05211DA90A3B1E /* PrescriptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrescriptionsView.swift; sourceTree = "<group>"; };
 		5CE9DD10ED2935C819E8E943 /* CompleteBloodCountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompleteBloodCountView.swift; sourceTree = "<group>"; };
+		5F3FA00672B65814D62A6482 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		6016E883554511EF22B8F1C6 /* ElectrolytePanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElectrolytePanelView.swift; sourceTree = "<group>"; };
 		61A1122CF6015784443C4C35 /* VideoConsultationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoConsultationView.swift; sourceTree = "<group>"; };
 		63A6CD41343E3C1F9B20B479 /* AuthViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViews.swift; sourceTree = "<group>"; };
@@ -182,6 +185,7 @@
 		C00669A95E8E6AAB6F40BD1F /* VitalsSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VitalsSyncManager.swift; sourceTree = "<group>"; };
 		C4B869B5713AC47E8F4277EC /* NutritionAPIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionAPIService.swift; sourceTree = "<group>"; };
 		C6B985040589AF30B68A3779 /* LiverFunctionTestsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiverFunctionTestsView.swift; sourceTree = "<group>"; };
+		C7CDB4CE97F9C8842D447B11 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
 		D02302579CD2EEF84A73344F /* NutritionChartViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionChartViews.swift; sourceTree = "<group>"; };
 		D8B01A8645CA9D64877E4FF0 /* VideoCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoCallView.swift; sourceTree = "<group>"; };
 		DC204CE3C3085B925ED8D319 /* NutritionGoalSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionGoalSetupView.swift; sourceTree = "<group>"; };
@@ -322,6 +326,7 @@
 			isa = PBXGroup;
 			children = (
 				3AEA3FF72DF1CA1272B9C3B2 /* GoogleSignInService.swift */,
+				C7CDB4CE97F9C8842D447B11 /* KeychainService.swift */,
 				ADF32113FC5D3A58C965EE19 /* LabReportsAPIService.swift */,
 				DD33A8D5E8AD0CB3474E947E /* NetworkService.swift */,
 				C4B869B5713AC47E8F4277EC /* NutritionAPIService.swift */,
@@ -385,6 +390,7 @@
 			isa = PBXGroup;
 			children = (
 				B71E3EFA0A2E40123170C17D /* Assets.xcassets */,
+				5F3FA00672B65814D62A6482 /* GoogleService-Info.plist */,
 				11C8CF965BC7361CA8D63A43 /* LaunchScreen.storyboard */,
 			);
 			path = Resources;
@@ -445,6 +451,7 @@
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
 					B089602FE23A6A872591020B = {
+						DevelopmentTeam = "${DEVELOPMENT_TEAM}";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -464,6 +471,7 @@
 				4025EB0218F984A692A55321 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
 				3F6394B640B75AEC01645793 /* XCRemoteSwiftPackageReference "client-sdk-swift" */,
 			);
+			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -478,6 +486,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0F09E081F8BBD6D8B18F84ED /* Assets.xcassets in Resources */,
+				1F8736ACF1845E7232CD7085 /* GoogleService-Info.plist in Resources */,
 				1D159B86A22A7331D339F8E4 /* LaunchScreen.storyboard in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -551,6 +560,7 @@
 				CD7AD7A061098D8C6AFA37D3 /* HealthMetricsView.swift in Sources */,
 				5CFB0FE71B1ED68664B9CDD4 /* ImagePickerView.swift in Sources */,
 				10EC107F34968377E75306F5 /* InfectionMarkersView.swift in Sources */,
+				ADAD144730E6B939B5C13B07 /* KeychainService.swift in Sources */,
 				DBBF7312AAE137171F6FB982 /* KidneyFunctionTestsView.swift in Sources */,
 				9EBFEBD122BD644093F66568 /* LabCategory.swift in Sources */,
 				F2B1166437A5A50B87283E1E /* LabCategoryDetailView.swift in Sources */,
@@ -613,11 +623,11 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 83B85QRG5R;
+				DEVELOPMENT_TEAM = "${DEVELOPMENT_TEAM}";
 				ENABLE_BITCODE = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = ZivoHealth;
-				INFOPLIST_KEY_CFBundleURLTypes = "<array>\n  <dict>\n    <key>CFBundleURLName</key>\n    <string>GoogleSignIn</string>\n    <key>CFBundleURLSchemes</key>\n    <array>\n      <string>com.googleusercontent.apps.YOUR_GOOGLE_CLIENT_ID</string>\n    </array>\n  </dict>\n</array>\n";
 				INFOPLIST_KEY_NSAppTransportSecurity = "<dict>\n  <key>NSAllowsArbitraryLoads</key>\n  <true/>\n  <key>NSExceptionDomains</key>\n  <dict>\n    <key>cdnjs.cloudflare.com</key>\n    <dict>\n      <key>NSExceptionAllowsInsecureHTTPLoads</key>\n      <true/>\n      <key>NSExceptionMinimumTLSVersion</key>\n      <string>TLSv1.0</string>\n    </dict>\n    <key>cdn.jsdelivr.net</key>\n    <dict>\n      <key>NSExceptionAllowsInsecureHTTPLoads</key>\n      <true/>\n      <key>NSExceptionMinimumTLSVersion</key>\n      <string>TLSv1.0</string>\n    </dict>\n  </dict>\n</dict>\n";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "This app uses 3D visualization for medical anatomy exploration";
 				INFOPLIST_KEY_NSCameraUsageDescription = "This app needs camera access for video consultations";
@@ -775,11 +785,11 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 83B85QRG5R;
+				DEVELOPMENT_TEAM = "${DEVELOPMENT_TEAM}";
 				ENABLE_BITCODE = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = ZivoHealth;
-				INFOPLIST_KEY_CFBundleURLTypes = "<array>\n  <dict>\n    <key>CFBundleURLName</key>\n    <string>GoogleSignIn</string>\n    <key>CFBundleURLSchemes</key>\n    <array>\n      <string>com.googleusercontent.apps.YOUR_GOOGLE_CLIENT_ID</string>\n    </array>\n  </dict>\n</array>\n";
 				INFOPLIST_KEY_NSAppTransportSecurity = "<dict>\n  <key>NSAllowsArbitraryLoads</key>\n  <true/>\n  <key>NSExceptionDomains</key>\n  <dict>\n    <key>cdnjs.cloudflare.com</key>\n    <dict>\n      <key>NSExceptionAllowsInsecureHTTPLoads</key>\n      <true/>\n      <key>NSExceptionMinimumTLSVersion</key>\n      <string>TLSv1.0</string>\n    </dict>\n    <key>cdn.jsdelivr.net</key>\n    <dict>\n      <key>NSExceptionAllowsInsecureHTTPLoads</key>\n      <true/>\n      <key>NSExceptionMinimumTLSVersion</key>\n      <string>TLSv1.0</string>\n    </dict>\n  </dict>\n</dict>\n";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "This app uses 3D visualization for medical anatomy exploration";
 				INFOPLIST_KEY_NSCameraUsageDescription = "This app needs camera access for video consultations";

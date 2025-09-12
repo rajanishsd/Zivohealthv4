@@ -64,6 +64,7 @@ class FileState(TypedDict):
     vitals_agent_result: Union[str, dict]  # Optional, result from vitals agent if applicable
     nutrition_agent_result: Union[str, dict]  # Optional, result from nutrition agent if applicable
     user_id: str  # Add user_id to state
+    user_prompt: Optional[str]  # User's original prompt/request for context
     processing_success: bool  # Whether processing was successful
     processing_message: str  # User-friendly processing message
     processing_statistics: Dict[str, Any]  # Detailed statistics from lab processing
@@ -211,7 +212,7 @@ async def handle_image(state: FileState) -> FileState:
         file_path = state["file_path"]
         
         # Analyze image using GPT-4V
-        analysis_result = analyze_image_with_gpt4v(file_path, state.get("image_base64"))
+        analysis_result = analyze_image_with_gpt4v(file_path, state.get("image_base64"), state.get("user_prompt"))
         
         # Store the analysis result
         state["analysis_result"] = analysis_result
@@ -507,7 +508,7 @@ async def handle_result(state: FileState) -> FileState:
         return state
 
 
-def analyze_image_with_gpt4v(file_path: str, image_base64: Optional[str] = None) -> DocumentAnalysisResult:
+def analyze_image_with_gpt4v(file_path: str, image_base64: Optional[str] = None, user_prompt: Optional[str] = None) -> DocumentAnalysisResult:
     """
     Analyze image using GPT-4V to identify document type and extract relevant information.
     
@@ -535,7 +536,9 @@ def analyze_image_with_gpt4v(file_path: str, image_base64: Optional[str] = None)
         )
         
         # Analysis prompt for medical document classification
-        analysis_prompt = """Analyze this image and classify it into one of these medical document categories:
+        user_context = f"\n\nUSER REQUEST: {user_prompt}" if user_prompt else ""
+        
+        analysis_prompt = f"""Analyze this image and classify it into one of these medical document categories:{user_context}
 
 1. **Clinical Notes - Handwritten notes by doctors, outpatient records, consultation sheets. These often include the doctor’s name, patient’s name, and free-form notes. Even if lab values are mentioned, it is still a clinical note unless it is structured like a lab report.
     Characteristics:
@@ -869,7 +872,7 @@ def create_file_type_workflow():
     return workflow.compile(checkpointer=MemorySaver())
 
 
-async def process_file_async(user_id: str, file_name: str = None, file_type: str = None, image_path: str = None, image_base64: str = None, source_file_path: str = None, analysis_only: bool = False) -> dict:
+async def process_file_async(user_id: str, file_name: str = None, file_type: str = None, image_path: str = None, image_base64: str = None, source_file_path: str = None, analysis_only: bool = False, user_prompt: str = None) -> dict:
     """
     Process a file and return its type (async version).
     
@@ -891,6 +894,7 @@ async def process_file_async(user_id: str, file_name: str = None, file_type: str
         file_name=file_name,
         file_type=file_type,
         image_base64=image_base64,
+        user_prompt=user_prompt,
         error="",
         processing_result="",
         analysis_result=DocumentAnalysisResult(

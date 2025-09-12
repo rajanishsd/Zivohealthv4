@@ -31,11 +31,11 @@ public class NetworkService: ObservableObject {
     public static let shared = NetworkService()
 
     @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
-    @AppStorage("patientAuthToken") private var patientAuthToken = ""
-    @AppStorage("doctorAuthToken") private var doctorAuthToken = ""
-    @AppStorage("patientRefreshToken") private var patientRefreshToken = ""
-    @AppStorage("doctorRefreshToken") private var doctorRefreshToken = ""
+    @AppStorage("lastKnownApiEndpoint") private var lastKnownApiEndpoint: String = AppConfig.defaultAPIEndpoint
     @AppStorage("userMode") private var userMode: UserMode = .patient
+    
+    // Use Keychain for secure token storage
+    private let keychain = KeychainService.shared
     
     // API Key for ZivoHealth iOS app
     private let apiKey = "UMYpN67NeR0W13cP13O62Mn04yG3tpEx" // Replace with actual key from generate_api_keys.py
@@ -72,6 +72,9 @@ public class NetworkService: ObservableObject {
     // Network state tracking
     @Published public var isNetworkAvailable: Bool = true
     @Published public var isReconnecting: Bool = false
+    
+    // Authentication state tracking
+    @Published public var isAuthenticatedState: Bool = false
     private var reconnectionTimer: Timer?
     
     // Authentication state
@@ -176,6 +179,41 @@ public class NetworkService: ObservableObject {
         // Initialization complete - baseURL will be computed lazily when first accessed
     }
     
+    /// Check if user is currently authenticated with a valid token
+    public func isAuthenticated() -> Bool {
+        let tokenEmpty = authToken.isEmpty
+        let tokenExpired = isTokenExpired()
+        let isAuth = !tokenEmpty && !tokenExpired
+        print("🔍 [NetworkService] isAuthenticated - tokenEmpty: \(tokenEmpty), tokenExpired: \(tokenExpired), result: \(isAuth)")
+        
+        return isAuth
+    }
+    
+    /// Initialize authentication on app startup - call this when the app launches
+    public func initializeAuthentication() async {
+        print("🚀 [NetworkService] Initializing authentication for \(userMode)")
+        
+        do {
+            try await ensureAuthentication()
+            print("✅ [NetworkService] Authentication initialized successfully")
+        } catch {
+            print("ℹ️ [NetworkService] No valid authentication available on startup: \(error)")
+        }
+        
+        // Update published state after authentication check
+        await MainActor.run {
+            isAuthenticatedState = isAuthenticated()
+        }
+    }
+
+    /// Quick check for whether we have any stored tokens for the current user mode
+    public func hasStoredTokens() -> Bool {
+        let hasTokens = keychain.hasStoredTokens(for: userMode)
+        let authTokenExists = !authToken.isEmpty
+        print("🔍 [NetworkService] hasStoredTokens for \(userMode): \(hasTokens), authToken exists: \(authTokenExists)")
+        return hasTokens && authTokenExists
+    }
+    
     // MARK: - Public URL Construction
     
     /// Constructs a full URL from a relative path
@@ -260,19 +298,13 @@ public class NetworkService: ObservableObject {
     // Get the appropriate token for current role
     private var authToken: String {
         get {
-            switch userMode {
-            case .patient:
-                return patientAuthToken
-            case .doctor:
-                return doctorAuthToken
-            }
+            return keychain.retrieveToken(for: userMode) ?? ""
         }
         set {
-            switch userMode {
-            case .patient:
-                patientAuthToken = newValue
-            case .doctor:
-                doctorAuthToken = newValue
+            if newValue.isEmpty {
+                _ = keychain.delete(key: "\(userMode.rawValue)_auth_token")
+            } else {
+                _ = keychain.storeToken(newValue, for: userMode)
             }
         }
     }
@@ -293,34 +325,67 @@ public class NetworkService: ObservableObject {
     }
 
     private func isTokenExpired() -> Bool {
-        guard let tokenData = UserDefaults.standard.data(forKey: "\(userMode)_token_info"),
-              let tokenInfo = try? decoder.decode(TokenInfo.self, from: tokenData) else {
+        // Check if we have a token in Keychain first
+        let currentToken = keychain.retrieveToken(for: userMode)
+        if currentToken == nil || currentToken!.isEmpty {
+            print("🔍 [NetworkService] No token in Keychain, considering expired")
             return true
         }
-        return Date() >= tokenInfo.expiresAt
+        
+        // Check token info for expiration
+        let key = (userMode == .patient) ? "patient_token_info" : "doctor_token_info"
+        if let tokenData = UserDefaults.standard.data(forKey: key),
+           let tokenInfo = try? decoder.decode(TokenInfo.self, from: tokenData) {
+            let isExpired = Date() >= tokenInfo.expiresAt
+            print("🔍 [NetworkService] Token expiration check - expiresAt: \(tokenInfo.expiresAt), isExpired: \(isExpired)")
+            return isExpired
+        }
+        
+        // Fallback: try legacy/interpolated key if present
+        if let legacyData = UserDefaults.standard.data(forKey: "\(userMode)_token_info"),
+           let legacyInfo = try? decoder.decode(TokenInfo.self, from: legacyData) {
+            // Migrate to explicit key
+            UserDefaults.standard.set(legacyData, forKey: key)
+            UserDefaults.standard.removeObject(forKey: "\(userMode)_token_info")
+            let isExpired = Date() >= legacyInfo.expiresAt
+            print("🔍 [NetworkService] Legacy token expiration check - expiresAt: \(legacyInfo.expiresAt), isExpired: \(isExpired)")
+            return isExpired
+        }
+        
+        // If we have a token but no expiration info, assume it's valid for now
+        // This handles the case where token info wasn't saved properly
+        print("🔍 [NetworkService] No token info found but token exists, assuming valid")
+        return false
     }
 
     private func tryRefreshAccessTokenIfNeeded() async -> Bool {
-        // If token hasn't expired, no need to refresh
-        guard isTokenExpired() else { return true }
+        let expired = isTokenExpired()
+        let tokenIsEmpty = authToken.isEmpty
+        print("🔄 [NetworkService] tryRefreshAccessTokenIfNeeded - expired=\(expired), tokenIsEmpty=\(tokenIsEmpty)")
 
-        // Determine which refresh token to use based on role
-        let refresh: String
-        switch userMode {
-        case .patient:
-            refresh = patientRefreshToken
-        case .doctor:
-            refresh = doctorRefreshToken
+        // If we already have a valid token, no refresh needed
+        if !expired && !tokenIsEmpty {
+            return true
         }
 
-        guard !refresh.isEmpty else { return false }
+        // Get refresh token from Keychain
+        let refresh = keychain.retrieveRefreshToken(for: userMode) ?? ""
+
+        guard !refresh.isEmpty else {
+            print("⚠️ [NetworkService] No refresh token available for \(userMode)")
+            return false
+        }
 
         do {
+            print("🔁 [NetworkService] Refreshing access token using stored refresh token for \(userMode)")
             let body: [String: Any] = ["refresh_token": refresh]
             let data = try await post("/auth/refresh", body: body, requiresAuth: false)
             let tokenResponse = try decoder.decode(TokenResponse.self, from: data)
-            authToken = tokenResponse.accessToken
-            saveTokenInfo(tokenResponse)
+            await MainActor.run {
+                authToken = tokenResponse.accessToken
+                saveTokenInfo(tokenResponse)
+            }
+            print("✅ [NetworkService] Access token refreshed for \(userMode)")
             return true
         } catch {
             print("❌ [NetworkService] Token refresh failed: \(error)")
@@ -331,11 +396,16 @@ public class NetworkService: ObservableObject {
     private func saveTokenInfo(_ tokenResponse: TokenResponse) {
         let tokenInfo = TokenInfo(from: tokenResponse)
         if let encoded = try? encoder.encode(tokenInfo) {
-            UserDefaults.standard.set(encoded, forKey: "\(userMode)_token_info")
+            let key = (userMode == .patient) ? "patient_token_info" : "doctor_token_info"
+            UserDefaults.standard.set(encoded, forKey: key)
+            // Clean up any legacy key
+            UserDefaults.standard.removeObject(forKey: "\(userMode)_token_info")
         }
     }
 
     private func clearTokenInfo() {
+        let key = (userMode == .patient) ? "patient_token_info" : "doctor_token_info"
+        UserDefaults.standard.removeObject(forKey: key)
         UserDefaults.standard.removeObject(forKey: "\(userMode)_token_info")
     }
 
@@ -344,20 +414,35 @@ public class NetworkService: ObservableObject {
         authToken = ""
         clearTokenInfo()
     }
+    
+    /// Logout user and clear all authentication data
+    public func logout() {
+        print("🚪 [NetworkService] Logging out user")
+        clearAllTokens()
+    }
 
     public func clearAllTokens() {
         print("🗑️ [NetworkService] Clearing all stored auth tokens")
-        patientAuthToken = ""
-        doctorAuthToken = ""
-        patientRefreshToken = ""
-        doctorRefreshToken = ""
+        _ = keychain.clearAllTokens()
         // Clear token info for both roles
         UserDefaults.standard.removeObject(forKey: "patient_token_info")
         UserDefaults.standard.removeObject(forKey: "doctor_token_info")
+        
+        // Update published state on main actor
+        Task { @MainActor in
+            isAuthenticatedState = false
+        }
     }
 
     public func getCurrentToken() -> String {
         return authToken
+    }
+    
+    /// Update the published authentication state
+    private func updateAuthenticationState() {
+        Task { @MainActor in
+            isAuthenticatedState = isAuthenticated()
+        }
     }
 
     // MARK: - LiveKit Video
@@ -412,16 +497,17 @@ public class NetworkService: ObservableObject {
 
     public func clearAllStoredData() {
         print("🗑️ [NetworkService] Clearing ALL stored authentication data")
-        patientAuthToken = ""
-        doctorAuthToken = ""
+        clearAllTokens()
         print("✅ [NetworkService] All tokens cleared - next API call will trigger fresh authentication")
     }
     
     public func debugAuthenticationState() {
         print("🔍 [NetworkService] Authentication Debug Info:")
         print("   Current Mode: \(userMode)")
-        print("   Patient Token: \(patientAuthToken.isEmpty ? "Empty" : "Exists (\(patientAuthToken.count) chars)")")
-        print("   Doctor Token: \(doctorAuthToken.isEmpty ? "Empty" : "Exists (\(doctorAuthToken.count) chars)")")
+        let patientToken = keychain.retrieveToken(for: .patient) ?? ""
+        let doctorToken = keychain.retrieveToken(for: .doctor) ?? ""
+        print("   Patient Token: \(patientToken.isEmpty ? "Empty" : "Exists (\(patientToken.count) chars)")")
+        print("   Doctor Token: \(doctorToken.isEmpty ? "Empty" : "Exists (\(doctorToken.count) chars)")")
         print("   Current Credentials: \(currentCredentials.email)")
         print("   API Endpoint: \(apiEndpoint)")
         print("   AppConfig Environment: \(AppConfig.Environment.current)")
@@ -463,14 +549,22 @@ public class NetworkService: ObservableObject {
     }
     
     public func handleEndpointChange() {
-        print("🔄 [NetworkService] API endpoint changed to: \(apiEndpoint)")
+        let newEndpoint = apiEndpoint
+        print("🔄 [NetworkService] API endpoint changed to: \(newEndpoint)")
+        
+        // Only clear tokens if the endpoint actually changed
+        if newEndpoint != lastKnownApiEndpoint {
+            print("⚠️ [NetworkService] Endpoint value changed from '\(lastKnownApiEndpoint)' to '\(newEndpoint)'. Clearing authentication tokens.")
+            clearAllTokens()
+            lastKnownApiEndpoint = newEndpoint
+        } else {
+            print("✅ [NetworkService] Endpoint value is the same as last known: '\(newEndpoint)'. Not clearing tokens.")
+        }
+        
         // Clear any cached network state
         isNetworkAvailable = true
         isReconnecting = false
         stopReconnectionTimer()
-        
-        // Clear authentication tokens since endpoint changed
-        clearAllTokens()
         
         // Reset auth retry count
         authRetryCount = 0
@@ -479,12 +573,6 @@ public class NetworkService: ObservableObject {
         print("✅ [NetworkService] Endpoint change handled successfully")
     }
     
-    public func forceUpdateEndpoint() {
-        print("🔄 [NetworkService] Forcing endpoint update to: \(AppConfig.defaultAPIEndpoint)")
-        apiEndpoint = AppConfig.defaultAPIEndpoint
-        handleEndpointChange()
-        print("✅ [NetworkService] Endpoint forcefully updated to: \(apiEndpoint)")
-    }
     
     private func startReconnectionTimer() {
         stopReconnectionTimer()
@@ -1013,6 +1101,15 @@ public class NetworkService: ObservableObject {
 
 public extension NetworkService {
     private func ensureAuthentication() async throws {
+        // Debug current token state
+        print("🔍 [NetworkService] ensureAuthentication - Current state:")
+        print("   User Mode: \(userMode)")
+        print("   Auth Token: \(authToken.isEmpty ? "Empty" : "Exists (\(authToken.count) chars)")")
+        let patientToken = keychain.retrieveToken(for: .patient) ?? ""
+        let doctorToken = keychain.retrieveToken(for: .doctor) ?? ""
+        print("   Patient Token: \(patientToken.isEmpty ? "Empty" : "Exists (\(patientToken.count) chars)")")
+        print("   Doctor Token: \(doctorToken.isEmpty ? "Empty" : "Exists (\(doctorToken.count) chars)")")
+        
         // Check if we have a valid token that hasn't expired
         if !authToken.isEmpty && !isTokenExpired() {
             print("🔐 [NetworkService] Using existing valid auth token for \(userMode)")
@@ -1030,14 +1127,16 @@ public extension NetworkService {
         }
 
         // Try refresh even if token is empty but we have a refresh token stored
+        print("🔄 [NetworkService] Attempting token refresh using stored refresh token...")
         if await tryRefreshAccessTokenIfNeeded() {
             print("✅ [NetworkService] Token refreshed using stored refresh token for \(userMode)")
             return
         }
 
-        // Require manual login for patient mode (no password stored). We keep session via refresh tokens only.
-        if userMode == .patient {
-            print("🛑 [NetworkService] No valid tokens available for patient mode - user must login once.")
+        // For patient mode, check if we have any stored tokens at all
+        let hasStoredTokens = keychain.hasStoredTokens(for: userMode)
+        if userMode == .patient && !hasStoredTokens {
+            print("🛑 [NetworkService] No stored tokens available for patient mode - user must login")
             throw NetworkError.authenticationFailed
         }
 
@@ -1947,14 +2046,9 @@ extension NetworkService {
             let data = try await post("/auth/email/password", body: body, requiresAuth: false)
             let response = try decoder.decode(AuthResponse.self, from: data)
             
-            // Store tokens
+            // Store tokens in Keychain
             authToken = response.tokens.accessToken
-            switch userMode {
-            case .patient:
-                patientRefreshToken = response.tokens.refreshToken
-            case .doctor:
-                doctorRefreshToken = response.tokens.refreshToken
-            }
+            _ = keychain.storeRefreshToken(response.tokens.refreshToken, for: userMode)
             
             // Save token info
             let tokenResponse = TokenResponse(
@@ -1965,6 +2059,9 @@ extension NetworkService {
                 refreshToken: response.tokens.refreshToken
             )
             saveTokenInfo(tokenResponse)
+            
+            // Update published authentication state
+            updateAuthenticationState()
             
             print("✅ [NetworkService] Dual auth login successful")
             return response.tokens.accessToken
@@ -2005,14 +2102,9 @@ extension NetworkService {
             let data = try await post("/auth/email/otp/verify", body: body, requiresAuth: false)
             let response = try decoder.decode(AuthResponse.self, from: data)
             
-            // Store tokens
+            // Store tokens in Keychain
             authToken = response.tokens.accessToken
-            switch userMode {
-            case .patient:
-                patientRefreshToken = response.tokens.refreshToken
-            case .doctor:
-                doctorRefreshToken = response.tokens.refreshToken
-            }
+            _ = keychain.storeRefreshToken(response.tokens.refreshToken, for: userMode)
             
             // Save token info
             let tokenResponse = TokenResponse(
@@ -2023,6 +2115,9 @@ extension NetworkService {
                 refreshToken: response.tokens.refreshToken
             )
             saveTokenInfo(tokenResponse)
+            
+            // Update published authentication state
+            updateAuthenticationState()
             
             print("✅ [NetworkService] OTP verification successful")
             return response.tokens.accessToken
@@ -2046,14 +2141,9 @@ extension NetworkService {
             let data = try await post("/auth/email/otp/verify", body: body, requiresAuth: false)
             let response = try decoder.decode(AuthResponse.self, from: data)
             
-            // Store tokens
+            // Store tokens in Keychain
             authToken = response.tokens.accessToken
-            switch userMode {
-            case .patient:
-                patientRefreshToken = response.tokens.refreshToken
-            case .doctor:
-                doctorRefreshToken = response.tokens.refreshToken
-            }
+            _ = keychain.storeRefreshToken(response.tokens.refreshToken, for: userMode)
             
             // Save token info
             let tokenResponse = TokenResponse(
@@ -2064,6 +2154,9 @@ extension NetworkService {
                 refreshToken: response.tokens.refreshToken
             )
             saveTokenInfo(tokenResponse)
+            
+            // Update published authentication state
+            updateAuthenticationState()
             
             print("✅ [NetworkService] OTP registration successful")
             return response.tokens.accessToken
@@ -2103,14 +2196,9 @@ extension NetworkService {
             let data = try await post("/auth/google/verify", body: body, requiresAuth: false)
             let response = try decoder.decode(AuthResponse.self, from: data)
             
-            // Store tokens
+            // Store tokens in Keychain
             authToken = response.tokens.accessToken
-            switch userMode {
-            case .patient:
-                patientRefreshToken = response.tokens.refreshToken
-            case .doctor:
-                doctorRefreshToken = response.tokens.refreshToken
-            }
+            _ = keychain.storeRefreshToken(response.tokens.refreshToken, for: userMode)
             
             // Save token info
             let tokenResponse = TokenResponse(
@@ -2121,6 +2209,9 @@ extension NetworkService {
                 refreshToken: response.tokens.refreshToken
             )
             saveTokenInfo(tokenResponse)
+            
+            // Update published authentication state
+            updateAuthenticationState()
             
             print("✅ [NetworkService] Google token verification successful")
             return response.tokens.accessToken

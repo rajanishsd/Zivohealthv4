@@ -2,16 +2,39 @@ import SwiftUI
 
 struct ContentView: View {
     @AppStorage("userMode") private var userMode: UserMode = .patient
-    @AppStorage("patientAuthToken") private var patientAuthToken = ""
     @State private var showingRoleSelection = false
     @State private var selectedTab = 0
+    @State private var isInitializing = true
+    @ObservedObject private var networkService = NetworkService.shared
 
     var body: some View {
-        if (patientAuthToken.isEmpty && userMode == .patient) {
+        if isInitializing {
+            // Show loading screen while checking authentication
+            VStack {
+                ProgressView()
+                Text("Initializing...")
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.white)
+            .onAppear {
+                Task {
+                    await initializeAuth()
+                }
+            }
+        } else if !networkService.isAuthenticatedState {
             if #available(iOS 16.0, *) {
-                NavigationStack { DualLoginView { } }
+                NavigationStack { 
+                    DualLoginView { 
+                        // Login successful - authentication state will be updated automatically by NetworkService
+                    } 
+                }
             } else {
-                NavigationView { DualLoginView { } }
+                NavigationView { 
+                    DualLoginView { 
+                        // Login successful - authentication state will be updated automatically by NetworkService
+                    } 
+                }
             }
         } else if showingRoleSelection {
             // Show only role selection without bottom navigation
@@ -216,6 +239,31 @@ struct ContentView: View {
             }
             .id(userMode.rawValue) // Force NavigationView reconstruction when role changes
             }
+        }
+    }
+    
+    // MARK: - Authentication Initialization
+    
+    private func initializeAuth() async {
+        print("🚀 [ContentView] Initializing authentication...")
+        
+        // Small delay to ensure AppStorage values are loaded
+        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+        
+        // Check initial state
+        let hasTokens = NetworkService.shared.hasStoredTokens()
+        print("🔍 [ContentView] Has stored tokens: \(hasTokens)")
+        
+        // Initialize NetworkService authentication
+        await NetworkService.shared.initializeAuthentication()
+        
+        // Check if user is authenticated
+        let authenticated = NetworkService.shared.isAuthenticated()
+        print("🔍 [ContentView] Final authentication state: \(authenticated)")
+        
+        await MainActor.run {
+            isInitializing = false
+            print("✅ [ContentView] Authentication check complete: \(authenticated ? "Authenticated" : "Not authenticated")")
         }
     }
 }

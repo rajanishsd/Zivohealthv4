@@ -2,10 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @AppStorage("userMode") private var userMode: UserMode = .patient
-    @AppStorage("patientAuthToken") private var patientAuthToken = ""
-    @AppStorage("doctorAuthToken") private var doctorAuthToken = ""
-    @AppStorage("patientRefreshToken") private var patientRefreshToken = ""
-    @AppStorage("apiEndpoint") private var apiEndpoint = ""
+    @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
     @State private var showingDeleteAlert = false
     @State private var customEndpoint = ""
     @State private var selectedEndpointType: EndpointType = .local
@@ -54,8 +51,6 @@ struct SettingsView: View {
             .alert("Sign Out", isPresented: $showingDeleteAlert) {
                 Button("Cancel", role: .cancel) { }
                 Button("Sign Out", role: .destructive) {
-                    patientAuthToken = ""
-                    doctorAuthToken = ""
                     NetworkService.shared.clearAllTokens()
                 }
             } message: {
@@ -142,9 +137,9 @@ struct SettingsView: View {
             HStack {
                 Text("Authentication Status")
                 Spacer()
-                let currentToken = userMode == .patient ? patientAuthToken : doctorAuthToken
-                Text(currentToken.isEmpty ? "Not Authenticated" : "Authenticated")
-                    .foregroundColor(currentToken.isEmpty ? .red : .green)
+                let isAuthenticated = NetworkService.shared.isAuthenticated()
+                Text(isAuthenticated ? "Authenticated" : "Not Authenticated")
+                    .foregroundColor(isAuthenticated ? .green : .red)
             }
         }
     }
@@ -157,11 +152,7 @@ struct SettingsView: View {
             .foregroundColor(.red)
             
             Button("Refresh Authentication") {
-                if userMode == .patient {
-                    patientAuthToken = ""
-                } else {
-                    doctorAuthToken = ""
-                }
+                NetworkService.shared.clearAuthToken()
                 NetworkService.shared.handleRoleChange()
             }
             .foregroundColor(.blue)
@@ -235,8 +226,7 @@ struct SettingsView: View {
         guard URL(string: newEndpoint) != nil else { return }
         let cleanEndpoint = newEndpoint.hasSuffix("/") ? String(newEndpoint.dropLast()) : newEndpoint
         apiEndpoint = cleanEndpoint
-        patientAuthToken = ""
-        doctorAuthToken = ""
+        NetworkService.shared.clearAllTokens()
         NetworkService.shared.handleEndpointChange()
     }
 }

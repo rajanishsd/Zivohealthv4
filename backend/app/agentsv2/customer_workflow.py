@@ -999,7 +999,8 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         
         file_name = uploaded_file.get("original_name")
         file_type = uploaded_file.get("file_type")
-        result = await process_file_async(user_id, file_name, file_type, final_image_path, final_image_base64, final_source_file_path,  analysis_only)
+        user_prompt = state.get("user_input", "")
+        result = await process_file_async(user_id, file_name, file_type, final_image_path, final_image_base64, final_source_file_path, analysis_only, user_prompt)
         
         # Extract key information from the result
         analysis_result = result.get("analysis_result", {})

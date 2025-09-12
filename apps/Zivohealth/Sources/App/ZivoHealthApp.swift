@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct ZivoHealthApp: App {
     @Environment(\.scenePhase) var scenePhase
-    @AppStorage("apiEndpoint") private var apiEndpoint = ""
+    @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
     
     init() {
         // Configure tab bar appearance globally to prevent transparency
@@ -23,13 +23,31 @@ struct ZivoHealthApp: App {
             ContentView()
                 .tint(.zivoRed)
                 .onAppear {
-                    // Force endpoint to match AppConfig on every launch
-                    print("🔄 [App] Forcing endpoint update to: \(AppConfig.defaultAPIEndpoint)")
-                    apiEndpoint = AppConfig.defaultAPIEndpoint
-                    NetworkService.shared.forceUpdateEndpoint()
+                    print("🚀 [App] onAppear - Current apiEndpoint: '\(apiEndpoint)'")
+                    print("🚀 [App] onAppear - AppConfig.defaultAPIEndpoint: '\(AppConfig.defaultAPIEndpoint)'")
                     
-                    // Environment-aware endpoint validation
-                    validateAndUpdateEndpoint()
+                    // Only validate and update endpoint if it's empty or invalid
+                    if apiEndpoint.isEmpty {
+                        print("🔄 [App] apiEndpoint is empty, setting to default: \(AppConfig.defaultAPIEndpoint)")
+                        apiEndpoint = AppConfig.defaultAPIEndpoint
+                        // Don't call handleEndpointChange() here since this is just initialization
+                    } else {
+                        print("✅ [App] apiEndpoint already set: \(apiEndpoint)")
+                        // Only validate if the endpoint looks suspicious (contains local IPs in production)
+                        if AppConfig.Environment.current == .production && 
+                           (apiEndpoint.contains("localhost") || apiEndpoint.contains("192.168") || apiEndpoint.contains("127.0.0.1")) {
+                            print("⚠️ [App] Detected local IP in production, updating to production endpoint")
+                            apiEndpoint = AppConfig.defaultAPIEndpoint
+                            NetworkService.shared.handleEndpointChange()
+                        } else {
+                            print("✅ [App] Endpoint looks valid, no changes needed")
+                        }
+                    }
+                    
+                    // Debug: Check authentication state
+                    print("🔍 [App] Authentication state check:")
+                    print("   - hasStoredTokens: \(NetworkService.shared.hasStoredTokens())")
+                    print("   - isAuthenticated: \(NetworkService.shared.isAuthenticated())")
                     
                     // Restore previous Google Sign-In session
                     Task {
@@ -42,36 +60,6 @@ struct ZivoHealthApp: App {
         }
     }
     
-    private func validateAndUpdateEndpoint() {
-        let currentEndpoint = apiEndpoint
-        
-        // In local environment, ensure localhost/lan IPs use HTTP (not HTTPS)
-        if AppConfig.Environment.current == .local {
-            if currentEndpoint.hasPrefix("https://") && (currentEndpoint.contains("localhost") || currentEndpoint.contains("127.0.0.1") || currentEndpoint.contains("192.168")) {
-                let httpEndpoint = currentEndpoint.replacingOccurrences(of: "https://", with: "http://")
-                apiEndpoint = httpEndpoint
-                NetworkService.shared.handleEndpointChange()
-                print("🛠 [App] Downgraded endpoint to HTTP for local: \(httpEndpoint)")
-            }
-            return
-        }
-        
-        // Production/staging rules
-        // Force HTTPS for production environments
-        if AppConfig.forceHTTPS && currentEndpoint.hasPrefix("http://") {
-            let httpsEndpoint = currentEndpoint.replacingOccurrences(of: "http://", with: "https://")
-            apiEndpoint = httpsEndpoint
-            NetworkService.shared.handleEndpointChange()
-            print("🔒 [App] Upgraded endpoint to HTTPS for production: \(httpsEndpoint)")
-        }
-        
-        // Require domain names for production (no local IPs)
-        if !AppConfig.allowLocalIP && (currentEndpoint.contains("localhost") || currentEndpoint.contains("192.168") || currentEndpoint.contains("127.0.0.1")) {
-            apiEndpoint = AppConfig.defaultAPIEndpoint
-            NetworkService.shared.handleEndpointChange()
-            print("🌐 [App] Updated endpoint to production domain: \(AppConfig.defaultAPIEndpoint)")
-        }
-    }
     
     private func handleScenePhaseChange(_ newPhase: ScenePhase) {
         switch newPhase {

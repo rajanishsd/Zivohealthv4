@@ -158,6 +158,24 @@ class ChatViewModel: ObservableObject {
     
     // MARK: - Helper Methods
     
+    private func getFileType(for fileExtension: String) -> String {
+        let ext = fileExtension.lowercased()
+        switch ext {
+        case "jpg", "jpeg", "png", "gif", "bmp", "tiff":
+            return "Image File"
+        case "pdf":
+            return "PDF Document"
+        case "doc", "docx":
+            return "Word Document"
+        case "xls", "xlsx":
+            return "Excel Document"
+        case "txt":
+            return "Text File"
+        default:
+            return "Unknown File"
+        }
+    }
+    
     private func clearAllMessages() {
         messages.removeAll()
         enhancedMessages.removeAll()
@@ -928,6 +946,40 @@ class ChatViewModel: ObservableObject {
         print("🌊 [ChatViewModel] sendStreamingMessage with file called")
         print("📤 [ChatViewModel] Streaming message: '\(content)' with file \(fileURL.lastPathComponent)")
 
+        // Add user's file message immediately to chat (with duplicate prevention)
+        await MainActor.run {
+            let fileName = fileURL.lastPathComponent
+            let messageContent = content.isEmpty ? "📎 \(fileName)" : content
+            
+            // Check for duplicates before adding
+            let isDuplicate = self.messages.contains(where: { existing in
+                existing.role == .user && 
+                existing.fileName == fileName && 
+                existing.fileName != nil && 
+                !existing.fileName!.isEmpty
+            })
+            
+            if !isDuplicate {
+                let userMessage = ChatMessage(
+                    role: .user,
+                    content: messageContent,
+                    timestamp: Date(),
+                    filePath: fileURL.path,
+                    fileType: getFileType(for: fileURL.pathExtension),
+                    fileName: fileName
+                )
+                self.messages.append(userMessage)
+                
+                // Add to enhanced messages if in enhanced mode
+                if self.useEnhancedMode {
+                    let enhanced = self.createEnhancedMessage(from: userMessage, content: userMessage.content)
+                    self.enhancedMessages.append(enhanced)
+                }
+            } else {
+                print("🚫 [ChatViewModel] Prevented duplicate file message: \(fileName)")
+            }
+        }
+
         // Reset UI state
         await MainActor.run {
             self.isStreaming = true
@@ -1027,9 +1079,19 @@ class ChatViewModel: ObservableObject {
                                         fileName: fileName,
                                         visualizations: visualizations
                                     )
-                                    // Deduplicate on (role, content)
+                                    // Deduplicate on (role, content) and for file messages also check filename
                                     let isDuplicate = self.messages.contains(where: { existing in
-                                        existing.role == chatMsg.role && existing.content == chatMsg.content
+                                        if existing.role == chatMsg.role && existing.content == chatMsg.content {
+                                            return true
+                                        }
+                                        // For file messages, also check if it's the same file by filename
+                                        if existing.role == chatMsg.role && 
+                                           existing.fileName == chatMsg.fileName && 
+                                           existing.fileName != nil && 
+                                           !existing.fileName!.isEmpty {
+                                            return true
+                                        }
+                                        return false
                                     })
                                     if !isDuplicate {
                                         self.messages.append(chatMsg)
@@ -1064,6 +1126,10 @@ class ChatViewModel: ObservableObject {
                             self.isTyping = false
                             self.isAIResponseComplete = true
                             self.currentProgress = statusMessage.progress ?? 1.0
+                            // Clear file upload state when complete
+                            self.lastInteractionWasFileUpload = false
+                            self.isAnalyzingFile = false
+                            self.currentUploadFilename = ""
                         }
                         return // Skip automatic reload beyond the explicit fallback above
                     }
@@ -1075,9 +1141,11 @@ class ChatViewModel: ObservableObject {
                         self.isAnalyzingFile = self.lastInteractionWasFileUpload
                     } else if statusText.contains("complete") || statusText.contains("Complete") {
                         self.currentStatus = "Complete"
-                        print("🏁 [ChatViewModel] Received complete status - keeping analysis state visible")
-                        // Don't clear analysis state immediately - let the UI show the status first
-                        // The state will be cleared when AI response is fully processed
+                        print("🏁 [ChatViewModel] Received complete status - clearing analysis state")
+                        // Clear analysis state when complete
+                        self.lastInteractionWasFileUpload = false
+                        self.isAnalyzingFile = false
+                        self.currentUploadFilename = ""
                     } else if statusText.lowercased().contains("waiting for user") || statusText.lowercased().contains("awaiting_user") || statusText.lowercased().contains("awaiting user") {
                         // Backend indicates it needs user input now
                         self.isAnalyzingFile = false
@@ -1107,6 +1175,8 @@ class ChatViewModel: ObservableObject {
                 if statusMessage.status == "complete" || statusMessage.status == "error" {
                     await MainActor.run {
                         self.isAnalyzingFile = false
+                        self.lastInteractionWasFileUpload = false
+                        self.currentUploadFilename = ""
                     }
                     continue
                 }
@@ -1148,7 +1218,8 @@ class ChatViewModel: ObservableObject {
                     // Allow messages with file attachments even if content is empty
                     let hasFileAttachment = backendMessage.filePath != nil && !backendMessage.filePath!.isEmpty
                     let hasValidContent = !backendMessage.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    let isValidMessage = hasValidContent || hasFileAttachment
+                    let hasVisualizations = backendMessage.visualizations?.isEmpty == false
+                    let isValidMessage = hasValidContent || hasFileAttachment || hasVisualizations
                     
                     // Debug logging for filtered messages
                     if !isValidRole {
@@ -1156,9 +1227,9 @@ class ChatViewModel: ObservableObject {
                     } else if !isNotSystemJSON {
                         print("🚫 [ChatViewModel] Filtered message (system JSON): \(backendMessage.content.prefix(50))")
                     } else if !isValidMessage {
-                        print("🚫 [ChatViewModel] Filtered message (no content or file): content='\(backendMessage.content)', file_path='\(backendMessage.filePath ?? "nil")'")
+                        print("🚫 [ChatViewModel] Filtered message (no content, file, or visualizations): content='\(backendMessage.content)', file_path='\(backendMessage.filePath ?? "nil")', visualizations=\(backendMessage.visualizations?.count ?? 0)")
                     } else {
-                        print("✅ [ChatViewModel] Valid message: role=\(backendMessage.role), hasContent=\(hasValidContent), hasFile=\(hasFileAttachment), file_path='\(backendMessage.filePath ?? "nil")'")
+                        print("✅ [ChatViewModel] Valid message: role=\(backendMessage.role), hasContent=\(hasValidContent), hasFile=\(hasFileAttachment), hasVisualizations=\(hasVisualizations), file_path='\(backendMessage.filePath ?? "nil")'")
                     }
                     
                     return isValidRole && isNotSystemJSON && isValidMessage
@@ -1196,14 +1267,14 @@ class ChatViewModel: ObservableObject {
                     print("🎯 [ChatViewModel] Detected new AI response - clearing analyzing state after delay")
                     // Clear after a delay to ensure user sees the status
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                        // Don't clear lastInteractionWasFileUpload here - it prevents StatusMessageView from showing
-                        // Keep it true to ensure inline status only
+                        // Clear all analysis state after AI response is complete
                         self.currentUploadFilename = ""
                         self.isAnalyzingFile = false
                         self.isTyping = false
                         self.isLoading = false
+                        self.lastInteractionWasFileUpload = false
                         self.currentStatus = "Complete"
-                        print("📝 [ChatViewModel] Finally cleared analysis state after AI response (kept lastInteractionWasFileUpload=true)")
+                        print("📝 [ChatViewModel] Finally cleared analysis state after AI response")
                     }
                 }
                 
