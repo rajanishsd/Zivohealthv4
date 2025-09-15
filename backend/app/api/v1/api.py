@@ -14,6 +14,7 @@ from app.api.v1.endpoints import lab_reports
 from app.api.v1.endpoints import files
 from app.api.v1.endpoints import video
 from app.api.v1.endpoints import password_reset
+from app.api.v1.endpoints import onboarding
 from app.routes import audit
 from app.routes import dashboard
 
@@ -37,5 +38,6 @@ api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboar
 api_router.include_router(lab_reports.router, prefix="/lab-reports", tags=["lab-reports"])
 api_router.include_router(files.router, prefix="/files", tags=["files"])
 api_router.include_router(video.router, prefix="/video", tags=["video"])
+api_router.include_router(onboarding.router, prefix="/onboarding", tags=["onboarding"])
 
 # api_router.include_router(telemetry_dashboard.router, prefix="/telemetry-audit", tags=["telemetry-dashboard"])

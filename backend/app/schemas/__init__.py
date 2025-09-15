@@ -4,3 +4,11 @@ from .chat_session import ChatMessage, ChatMessageCreate, ChatSession, ChatSessi
 from .appointment import Appointment, AppointmentCreate, AppointmentUpdate, AppointmentWithDetails
 from . import health_schemas
 from . import nutrition 
+from .onboarding import (
+    OnboardingPayload,
+    BasicDetails,
+    HealthConditions,
+    LifestyleHabits,
+    NotificationPreferences,
+    ConsentRecord,
+)

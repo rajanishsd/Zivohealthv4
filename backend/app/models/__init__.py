@@ -62,3 +62,14 @@ from .health_data import (
 )
 from .lab_test_mapping import LabTestMapping
 from .lab_aggregation import LabReportDaily, LabReportMonthly, LabReportQuarterly, LabReportYearly
+from .user_profile import (
+    UserProfile,
+    Condition,
+    Allergen,
+    UserCondition,
+    UserAllergy,
+    UserLifestyle,
+    UserNotificationPreferences,
+    UserConsent,
+    UserMeasurementPreferences,
+)

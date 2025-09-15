@@ -16,6 +16,7 @@ struct DualLoginView: View {
     @State private var emailExists: Bool = false
     @State private var otpSent: Bool = false
     @FocusState private var focusedField: Field?
+    @State private var showOnboarding: Bool = false
 
     var onSuccess: () -> Void
 
@@ -411,7 +412,7 @@ struct DualLoginView: View {
                 NetworkService.shared.handleRoleChange()
                 _ = try await NetworkService.shared.loginWithPassword(email: email, password: password)
                 await MainActor.run {
-                    onSuccess()
+                    if !NetworkService.shared.isOnboardingCompleted() { showOnboarding = true } else { onSuccess() }
                 }
             } catch {
                 await MainActor.run {
@@ -461,7 +462,7 @@ struct DualLoginView: View {
                 NetworkService.shared.handleRoleChange()
                 _ = try await NetworkService.shared.verifyOTP(email: email, code: otpCode)
                 await MainActor.run {
-                    onSuccess()
+                    if !NetworkService.shared.isOnboardingCompleted() { showOnboarding = true } else { onSuccess() }
                 }
             } catch {
                 await MainActor.run {
@@ -483,7 +484,7 @@ struct DualLoginView: View {
                 NetworkService.shared.handleRoleChange()
                 _ = try await NetworkService.shared.signInWithGoogle()
                 await MainActor.run {
-                    onSuccess()
+                    if !NetworkService.shared.isOnboardingCompleted() { showOnboarding = true } else { onSuccess() }
                 }
             } catch {
                 await MainActor.run {
@@ -520,6 +521,7 @@ struct DualRegistrationView: View {
     @State private var otpCode: String = ""
     @State private var otpSent: Bool = false
     @FocusState private var focusedField: Field?
+    @State private var showOnboarding: Bool = false
 
     var onSuccess: () -> Void
 
@@ -588,6 +590,15 @@ struct DualRegistrationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .modifier(HideNavBarCompat())
         .background(Color.white)
+        .sheet(isPresented: $showOnboarding, onDismiss: {
+            onSuccess()
+        }) {
+            OnboardingFlowView(
+                prefilledEmail: email,
+                prefilledFullName: fullName
+            )
+            .environmentObject(NetworkService.shared)
+        }
     }
     
     // MARK: - Registration Method Selection
@@ -887,9 +898,19 @@ struct DualRegistrationView: View {
             do {
                 userMode = .patient
                 NetworkService.shared.handleRoleChange()
+                // Reset onboarding status for new user
+                NetworkService.shared.resetOnboardingStatus()
                 _ = try await NetworkService.shared.register(email: email, password: password, fullName: fullName)
                 await MainActor.run {
-                    onSuccess()
+                    let onboardingCompleted = NetworkService.shared.isOnboardingCompleted()
+                    print("🔍 [DualAuthViews] Registration successful - onboardingCompleted: \(onboardingCompleted)")
+                    if !onboardingCompleted { 
+                        print("📋 [DualAuthViews] Showing onboarding flow")
+                        showOnboarding = true 
+                    } else { 
+                        print("✅ [DualAuthViews] Onboarding already completed, calling onSuccess")
+                        onSuccess() 
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -928,9 +949,19 @@ struct DualRegistrationView: View {
             do {
                 userMode = .patient
                 NetworkService.shared.handleRoleChange()
+                // Reset onboarding status for new user
+                NetworkService.shared.resetOnboardingStatus()
                 _ = try await NetworkService.shared.registerWithOTP(email: email, code: otpCode, fullName: fullName)
                 await MainActor.run {
-                    onSuccess()
+                    let onboardingCompleted = NetworkService.shared.isOnboardingCompleted()
+                    print("🔍 [DualAuthViews] OTP Registration successful - onboardingCompleted: \(onboardingCompleted)")
+                    if !onboardingCompleted { 
+                        print("📋 [DualAuthViews] Showing onboarding flow")
+                        showOnboarding = true 
+                    } else { 
+                        print("✅ [DualAuthViews] Onboarding already completed, calling onSuccess")
+                        onSuccess() 
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -949,9 +980,19 @@ struct DualRegistrationView: View {
             do {
                 userMode = .patient
                 NetworkService.shared.handleRoleChange()
+                // Reset onboarding status for new user
+                NetworkService.shared.resetOnboardingStatus()
                 _ = try await NetworkService.shared.signInWithGoogle()
                 await MainActor.run {
-                    onSuccess()
+                    let onboardingCompleted = NetworkService.shared.isOnboardingCompleted()
+                    print("🔍 [DualAuthViews] Google Registration successful - onboardingCompleted: \(onboardingCompleted)")
+                    if !onboardingCompleted { 
+                        print("📋 [DualAuthViews] Showing onboarding flow")
+                        showOnboarding = true 
+                    } else { 
+                        print("✅ [DualAuthViews] Onboarding already completed, calling onSuccess")
+                        onSuccess() 
+                    }
                 }
             } catch {
                 await MainActor.run {

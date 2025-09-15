@@ -26,28 +26,34 @@ struct ZivoHealthApp: App {
                     print("🚀 [App] onAppear - Current apiEndpoint: '\(apiEndpoint)'")
                     print("🚀 [App] onAppear - AppConfig.defaultAPIEndpoint: '\(AppConfig.defaultAPIEndpoint)'")
                     
-                    // Only validate and update endpoint if it's empty or invalid
-                    if apiEndpoint.isEmpty {
-                        print("🔄 [App] apiEndpoint is empty, setting to default: \(AppConfig.defaultAPIEndpoint)")
-                        apiEndpoint = AppConfig.defaultAPIEndpoint
-                        // Don't call handleEndpointChange() here since this is just initialization
-                    } else {
-                        print("✅ [App] apiEndpoint already set: \(apiEndpoint)")
-                        // Only validate if the endpoint looks suspicious (contains local IPs in production)
-                        if AppConfig.Environment.current == .production && 
-                           (apiEndpoint.contains("localhost") || apiEndpoint.contains("192.168") || apiEndpoint.contains("127.0.0.1")) {
-                            print("⚠️ [App] Detected local IP in production, updating to production endpoint")
+                    // Always ensure we're using the current AppConfig value
+                    if apiEndpoint != AppConfig.defaultAPIEndpoint {
+                        print("🔄 [App] apiEndpoint '\(apiEndpoint)' differs from AppConfig '\(AppConfig.defaultAPIEndpoint)', updating...")
+                        
+                        // Check if we should clear tokens based on pre-deploy configuration
+                        let shouldClearTokens = AppConfig.shouldClearTokensOnEnvironmentSwitch
+                        let isSwitchingEnvironments = isDifferentEnvironmentType(from: apiEndpoint, to: AppConfig.defaultAPIEndpoint)
+                        
+                        if shouldClearTokens && isSwitchingEnvironments {
+                            print("⚠️ [App] Environment switch detected + shouldClearTokensOnEnvironmentSwitch=true - clearing tokens")
                             apiEndpoint = AppConfig.defaultAPIEndpoint
                             NetworkService.shared.handleEndpointChange()
                         } else {
-                            print("✅ [App] Endpoint looks valid, no changes needed")
+                            print("ℹ️ [App] Updating endpoint - tokens preserved (shouldClearTokensOnEnvironmentSwitch=\(shouldClearTokens))")
+                            apiEndpoint = AppConfig.defaultAPIEndpoint
+                            NetworkService.shared.resetToAppConfigEndpoint()
                         }
+                    } else {
+                        print("✅ [App] apiEndpoint matches AppConfig: \(apiEndpoint)")
                     }
                     
                     // Debug: Check authentication state
                     print("🔍 [App] Authentication state check:")
                     print("   - hasStoredTokens: \(NetworkService.shared.hasStoredTokens())")
                     print("   - isAuthenticated: \(NetworkService.shared.isAuthenticated())")
+                    
+                    // Debug: Print detailed network service state
+                    NetworkService.shared.debugAuthenticationState()
                     
                     // Restore previous Google Sign-In session
                     Task {
@@ -80,5 +86,27 @@ struct ZivoHealthApp: App {
         @unknown default:
             break
         }
+    }
+    
+    // MARK: - Helper Functions
+    
+    /// Determines if we're switching between different environment types
+    /// This helps decide whether to clear stored tokens for security
+    private func isDifferentEnvironmentType(from oldEndpoint: String, to newEndpoint: String) -> Bool {
+        // Define environment types
+        let isProduction = oldEndpoint.contains("api.zivohealth.ai")
+        let isStaging = oldEndpoint.contains("staging-api.zivohealth.ai")
+        let isLocal = oldEndpoint.contains("192.168") || oldEndpoint.contains("localhost") || oldEndpoint.contains("127.0.0.1")
+        
+        let isNewProduction = newEndpoint.contains("api.zivohealth.ai")
+        let isNewStaging = newEndpoint.contains("staging-api.zivohealth.ai")
+        let isNewLocal = newEndpoint.contains("192.168") || newEndpoint.contains("localhost") || newEndpoint.contains("127.0.0.1")
+        
+        // Check if we're switching between different environment types
+        let switchingFromProduction = isProduction && (isNewStaging || isNewLocal)
+        let switchingFromStaging = isStaging && (isNewProduction || isNewLocal)
+        let switchingFromLocal = isLocal && (isNewProduction || isNewStaging)
+        
+        return switchingFromProduction || switchingFromStaging || switchingFromLocal
     }
 }

@@ -949,7 +949,7 @@ class ChatViewModel: ObservableObject {
         // Add user's file message immediately to chat (with duplicate prevention)
         await MainActor.run {
             let fileName = fileURL.lastPathComponent
-            let messageContent = content.isEmpty ? "📎 \(fileName)" : content
+            let messageContent = content.isEmpty ? "" : content
             
             // Check for duplicates before adding
             let isDuplicate = self.messages.contains(where: { existing in

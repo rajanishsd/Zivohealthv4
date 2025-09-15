@@ -37,6 +37,11 @@ public class NetworkService: ObservableObject {
     // Use Keychain for secure token storage
     private let keychain = KeychainService.shared
     
+    // Token caching to avoid redundant KeychainService calls
+    private var cachedAuthToken: String?
+    private var lastTokenCacheTime: Date?
+    private let tokenCacheValidityDuration: TimeInterval = 5.0 // Cache for 5 seconds
+    
     // API Key for ZivoHealth iOS app
     private let apiKey = "UMYpN67NeR0W13cP13O62Mn04yG3tpEx" // Replace with actual key from generate_api_keys.py
     
@@ -76,6 +81,10 @@ public class NetworkService: ObservableObject {
     // Authentication state tracking
     @Published public var isAuthenticatedState: Bool = false
     private var reconnectionTimer: Timer?
+    
+    // Current user information
+    @Published public var currentUserEmail: String?
+    @Published public var currentUserFullName: String?
     
     // Authentication state
     private var isRefreshingToken: Bool = false
@@ -176,6 +185,34 @@ public class NetworkService: ObservableObject {
     private var baseURL: String { "\(apiEndpoint)\(apiVersion)" }
 
     private init() {
+        // Check if we should force clear tokens on app launch
+        if AppConfig.shouldClearTokensOnAppLaunch {
+            print("🧹 [NetworkService] shouldClearTokensOnAppLaunch=true - clearing all tokens on app launch")
+            clearAllTokens()
+        }
+        
+        // Ensure we're using the current AppConfig value, not a stale stored value
+        let configEndpoint = AppConfig.defaultAPIEndpoint
+        if apiEndpoint != configEndpoint {
+            print("🔄 [NetworkService] Initializing - stored endpoint '\(apiEndpoint)' differs from AppConfig '\(configEndpoint)', updating...")
+            
+            // Check if we should clear tokens based on pre-deploy configuration
+            let shouldClearTokens = AppConfig.shouldClearTokensOnEnvironmentSwitch
+            let isSwitchingEnvironments = isDifferentEnvironmentType(from: apiEndpoint, to: configEndpoint)
+            
+            if shouldClearTokens && isSwitchingEnvironments {
+                print("⚠️ [NetworkService] Environment switch detected + shouldClearTokensOnEnvironmentSwitch=true - clearing tokens")
+                print("🔄 [NetworkService] Old endpoint: '\(apiEndpoint)' -> New endpoint: '\(configEndpoint)'")
+                apiEndpoint = configEndpoint
+                clearAllTokens()
+                lastKnownApiEndpoint = configEndpoint
+                print("✅ [NetworkService] Environment switch complete - all tokens cleared")
+            } else {
+                print("ℹ️ [NetworkService] Updating endpoint - tokens preserved (shouldClearTokensOnEnvironmentSwitch=\(shouldClearTokens))")
+                apiEndpoint = configEndpoint
+                lastKnownApiEndpoint = configEndpoint
+            }
+        }
         // Initialization complete - baseURL will be computed lazily when first accessed
     }
     
@@ -295,12 +332,27 @@ public class NetworkService: ObservableObject {
         return signature
     }
 
-    // Get the appropriate token for current role
+    // Get the appropriate token for current role with caching
     private var authToken: String {
         get {
-            return keychain.retrieveToken(for: userMode) ?? ""
+            // Check if we have a valid cached token
+            if let cachedToken = cachedAuthToken,
+               let cacheTime = lastTokenCacheTime,
+               Date().timeIntervalSince(cacheTime) < tokenCacheValidityDuration {
+                return cachedToken
+            }
+            
+            // Cache miss or expired - retrieve from Keychain
+            let token = keychain.retrieveToken(for: userMode) ?? ""
+            cachedAuthToken = token
+            lastTokenCacheTime = Date()
+            return token
         }
         set {
+            // Update cache immediately
+            cachedAuthToken = newValue
+            lastTokenCacheTime = Date()
+            
             if newValue.isEmpty {
                 _ = keychain.delete(key: "\(userMode.rawValue)_auth_token")
             } else {
@@ -325,10 +377,10 @@ public class NetworkService: ObservableObject {
     }
 
     private func isTokenExpired() -> Bool {
-        // Check if we have a token in Keychain first
-        let currentToken = keychain.retrieveToken(for: userMode)
-        if currentToken == nil || currentToken!.isEmpty {
-            print("🔍 [NetworkService] No token in Keychain, considering expired")
+        // Use cached token to avoid redundant KeychainService calls
+        let currentToken = authToken
+        if currentToken.isEmpty {
+            print("🔍 [NetworkService] No token available, considering expired")
             return true
         }
         
@@ -411,6 +463,9 @@ public class NetworkService: ObservableObject {
 
     public func clearAuthToken() {
         print("🗑️ [NetworkService] Clearing stored auth token for \(userMode)")
+        // Clear cache first
+        cachedAuthToken = nil
+        lastTokenCacheTime = nil
         authToken = ""
         clearTokenInfo()
     }
@@ -423,6 +478,9 @@ public class NetworkService: ObservableObject {
 
     public func clearAllTokens() {
         print("🗑️ [NetworkService] Clearing all stored auth tokens")
+        // Clear cache first
+        cachedAuthToken = nil
+        lastTokenCacheTime = nil
         _ = keychain.clearAllTokens()
         // Clear token info for both roles
         UserDefaults.standard.removeObject(forKey: "patient_token_info")
@@ -438,8 +496,15 @@ public class NetworkService: ObservableObject {
         return authToken
     }
     
+    /// Invalidate the token cache to force fresh retrieval from Keychain
+    public func invalidateTokenCache() {
+        print("🔄 [NetworkService] Invalidating token cache")
+        cachedAuthToken = nil
+        lastTokenCacheTime = nil
+    }
+    
     /// Update the published authentication state
-    private func updateAuthenticationState() {
+    public func updateAuthenticationState() {
         Task { @MainActor in
             isAuthenticatedState = isAuthenticated()
         }
@@ -485,6 +550,11 @@ public class NetworkService: ObservableObject {
 
     public func handleRoleChange() {
         print("🔄 [NetworkService] User role changed to \(userMode)")
+        
+        // Clear cache when role changes to force fresh token retrieval
+        cachedAuthToken = nil
+        lastTokenCacheTime = nil
+        
         print("🔐 [NetworkService] Current \(userMode) token: \(authToken.isEmpty ? "None" : "Exists (\(authToken.count) chars)")")
 
         // Don't clear the token anymore - each role keeps its own token
@@ -504,8 +574,10 @@ public class NetworkService: ObservableObject {
     public func debugAuthenticationState() {
         print("🔍 [NetworkService] Authentication Debug Info:")
         print("   Current Mode: \(userMode)")
-        let patientToken = keychain.retrieveToken(for: .patient) ?? ""
-        let doctorToken = keychain.retrieveToken(for: .doctor) ?? ""
+        
+        // Use cached values to avoid redundant KeychainService calls
+        let patientToken = (userMode == .patient) ? authToken : (keychain.retrieveToken(for: .patient) ?? "")
+        let doctorToken = (userMode == .doctor) ? authToken : (keychain.retrieveToken(for: .doctor) ?? "")
         print("   Patient Token: \(patientToken.isEmpty ? "Empty" : "Exists (\(patientToken.count) chars)")")
         print("   Doctor Token: \(doctorToken.isEmpty ? "Empty" : "Exists (\(doctorToken.count) chars)")")
         print("   Current Credentials: \(currentCredentials.email)")
@@ -513,6 +585,7 @@ public class NetworkService: ObservableObject {
         print("   AppConfig Environment: \(AppConfig.Environment.current)")
         print("   AppConfig Default Endpoint: \(AppConfig.defaultAPIEndpoint)")
         print("   Base URL: \(baseURL)")
+        print("   Endpoints Match: \(apiEndpoint == AppConfig.defaultAPIEndpoint ? "✅ YES" : "❌ NO")")
     }
 
     // MARK: - App Lifecycle Management
@@ -571,6 +644,24 @@ public class NetworkService: ObservableObject {
         
         // Update baseURL will be computed lazily on next request
         print("✅ [NetworkService] Endpoint change handled successfully")
+    }
+    
+    /// Force reset API endpoint to current AppConfig value
+    public func resetToAppConfigEndpoint() {
+        let configEndpoint = AppConfig.defaultAPIEndpoint
+        print("🔄 [NetworkService] Resetting API endpoint from '\(apiEndpoint)' to AppConfig value: '\(configEndpoint)'")
+        apiEndpoint = configEndpoint
+        lastKnownApiEndpoint = configEndpoint
+        print("✅ [NetworkService] API endpoint reset to AppConfig value")
+    }
+    
+    /// Clear stored endpoint and force use of AppConfig value
+    public func clearStoredEndpoint() {
+        print("🗑️ [NetworkService] Clearing stored API endpoint")
+        UserDefaults.standard.removeObject(forKey: "apiEndpoint")
+        apiEndpoint = AppConfig.defaultAPIEndpoint
+        lastKnownApiEndpoint = AppConfig.defaultAPIEndpoint
+        print("✅ [NetworkService] Stored endpoint cleared, using AppConfig value: \(AppConfig.defaultAPIEndpoint)")
     }
     
     
@@ -1095,6 +1186,86 @@ public class NetworkService: ObservableObject {
         
         return consultationRequest
     }
+
+    // MARK: - Onboarding helpers
+    @AppStorage("onboardingCompleted") private var onboardingCompleted: Bool = false
+
+    public func isOnboardingCompleted() -> Bool {
+        print("🔍 [NetworkService] isOnboardingCompleted: \(onboardingCompleted)")
+        return onboardingCompleted
+    }
+    
+    public func markOnboardingCompleted() {
+        print("✅ [NetworkService] Marking onboarding as completed")
+        onboardingCompleted = true
+    }
+    
+    public func resetOnboardingStatus() {
+        print("🔄 [NetworkService] Resetting onboarding status for new user")
+        onboardingCompleted = false
+    }
+    
+    public func setCurrentUserInfo(email: String, fullName: String) {
+        print("👤 [NetworkService] Setting current user info - Email: \(email), Name: \(fullName)")
+        currentUserEmail = email
+        currentUserFullName = fullName
+    }
+    
+    // MARK: - Manual Reset Functions
+    
+    /// Manually clear all tokens and reset authentication state
+    /// Use this for testing or when you need to force a fresh login
+    public func forceResetAuthentication() {
+        print("🧪 [NetworkService] Manual reset requested - clearing all tokens and authentication state")
+        clearAllTokens()
+        currentUserEmail = nil
+        currentUserFullName = nil
+        onboardingCompleted = false
+        updateAuthenticationState()
+        print("✅ [NetworkService] Manual reset complete - app will show login screen")
+    }
+    
+    /// Reset only onboarding status (useful for testing onboarding flow)
+    public func forceResetOnboarding() {
+        print("🧪 [NetworkService] Manual onboarding reset requested")
+        onboardingCompleted = false
+        updateAuthenticationState()
+        print("✅ [NetworkService] Onboarding reset complete")
+    }
+    
+    /// Debug function to print current authentication state
+    public func printDebugState() {
+        print("🔍 [NetworkService] Debug State:")
+        print("   - API Endpoint: \(apiEndpoint)")
+        print("   - User Mode: \(userMode)")
+        print("   - Has Stored Tokens: \(hasStoredTokens())")
+        print("   - Is Authenticated: \(isAuthenticated())")
+        print("   - Onboarding Completed: \(isOnboardingCompleted())")
+        print("   - Current User Email: \(currentUserEmail ?? "nil")")
+        print("   - Current User Name: \(currentUserFullName ?? "nil")")
+    }
+    
+    // MARK: - Helper Functions
+    
+    /// Determines if we're switching between different environment types
+    /// This helps decide whether to clear stored tokens for security
+    private func isDifferentEnvironmentType(from oldEndpoint: String, to newEndpoint: String) -> Bool {
+        // Define environment types
+        let isProduction = oldEndpoint.contains("api.zivohealth.ai")
+        let isStaging = oldEndpoint.contains("staging-api.zivohealth.ai")
+        let isLocal = oldEndpoint.contains("192.168") || oldEndpoint.contains("localhost") || oldEndpoint.contains("127.0.0.1")
+        
+        let isNewProduction = newEndpoint.contains("api.zivohealth.ai")
+        let isNewStaging = newEndpoint.contains("staging-api.zivohealth.ai")
+        let isNewLocal = newEndpoint.contains("192.168") || newEndpoint.contains("localhost") || newEndpoint.contains("127.0.0.1")
+        
+        // Check if we're switching between different environment types
+        let switchingFromProduction = isProduction && (isNewStaging || isNewLocal)
+        let switchingFromStaging = isStaging && (isNewProduction || isNewLocal)
+        let switchingFromLocal = isLocal && (isNewProduction || isNewStaging)
+        
+        return switchingFromProduction || switchingFromStaging || switchingFromLocal
+    }
 }
 
 // MARK: - Authentication Extension
@@ -1105,8 +1276,10 @@ public extension NetworkService {
         print("🔍 [NetworkService] ensureAuthentication - Current state:")
         print("   User Mode: \(userMode)")
         print("   Auth Token: \(authToken.isEmpty ? "Empty" : "Exists (\(authToken.count) chars)")")
-        let patientToken = keychain.retrieveToken(for: .patient) ?? ""
-        let doctorToken = keychain.retrieveToken(for: .doctor) ?? ""
+        
+        // Use cached values to avoid redundant KeychainService calls
+        let patientToken = (userMode == .patient) ? authToken : (keychain.retrieveToken(for: .patient) ?? "")
+        let doctorToken = (userMode == .doctor) ? authToken : (keychain.retrieveToken(for: .doctor) ?? "")
         print("   Patient Token: \(patientToken.isEmpty ? "Empty" : "Exists (\(patientToken.count) chars)")")
         print("   Doctor Token: \(doctorToken.isEmpty ? "Empty" : "Exists (\(doctorToken.count) chars)")")
         
@@ -1170,6 +1343,9 @@ public extension NetworkService {
 
             let userResponse = try decoder.decode(UserResponse.self, from: data)
             print("👤 [NetworkService] Created user with ID: \(userResponse.id)")
+            
+            // Store current user information
+            setCurrentUserInfo(email: userResponse.email, fullName: userResponse.fullName)
 
             // Now login to get the token
             return try await loginWithPassword(email: email, password: password)
@@ -1653,7 +1829,7 @@ extension NetworkService {
         return try await request(path: path, method: "GET", body: nil, requiresAuth: requiresAuth)
     }
 
-    private func post(_ path: String, body: [String: Any], requiresAuth: Bool = true) async throws -> Data {
+    func post(_ path: String, body: [String: Any], requiresAuth: Bool = true) async throws -> Data {
         return try await request(path: path, method: "POST", body: body, requiresAuth: requiresAuth)
     }
 
@@ -2060,6 +2236,9 @@ extension NetworkService {
             )
             saveTokenInfo(tokenResponse)
             
+            // Store current user information
+            setCurrentUserInfo(email: response.user.email, fullName: response.user.fullName ?? "")
+            
             // Update published authentication state
             updateAuthenticationState()
             
@@ -2116,6 +2295,9 @@ extension NetworkService {
             )
             saveTokenInfo(tokenResponse)
             
+            // Store current user information
+            setCurrentUserInfo(email: response.user.email, fullName: response.user.fullName ?? "")
+            
             // Update published authentication state
             updateAuthenticationState()
             
@@ -2154,6 +2336,9 @@ extension NetworkService {
                 refreshToken: response.tokens.refreshToken
             )
             saveTokenInfo(tokenResponse)
+            
+            // Store current user information
+            setCurrentUserInfo(email: response.user.email, fullName: response.user.fullName ?? "")
             
             // Update published authentication state
             updateAuthenticationState()
@@ -2209,6 +2394,9 @@ extension NetworkService {
                 refreshToken: response.tokens.refreshToken
             )
             saveTokenInfo(tokenResponse)
+            
+            // Store current user information
+            setCurrentUserInfo(email: response.user.email, fullName: response.user.fullName ?? "")
             
             // Update published authentication state
             updateAuthenticationState()

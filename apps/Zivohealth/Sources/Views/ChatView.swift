@@ -608,8 +608,8 @@ struct MessageInputView: View {
         }
         .onChange(of: selectedImageURL) { imageURL in
             if let imageURL = imageURL {
-                // Handle image selection from camera
-                handleFileSelection(imageURL)
+                // Don't call handleFileSelection for camera images to avoid duplicate indicators
+                // Camera images are handled by the selectedImage indicator above
             }
         }
     }
@@ -623,7 +623,7 @@ struct MessageInputView: View {
         if isSending {
             return false
         }
-        return !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedFile != nil || selectedImageURL != nil
+        return !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedFile != nil || selectedImage != nil
     }
     
     private func sendMessage() {

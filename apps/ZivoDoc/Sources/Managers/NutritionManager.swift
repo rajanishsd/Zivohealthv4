@@ -247,10 +247,16 @@ class NutritionManager: ObservableObject {
     
     func loadWeeklyData() {
         selectedGranularity = NutritionTimeGranularity.weekly
-        // Load exactly 3 weeks: start from 3 weeks ago to get this week, last week, and 2 weeks ago
+        // Load exactly 3 weeks: start from 3 weeks ago to get the last 3 complete weeks
         let threeWeeksAgo = Calendar.current.date(byAdding: .weekOfYear, value: -3, to: Date()) ?? Date()
-        let nextWeek = Calendar.current.date(byAdding: .weekOfYear, value: 1, to: today) ?? today
-        loadChartData(startDate: threeWeeksAgo, endDate: nextWeek, granularity: NutritionTimeGranularity.weekly)
+        let today = Date()
+        
+        // Debug logging
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        print("📊 [NutritionManager] Loading weekly data from \(formatter.string(from: threeWeeksAgo)) to \(formatter.string(from: today))")
+        
+        loadChartData(startDate: threeWeeksAgo, endDate: today, granularity: NutritionTimeGranularity.weekly)
     }
     
     func loadMonthlyData() {

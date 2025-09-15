@@ -36,6 +36,16 @@ struct ContentView: View {
                     } 
                 }
             }
+        } else if !networkService.isOnboardingCompleted() {
+            // Show onboarding flow for authenticated users who haven't completed onboarding
+            OnboardingFlowView(
+                prefilledEmail: networkService.currentUserEmail,
+                prefilledFullName: networkService.currentUserFullName
+            )
+            .environmentObject(networkService)
+                .onAppear {
+                    print("📋 [ContentView] Showing onboarding flow - user is authenticated but onboarding not completed")
+                }
         } else if showingRoleSelection {
             // Show only role selection without bottom navigation
             HomeView(onRoleSelected: {
@@ -151,6 +161,7 @@ struct ContentView: View {
                         }
                     }
                     .onAppear {
+                        print("🏠 [ContentView] Showing main app - user is authenticated and onboarding completed")
                         // Configure tab bar appearance to be solid and prevent transparency
                         let tabBarAppearance = UITabBarAppearance()
                         tabBarAppearance.configureWithOpaqueBackground()
