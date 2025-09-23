@@ -28,7 +28,8 @@ class NutritionManager: ObservableObject {
     private let nutritionAPIService = NutritionAPIService.shared
     private var cancellables = Set<AnyCancellable>()
     
-    private let today = Date()
+    // DO NOT cache today's date; compute dynamically to avoid stale values after midnight
+    private var today: Date { Date() }
     
     // MARK: - Computed Properties for Health360OverviewView
     var todaysMeals: [NutritionDataResponse] {

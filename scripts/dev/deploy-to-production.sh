@@ -17,11 +17,14 @@ echo ""
 echo "📋 Step 1: Setting up production environment configuration..."
 cd "$BACKEND_DIR"
 
-if [ -f ".env.production" ]; then
+if [ -f ".env copy.production" ]; then
+    cp ".env copy.production" .env
+    echo "✅ Production environment configuration activated"
+elif [ -f ".env.production" ]; then
     cp .env.production .env
     echo "✅ Production environment configuration activated"
 else
-    echo "❌ Error: .env.production file not found"
+    echo "❌ Error: .env.production or .env copy.production file not found"
     echo "   Please create backend/.env.production with production configuration"
     exit 1
 fi

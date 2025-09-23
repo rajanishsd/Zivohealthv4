@@ -751,13 +751,6 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         - User mentions food, meals, calories, nutrition, diet, eating habits, supplements
         - User asks for dietary advice or nutritional guidance
         
-        
-        Examples:
-        - "update my nutrition data: I had a chicken salad with olive oil dressing for lunch"
-        - "retrieve my nutrition data: show me my calorie intake for this week"
-        - "analyze my nutrition: am I getting enough protein in my diet? and recommend me a meal plan"
-        - "Set Nutrition Goal: I want to start a Weight loss diet plan. Please set nutrition goals accordingly."
-        
         Args:
             prompt_with_user_input: Combined prompt that includes the operation type AND the user's actual words/input
                                    Must preserve the user's original words and context
@@ -1069,7 +1062,22 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
     - File path: {uploaded_file.get('file_path', 'Unknown')}
     """
 
+    # Build conversation context like in assess_user_intent
+    conversation_history = state.get("conversation_history", [])
+    context_info = ""
+    if conversation_history:
+        recent_history = conversation_history[-5:] if len(conversation_history) > 5 else conversation_history
+        context_info = "\n\nCONVERSATION CONTEXT:\n"
+        for msg in recent_history:
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', '')
+            context_info += f"- {role.upper()}: {content[:200]}{'...' if len(content) > 200 else ''}\n"
+        context_info += "\nUse this context to better understand the current request.\n"
+
     system_prompt = f"""You are a healthcare app assistant that coordinates with specialized agents to fulfill user requests.
+
+            Conversation history:
+            {context_info}
 
             HEALTHCARE APP SCOPE:
             The app handles these specific areas with dedicated agents:

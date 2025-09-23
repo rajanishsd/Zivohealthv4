@@ -8,8 +8,7 @@ echo "============================="
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DASHBOARD_DIR="$SCRIPT_DIR/../backend-dashboard"
-LOG_FILE="$DASHBOARD_DIR/dashboard.log"
+LOG_FILE="$SCRIPT_DIR/../logs/dashboard.log"
 
 # Color codes for output
 RED='\033[0;31m'

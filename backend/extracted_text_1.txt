@@ -1,7 +1,0 @@
-LFT Values and 2-Point Rolling Average
-ALP
-ALT (SGPT)
-AST (SGOT)
-Albumin
-Direct Bilirubin
-GGT

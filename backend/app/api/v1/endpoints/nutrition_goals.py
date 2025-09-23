@@ -397,14 +397,9 @@ def get_active_goal_progress(
         current_value = None
         if aggregate_row is not None and hasattr(aggregate_row, col_name):
             current_value = getattr(aggregate_row, col_name)
-        # Fallback: if no aggregate in the requested window, try the most recent daily aggregate in the last 7 days
-        if current_value is None and timeframe == "daily":
-            fallback_start = (end_date or date.today()) - timedelta(days=7)
-            aggregates_fb = crud_nutrition.nutrition_daily_aggregate.get_by_user_date_range(db, user_id=current_user.id, start_date=fallback_start, end_date=end_date or date.today())
-            if aggregates_fb:
-                latest = aggregates_fb[-1]
-                if hasattr(latest, col_name):
-                    current_value = getattr(latest, col_name)
+        # Do not fallback to previous days for daily timeframe.
+        # If today's aggregate doesn't exist (no meals logged yet), keep current_value as None
+        # so clients can display a clear "No Data" state for today instead of showing yesterday's values.
 
         # Compute status
         status = "no_data"

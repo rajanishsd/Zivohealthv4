@@ -22,12 +22,23 @@ locals {
     ENVIRONMENT         = var.environment
     VALID_API_KEYS_OVERRIDE = var.valid_api_keys_override
     APP_SECRET_KEY_OVERRIDE = var.app_secret_key_override
+    reminder_service_host = var.reminder_service_host
+    reminder_service_port = var.reminder_service_port
+    reminder_rabbitmq_url = var.reminder_rabbitmq_url
+    reminder_rabbitmq_exchange = var.reminder_rabbitmq_exchange
+    reminder_rabbitmq_input_queue = var.reminder_rabbitmq_input_queue
+    reminder_rabbitmq_output_queue = var.reminder_rabbitmq_output_queue
+    reminder_rabbitmq_input_routing_key = var.reminder_rabbitmq_input_routing_key
+    reminder_rabbitmq_output_routing_key = var.reminder_rabbitmq_output_routing_key
+    reminder_scheduler_scan_interval_seconds = var.reminder_scheduler_scan_interval_seconds
+    reminder_scheduler_batch_size = var.reminder_scheduler_batch_size
+    reminder_metrics_enabled = var.reminder_metrics_enabled
   })
 }
 
 resource "aws_instance" "host" {
   ami                         = data.aws_ami.ubuntu.id
-  instance_type               = "t2.micro"
+  instance_type               = "t2.small"
   subnet_id                   = var.public_subnet_id
   vpc_security_group_ids      = var.security_group_ids
   iam_instance_profile        = var.instance_profile_name
@@ -43,7 +54,7 @@ resource "aws_instance" "host" {
   }
 
   tags = {
-    Name = "${var.project}-${var.environment}-ec2"
+    Name = "${var.project}-${var.environment}-ec2-no-snapd"
   }
 }
 

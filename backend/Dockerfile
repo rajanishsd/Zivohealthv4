@@ -28,6 +28,9 @@ COPY alembic/ /app/alembic/
 COPY alembic.ini /app/
 COPY run.py /app/
 
+# Copy keys folder for FCM credentials
+COPY keys/ /app/keys/
+
 # Copy built React app from react-builder stage
 COPY --from=react-builder /app/build/ /app/www/reset-password/
 

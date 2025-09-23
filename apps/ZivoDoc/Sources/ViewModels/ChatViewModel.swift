@@ -1055,9 +1055,14 @@ class ChatViewModel: ObservableObject {
                         self.isAnalyzingFile = self.lastInteractionWasFileUpload
                     } else if statusText.contains("complete") || statusText.contains("Complete") {
                         self.currentStatus = "Complete"
-                        print("🏁 [ChatViewModel] Received complete status - keeping analysis state visible")
-                        // Don't clear analysis state immediately - let the UI show the status first
-                        // The state will be cleared when AI response is fully processed
+                        print("🏁 [ChatViewModel] Received complete status - clearing analysis state")
+                        // Clear analysis state when complete
+                        self.lastInteractionWasFileUpload = false
+                        self.isAnalyzingFile = false
+                        self.currentUploadFilename = ""
+                        self.isLoading = false
+                        self.isTyping = false
+                        self.isStreaming = false
                     } else {
                         self.currentStatus = statusText
                         self.isTyping = statusText != "error"
@@ -1079,6 +1084,12 @@ class ChatViewModel: ObservableObject {
                 if statusMessage.status == "complete" || statusMessage.status == "error" {
                     await MainActor.run {
                         self.isAnalyzingFile = false
+                        self.lastInteractionWasFileUpload = false
+                        self.currentUploadFilename = ""
+                        self.isLoading = false
+                        self.isTyping = false
+                        self.isStreaming = false
+                        print("🏁 [ChatViewModel] Final status clear - analysis complete")
                     }
                     continue
                 }

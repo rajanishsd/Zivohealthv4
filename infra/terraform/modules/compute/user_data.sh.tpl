@@ -3,165 +3,111 @@ set -e
 
 export AWS_DEFAULT_REGION=${AWS_REGION}
 
-# Install updates, awscli, and SSM Agent
+# Install updates and awscli
 apt-get update -y || true
 apt-get install -y ca-certificates curl gnupg lsb-release awscli || true
 
-# Ensure SSM Agent is installed and running (Ubuntu 22.04 ships with it, but keep idempotent)
-if ! systemctl status snap.amazon-ssm-agent.amazon-ssm-agent >/dev/null 2>&1; then
-  snap install amazon-ssm-agent || true
-  systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent || true
-fi
+# CRITICAL: Remove snapd and install traditional SSM agent
+echo "Removing snapd and installing traditional SSM agent..."
 
+# Stop and disable snapd services
+systemctl stop snapd || true
+systemctl disable snapd || true
+systemctl stop snapd.socket || true
+systemctl disable snapd.socket || true
+systemctl stop snapd.seeded || true
+systemctl disable snapd.seeded || true
+
+# Remove snap packages
+snap remove amazon-ssm-agent || true
+snap remove core20 || true
+snap remove core22 || true
+snap remove lxd || true
+snap remove snapd || true
+
+# Remove snapd package and clean up
+apt-get remove --purge -y snapd || true
+apt-get autoremove -y || true
+apt-get autoclean || true
+
+# Clean up snap directories
+rm -rf /var/lib/snapd || true
+rm -rf /snap || true
+rm -rf /home/*/snap || true
+
+# Install traditional SSM agent from AWS
+echo "Installing traditional SSM agent..."
+wget -q https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/debian_amd64/amazon-ssm-agent.deb
+dpkg -i amazon-ssm-agent.deb || true
+rm amazon-ssm-agent.deb
+
+# Enable and start traditional SSM agent
+systemctl enable amazon-ssm-agent
+systemctl start amazon-ssm-agent
+
+# Verify SSM agent is running
+systemctl status amazon-ssm-agent --no-pager || true
+
+echo "Snapd removed and traditional SSM agent installed successfully!"
+
+# Install Docker if not present
 if ! command -v docker >/dev/null 2>&1; then
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
   chmod a+r /etc/apt/keyrings/docker.gpg
-  echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-    $(. /etc/os-release && echo $VERSION_CODENAME) stable" | \
-    tee /etc/apt/sources.list.d/docker.list > /dev/null
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
   apt-get update -y
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 fi
 
 usermod -aG docker ubuntu || true
 
+# Create basic application directory
 mkdir -p /opt/zivohealth
 cd /opt/zivohealth
 
-# Write docker-compose.yml
-cat > /opt/zivohealth/docker-compose.yml <<'YAML'
-services:
-  api:
-    image: ${ECR_REPO_URL}:${IMAGE_TAG}
-    env_file:
-      - .env
-    expose:
-      - "8000"
-    restart: always
-    depends_on:
-      - redis
-  caddy:
-    image: public.ecr.aws/docker/library/caddy:2-alpine
-    restart: always
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./www:/srv/www:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - api
-  redis:
-    image: public.ecr.aws/docker/library/redis:7-alpine
-    restart: always
-volumes:
-  caddy_data:
-  caddy_config:
-YAML
+# Get database configuration from SSM parameters
+POSTGRES_SERVER=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/db/host" --query "Parameter.Value" --output text 2>/dev/null || echo "localhost")
+POSTGRES_USER=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/db/user" --query "Parameter.Value" --output text 2>/dev/null || echo "zivo")
+POSTGRES_PASSWORD=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/db/password" --query "Parameter.Value" --output text 2>/dev/null || echo "changeme")
 
-# Populate .env from SSM
-PROJECT=${PROJECT}
-ENVIRONMENT=${ENVIRONMENT}
-DB_HOST=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name /${PROJECT}/${ENVIRONMENT}/db/host --query "Parameter.Value" --output text || echo "")
-DB_USER=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name /${PROJECT}/${ENVIRONMENT}/db/user --query "Parameter.Value" --output text || echo "")
-DB_PASS=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name /${PROJECT}/${ENVIRONMENT}/db/password --query "Parameter.Value" --output text || echo "")
-S3_BUCKET=$(aws --region ${AWS_REGION} ssm get-parameter --name /${PROJECT}/${ENVIRONMENT}/s3/bucket --query "Parameter.Value" --output text || echo "")
-VALID_API_KEYS_SSM=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/api/valid_api_keys" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-
-# Optional application secrets/config from SSM (if present)
+# Get other configuration from SSM parameters
+SECRET_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/app/secret_key" --query "Parameter.Value" --output text 2>/dev/null || echo "zivohealth900")
+# VALID_API_KEYS is stored under /api/valid_api_keys
+VALID_API_KEYS=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/api/valid_api_keys" --query "Parameter.Value" --output text 2>/dev/null || echo "[]")
+# App-level HMAC secret for request signatures
+APP_SECRET_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/app/app_secret_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 OPENAI_API_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/openai/api_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-LANGCHAIN_API_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/langsmith/api_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-LANGCHAIN_PROJECT=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/langsmith/project" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-LANGCHAIN_ENDPOINT=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/langsmith/endpoint" --query "Parameter.Value" --output text 2>/dev/null || echo "")
+# LangChain and other external API keys
+LANGCHAIN_API_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/langchain/api_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 E2B_API_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/e2b/api_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-SERPAPI_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/serpapi/key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-LIVEKIT_URL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/livekit/url" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-LIVEKIT_API_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/livekit/api_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-LIVEKIT_API_SECRET=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/livekit/api_secret" --query "Parameter.Value" --output text 2>/dev/null || echo "")
+SERPAPI_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/serpapi/api_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
+AWS_ACCESS_KEY_ID=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/aws/access_key_id" --query "Parameter.Value" --output text 2>/dev/null || echo "")
+AWS_SECRET_ACCESS_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/aws/secret_access_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 
-# Create a script to fetch all SSM parameters and update .env
-cat > /opt/zivohealth/update_env_from_ssm.sh <<'SSM_SCRIPT'
-#!/bin/bash
-set -e
+# Get reminder-specific config from SSM
+REMINDER_FCM_CREDENTIALS_JSON=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/reminders/fcm_credentials_json" --query "Parameter.Value" --output text 2>/dev/null || echo "")
+REMINDER_FCM_PROJECT_ID=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/reminders/fcm_project_id" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 
-PROJECT=${PROJECT}
-ENVIRONMENT=${ENVIRONMENT}
-AWS_REGION=${AWS_REGION}
+# Create keys directory for FCM credentials
+mkdir -p /opt/zivohealth/keys
 
-# Function to get SSM parameter with fallback
-get_ssm_param() {
-  local name="$$1"
-  local default="$$2"
-  local decrypt="$${3:-false}"
-  
-  if [ "$$decrypt" = "true" ]; then
-    aws --region $$AWS_REGION ssm get-parameter --with-decryption --name "$$name" --query "Parameter.Value" --output text 2>/dev/null || echo "$$default"
-  else
-    aws --region $$AWS_REGION ssm get-parameter --name "$$name" --query "Parameter.Value" --output text 2>/dev/null || echo "$$default"
-  fi
-}
-
-# Get all configuration from SSM
-SMTP_SERVER=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/smtp_server" "")
-SMTP_PORT=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/smtp_port" "")
-SMTP_USERNAME=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/smtp_username" "")
-SMTP_PASSWORD=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/smtp_password" "" true)
-FROM_EMAIL=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/from_email" "")
-FRONTEND_URL=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/frontend_url" "")
-PASSWORD_RESET_BASE_URL=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/password_reset_base_url" "")
-PASSWORD_RESET_TOKEN_EXPIRY_MINUTES=$$(get_ssm_param "/$$PROJECT/$$ENVIRONMENT/email/password_reset_token_expiry_minutes" "")
-
-# Add email configuration to .env if not already present
-if ! grep -q "SMTP_SERVER" /opt/zivohealth/.env; then
-  echo "" >> /opt/zivohealth/.env
-  echo "# Email Configuration" >> /opt/zivohealth/.env
-  echo "SMTP_SERVER=$$SMTP_SERVER" >> /opt/zivohealth/.env
-  echo "SMTP_PORT=$$SMTP_PORT" >> /opt/zivohealth/.env
-  echo "SMTP_USERNAME=$$SMTP_USERNAME" >> /opt/zivohealth/.env
-  echo "SMTP_PASSWORD=$$SMTP_PASSWORD" >> /opt/zivohealth/.env
-  echo "FROM_EMAIL=$$FROM_EMAIL" >> /opt/zivohealth/.env
-  echo "FRONTEND_URL=$$FRONTEND_URL" >> /opt/zivohealth/.env
-  echo "PASSWORD_RESET_BASE_URL=$$PASSWORD_RESET_BASE_URL" >> /opt/zivohealth/.env
-  echo "PASSWORD_RESET_TOKEN_EXPIRY_MINUTES=$$PASSWORD_RESET_TOKEN_EXPIRY_MINUTES" >> /opt/zivohealth/.env
-fi
-SSM_SCRIPT
-
-chmod +x /opt/zivohealth/update_env_from_ssm.sh
-/opt/zivohealth/update_env_from_ssm.sh
-
-
-# Secret key: fetch from SSM if available, otherwise generate a random one for this instance
-SECRET_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/app/secret_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-if [ -z "$SECRET_KEY" ]; then
-  SECRET_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '\n')
-fi
-
-# App secret for HMAC signatures
-APP_SECRET_KEY=${APP_SECRET_KEY_OVERRIDE}
-if [ -z "$APP_SECRET_KEY" ]; then
-  APP_SECRET_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/app/app_secret_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-fi
-if [ -z "$APP_SECRET_KEY" ]; then
-  APP_SECRET_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '\n')
-fi
-
-# --- API keys: use SSM if present, otherwise generate one so the system is usable ---
-if [ -n "${VALID_API_KEYS_OVERRIDE}" ]; then
-  VALID_API_KEYS="${VALID_API_KEYS_OVERRIDE}"
-elif [ -n "$VALID_API_KEYS_SSM" ]; then
-  VALID_API_KEYS="$VALID_API_KEYS_SSM"
+# Write FCM credentials to file if available from SSM
+if [ -n "$${REMINDER_FCM_CREDENTIALS_JSON}" ] && [ "$${REMINDER_FCM_CREDENTIALS_JSON}" != "" ]; then
+    echo "$${REMINDER_FCM_CREDENTIALS_JSON}" > /opt/zivohealth/keys/fcm-credentials.json
+    chmod 600 /opt/zivohealth/keys/fcm-credentials.json
+    FCM_CREDENTIALS_PATH="/opt/zivohealth/keys/fcm-credentials.json"
 else
-  GEN_KEY=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32)
-  VALID_API_KEYS="[\"$GEN_KEY\"]"
-  echo "{\"api_keys\": [$GEN_KEY]}" > /opt/zivohealth/generated_api_keys.json || true
+    # Create a default empty file if no credentials available
+    echo "{}" > /opt/zivohealth/keys/fcm-credentials.json
+    chmod 600 /opt/zivohealth/keys/fcm-credentials.json
+    FCM_CREDENTIALS_PATH="/opt/zivohealth/keys/fcm-credentials.json"
 fi
 
-# AI Model Configuration will be added by the update script
+# Note: The keys from backend/keys/ are copied into the Docker image during build
+# and will be available at /app/keys/ inside the container
 
+# Create comprehensive .env file with all required variables
 cat > /opt/zivohealth/.env <<ENV
 # Project Information
 PROJECT_NAME=ZivoHealth
@@ -172,37 +118,35 @@ API_V1_STR=/api/v1
 # Server settings
 SERVER_HOST=0.0.0.0
 SERVER_PORT=8000
-PROCESS_PENDING_ON_STARTUP=false
+
+# Security
+SECRET_KEY=$${SECRET_KEY}
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# Database
+POSTGRES_SERVER=$${POSTGRES_SERVER}
+POSTGRES_PORT=5432
+POSTGRES_USER=$${POSTGRES_USER}
+POSTGRES_PASSWORD=$${POSTGRES_PASSWORD}
+POSTGRES_DB=zivohealth_dev
 
 # Redis
 REDIS_HOST=redis
 REDIS_PORT=6379
 REDIS_DB=0
+REDIS_URL=redis://redis:6379/0
 
-# Database
-POSTGRES_SERVER=$${DB_HOST}
-POSTGRES_PORT=5432
-POSTGRES_DB=$${PROJECT}_$${ENVIRONMENT}
-POSTGRES_USER=$${DB_USER}
-POSTGRES_PASSWORD=$${DB_PASS}
+# OpenAI
+# Quote to avoid any accidental truncation or parsing issues (e.g., keys starting with sk-)
+OPENAI_API_KEY="$${OPENAI_API_KEY}"
 
-# Security
-SECRET_KEY=$${SECRET_KEY}
-APP_SECRET_KEY=$${APP_SECRET_KEY}
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-VALID_API_KEYS=$${VALID_API_KEYS}
-REQUIRE_API_KEY=true
-REQUIRE_APP_SIGNATURE=false
-
-# AWS
-AWS_DEFAULT_REGION=${AWS_REGION}
-AWS_REGION=${AWS_REGION}
-AWS_S3_BUCKET=$${S3_BUCKET}
-USE_S3_UPLOADS=true
-
-# File Uploads
-UPLOADS_S3_PREFIX=
+# AWS Configuration
+AWS_ACCESS_KEY_ID=$${AWS_ACCESS_KEY_ID}
+AWS_SECRET_ACCESS_KEY=$${AWS_SECRET_ACCESS_KEY}
+AWS_DEFAULT_REGION=$${AWS_REGION}
+AWS_REGION=$${AWS_REGION}
+AWS_S3_BUCKET=zivohealth-data
 
 # OCR Configuration
 OCR_PROVIDER=aws_textract
@@ -210,98 +154,274 @@ OCR_TIMEOUT=120
 OCR_MAX_FILE_SIZE=10485760
 
 # CORS
-CORS_ORIGINS=["https://app.zivohealth.ai", "https://www.zivohealth.ai", "https://zivohealth.ai"]
+CORS_ORIGINS=["http://localhost:3000", "http://localhost:8000", "http://127.0.0.1:3000", "http://127.0.0.1:8000"]
 
 # WebSocket
 WS_MESSAGE_QUEUE=chat_messages
 
+# AI MODEL CONFIGURATION
+BASE_AGENT_MODEL=o4-mini
+BASE_AGENT_TEMPERATURE=1
+LAB_AGENT=o4-mini
+LAB_AGENT_TEMPERATURE=1
+CUSTOMER_AGENT_MODEL=gpt-4o-mini
+CUSTOMER_AGENT_TEMPERATURE=0.3
+MEDICAL_DOCTOR_MODEL=gpt-4o-mini
+MEDICAL_DOCTOR_TEMPERATURE=0.1
+DOCUMENT_WORKFLOW_MODEL=gpt-4o-mini
+DOCUMENT_WORKFLOW_TEMPERATURE=0.1
+OPENAI_CLIENT_MODEL=gpt-4o-mini
+DEFAULT_AI_MODEL=gpt-4o-mini
+
 # Vitals Aggregation
-VITALS_BATCH_SIZE=20000
 VITALS_AGGREGATION_DELAY_BULK=60
 VITALS_AGGREGATION_DELAY_INCREMENTAL=15
+VITALS_BATCH_SIZE=20000
+PROCESS_PENDING_ON_STARTUP=False
 
-# Optional Integrations (populated from SSM if available)
-OPENAI_API_KEY=$${OPENAI_API_KEY}
+# LangSmith Configuration
 LANGCHAIN_TRACING_V2=true
-LANGCHAIN_ENDPOINT=$${LANGCHAIN_ENDPOINT}
-LANGCHAIN_PROJECT=$${LANGCHAIN_PROJECT}
-LANGCHAIN_API_KEY=$${LANGCHAIN_API_KEY}
-E2B_API_KEY=$${E2B_API_KEY}
-SERPAPI_KEY=$${SERPAPI_KEY}
-LIVEKIT_URL=$${LIVEKIT_URL}
-LIVEKIT_API_KEY=$${LIVEKIT_API_KEY}
-LIVEKIT_API_SECRET=$${LIVEKIT_API_SECRET}
+LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
+LANGCHAIN_PROJECT=zivohealth-document-workflow
+LANGCHAIN_API_KEY="$${LANGCHAIN_API_KEY}"
 
-# Email Configuration and AI Model Configuration will be added by the update script
+# Lab Aggregation Agent
+LAB_AGGREGATION_AGENT_MODEL=o4-mini
+LAB_AGGREGATION_AGENT_TEMPERATURE=0.1
+
+# Nutrition Agent
+NUTRITION_VISION_MODEL=gpt-4.1-mini
+NUTRITION_AGENT_MODEL=o4-mini
+
+# External APIs
+E2B_API_KEY="$${E2B_API_KEY}"
+SERPAPI_KEY="$${SERPAPI_KEY}"
+
+# Vitals Agent Models
+VITALS_VISION_MODEL=gpt-4.1-mini
+VITALS_AGENT_MODEL=o4-mini
+
+# Prescription Clinical Agent Models
+PRESCRIPTION_CLINICAL_AGENT_MODEL=o4-mini
+PRESCRIPTION_CLINICAL_VISION_MODEL=gpt-4.1-mini
+PRESCRIPTION_CLINICAL_VISION_MAX_TOKENS=4000
+
+# Pharmacy Agent Models
+PHARMACY_AGENT_MODEL=o4-mini
+PHARMACY_VISION_MODEL=gpt-4.1-mini
+
+# LiveKit Configuration
+LIVEKIT_URL=ws://192.168.0.100:7880
+LIVEKIT_API_KEY=devkey
+LIVEKIT_API_SECRET=devsecret
+
+# S3 Configuration
+UPLOADS_S3_PREFIX=uploads/chat
+
+# API Security
+VALID_API_KEYS=$${VALID_API_KEYS}
+APP_SECRET_KEY=$${APP_SECRET_KEY}
+REQUIRE_API_KEY=true
+REQUIRE_APP_SIGNATURE=true
+
+# Email Configuration
+SMTP_SERVER=smtp.zoho.in
+SMTP_PORT=587
+SMTP_USERNAME=rajanish@zivohealth.ai
+SMTP_PASSWORD="${smtp_password}"
+FROM_EMAIL=rajanish@zivohealth.ai
+FRONTEND_URL=https://zivohealth.ai
+PASSWORD_RESET_TOKEN_EXPIRY_MINUTES=30
+
+# Password Reset App Configuration
+PASSWORD_RESET_APP_DIR=www/reset-password
+
+# Reminder Service Configuration
+REMINDER_SERVICE_HOST=${reminder_service_host}
+REMINDER_SERVICE_PORT=${reminder_service_port}
+REMINDER_RABBITMQ_URL=${reminder_rabbitmq_url}
+REMINDER_RABBITMQ_EXCHANGE=${reminder_rabbitmq_exchange}
+REMINDER_RABBITMQ_INPUT_QUEUE=${reminder_rabbitmq_input_queue}
+REMINDER_RABBITMQ_OUTPUT_QUEUE=${reminder_rabbitmq_output_queue}
+REMINDER_RABBITMQ_INPUT_ROUTING_KEY=${reminder_rabbitmq_input_routing_key}
+REMINDER_RABBITMQ_OUTPUT_ROUTING_KEY=${reminder_rabbitmq_output_routing_key}
+REMINDER_SCHEDULER_SCAN_INTERVAL_SECONDS=${reminder_scheduler_scan_interval_seconds}
+REMINDER_SCHEDULER_BATCH_SIZE=${reminder_scheduler_batch_size}
+REMINDER_METRICS_ENABLED=${reminder_metrics_enabled}
+REMINDER_WORKER_CONCURRENCY=4
+REMINDER_FCM_CREDENTIALS_JSON=/app/keys/fcm-credentials.json
+REMINDER_FCM_PROJECT_ID=$${REMINDER_FCM_PROJECT_ID}
+GOOGLE_APPLICATION_CREDENTIALS=/app/keys/fcm-credentials.json
 ENV
 
-# Ensure compose image variables are available from .env as well
-echo "ECR_REPO_URL=${ECR_REPO_URL}" >> /opt/zivohealth/.env
-echo "IMAGE_TAG=${IMAGE_TAG}" >> /opt/zivohealth/.env
+# Create docker-compose.yml with reminder service
+cat > /opt/zivohealth/docker-compose.yml <<COMPOSE
+version: '3.8'
 
-# Prepare static site content for apex/www
-mkdir -p /opt/zivohealth/www
-cat > /opt/zivohealth/www/index.html <<'HTML'
+services:
+  # Main backend API
+  api:
+    image: $${ECR_REPO_URL:-zivohealth-backend}:$${IMAGE_TAG:-latest}
+    container_name: zivohealth-api
+    ports:
+      - "8000:8000"
+    environment:
+      - AWS_DEFAULT_REGION=${AWS_REGION}
+    env_file:
+      - .env
+    volumes:
+      - ./keys:/app/keys:ro
+    depends_on:
+      - redis
+      - rabbitmq
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-HTML
+  # Reminder service API
+  reminders:
+    image: $${ECR_REPO_URL:-zivohealth-backend}:$${IMAGE_TAG:-latest}
+    container_name: zivohealth-reminders
+    ports:
+      - "${reminder_service_port}:${reminder_service_port}"
+    environment:
+      - AWS_DEFAULT_REGION=${AWS_REGION}
+    env_file:
+      - .env
+    volumes:
+      - ./keys:/app/keys:ro
+    command: ["python", "-m", "uvicorn", "app.reminders.service:app", "--host", "0.0.0.0", "--port", "${reminder_service_port}"]
+    depends_on:
+      - redis
+      - rabbitmq
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${reminder_service_port}/api/v1/reminders/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-# Write Caddyfile for automatic HTTPS, with API on api.zivohealth.ai and static apex/www
-cat > /opt/zivohealth/Caddyfile <<'CADDY'
+  # Reminder Celery worker
+  reminders-worker:
+    image: $${ECR_REPO_URL:-zivohealth-backend}:$${IMAGE_TAG:-latest}
+    container_name: zivohealth-reminders-worker
+    environment:
+      - AWS_DEFAULT_REGION=${AWS_REGION}
+    env_file:
+      - .env
+    volumes:
+      - ./keys:/app/keys:ro
+    command: ["python", "-m", "celery", "-A", "app.reminders.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "reminders.input.v1,reminders.output.v1", "--concurrency=4"]
+    depends_on:
+      - redis
+      - rabbitmq
+    restart: unless-stopped
+
+  # Reminder Celery beat scheduler
+  reminders-beat:
+    image: $${ECR_REPO_URL:-zivohealth-backend}:$${IMAGE_TAG:-latest}
+    container_name: zivohealth-reminders-beat
+    environment:
+      - AWS_DEFAULT_REGION=${AWS_REGION}
+    env_file:
+      - .env
+    volumes:
+      - ./keys:/app/keys:ro
+    command: ["python", "-m", "celery", "-A", "app.reminders.celery_app:celery_app", "beat", "--loglevel=INFO"]
+    depends_on:
+      - redis
+      - rabbitmq
+    restart: unless-stopped
+
+  # Note: PostgreSQL is managed by RDS, not docker-compose
+
+  # Redis for caching and Celery
+  redis:
+    image: redis:7-alpine
+    container_name: zivohealth-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  # RabbitMQ for Celery message broker
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: zivohealth-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    restart: unless-stopped
+
+  # Caddy reverse proxy
+  caddy:
+    image: public.ecr.aws/docker/library/caddy:2-alpine
+    container_name: zivohealth-caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    environment:
+      - REMINDER_SERVICE_PORT=${reminder_service_port}
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+# No volumes needed since PostgreSQL is managed by RDS
+COMPOSE
+
+# Create Caddyfile for reverse proxy
+cat > /opt/zivohealth/Caddyfile <<CADDY
 api.zivohealth.ai {
-  encode zstd gzip
-  reverse_proxy api:8000
+    encode zstd gzip
+
+    @reminders path /api/v1/reminders*
+    handle @reminders {
+        reverse_proxy reminders:{$REMINDER_SERVICE_PORT}
+    }
+
+    reverse_proxy api:8000
 }
 
 zivohealth.ai, www.zivohealth.ai {
-  encode zstd gzip
-  
-  # Route password reset requests to backend API
-  handle /reset-password* {
-    reverse_proxy api:8000
-  }
-  
-  # Serve all other requests as static files
-  root * /srv/www
-  file_server
+    encode zstd gzip
+
+    # Route password reset requests to backend API
+    handle /reset-password* {
+        reverse_proxy api:8000
+    }
+
+    # Route Reminders API to reminders service
+    handle /api/v1/reminders* {
+        reverse_proxy reminders:{$REMINDER_SERVICE_PORT}
+    }
+
+    # Route other API requests to backend
+    handle /api/* {
+        reverse_proxy api:8000
+    }
+
+    # Route health checks to backend
+    handle /health {
+        reverse_proxy api:8000
+    }
+
+    # Serve all other requests as static files
+    root * /srv/www
+    file_server
 }
 CADDY
 
-# Systemd service
-cat > /etc/systemd/system/zivohealth.service <<'UNIT'
-[Unit]
-Description=ZivoHealth Docker Compose
-After=network.target docker.service
-Requires=docker.service
-
-[Service]
-Type=oneshot
-WorkingDirectory=/opt/zivohealth
-Environment=ECR_REPO_URL=${ECR_REPO_URL}
-Environment=IMAGE_TAG=${IMAGE_TAG}
-ExecStartPre=/bin/bash -lc '/usr/bin/aws ecr get-login-password --region ${AWS_REGION} | /usr/bin/docker login --username AWS --password-stdin $(echo ${ECR_REPO_URL} | cut -d"/" -f1)'
-ExecStartPre=/usr/bin/docker pull public.ecr.aws/docker/library/redis:7-alpine
-ExecStart=/usr/bin/docker compose up -d
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-systemctl daemon-reload
-systemctl enable --now zivohealth.service
-
-# Wait for services to start
-sleep 30
-
-# Deploy password reset app
-echo "🚀 Deploying password reset app..."
-mkdir -p /srv/www
-docker cp zivohealth-api-1:/app/www/reset-password /srv/www/ || echo "⚠️ Password reset app not found in container"
-chown -R root:root /srv/www/reset-password
-chmod -R 755 /srv/www/reset-password
-
-# Restart Caddy to pick up the new files
-docker restart zivohealth-caddy-1
-
-echo "✅ Password reset app deployment completed!"
-
+echo "Docker Compose configuration created with reminder service and Caddy reverse proxy!"

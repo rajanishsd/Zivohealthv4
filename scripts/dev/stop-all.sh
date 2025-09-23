@@ -177,6 +177,18 @@ stop_postgresql() {
     fi
 }
 
+# Function to stop RabbitMQ (Homebrew service)
+stop_rabbitmq() {
+    print_status "Stopping RabbitMQ broker..."
+    if command -v brew >/dev/null 2>&1; then
+        brew services stop rabbitmq >/dev/null 2>&1 || true
+        sleep 1
+        kill_port "5672" "RabbitMQ"
+    else
+        kill_port "5672" "RabbitMQ"
+    fi
+}
+
 # Function to cleanup any remaining processes
 cleanup_remaining() {
     print_status "Cleaning up any remaining processes..."
@@ -199,6 +211,18 @@ cleanup_remaining() {
     print_success "Cleanup complete"
 }
 
+# Function to stop Reminders service
+stop_reminders() {
+    print_status "Stopping Reminders service..."
+    if [ -f "backend/scripts/stop_reminders.sh" ]; then
+        ./backend/scripts/stop_reminders.sh > /dev/null 2>&1 || true
+    else
+        # Fallback: kill ports/processes (8085 for API; Celery worker/beat by PID files)
+        kill_port "8085" "Reminders API"
+        pkill -f "celery.*app.reminders.celery_app" 2>/dev/null || true
+    fi
+}
+
 # Function to stop individual service
 stop_service() {
     local service=$1
@@ -216,9 +240,12 @@ stop_service() {
         "postgresql"|"postgres")
             stop_postgresql
             ;;
+        "reminders")
+            stop_reminders
+            ;;
         *)
             print_error "Unknown service: $service"
-            print_status "Available services: dashboard, backend, redis, postgresql"
+            print_status "Available services: dashboard, backend, redis, postgresql, reminders"
             exit 1
             ;;
     esac
@@ -246,10 +273,16 @@ main() {
     stop_dashboard
     echo ""
     
+    stop_reminders
+    echo ""
+    
     stop_backend
     echo ""
     
     stop_redis
+    echo ""
+    
+    stop_rabbitmq
     echo ""
     
     stop_postgresql
@@ -277,6 +310,14 @@ main() {
     else
         echo "✅ Backend: Stopped"
     fi
+
+    # Reminders API status (port 8085)
+    if check_service_running "Reminders API" "8085"; then
+        echo "❌ Reminders: Still running on port 8085"
+        all_stopped=false
+    else
+        echo "✅ Reminders: Stopped"
+    fi
     
     if check_service_running "Redis" "6379"; then
         echo "❌ Redis: Still running on port 6379"
@@ -290,6 +331,13 @@ main() {
         all_stopped=false
     else
         echo "✅ PostgreSQL: Stopped"
+    fi
+
+    # Password Reset App status (built assets presence)
+    if [ -d "backend/www/reset-password" ] || [ -d "backend/password-reset-app/build" ]; then
+        echo "ℹ️  Password Reset App: Built assets present"
+    else
+        echo "ℹ️  Password Reset App: No built assets"
     fi
     
     echo ""

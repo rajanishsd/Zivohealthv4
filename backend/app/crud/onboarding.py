@@ -55,6 +55,8 @@ def submit_onboarding(db: Session, user: User, payload: OnboardingPayload, *, ip
     profile.activity_level = payload.basic.activity_level
     profile.phone_number = payload.basic.phone_number
     profile.timezone = payload.basic.timezone
+    # Mark onboarding as completed when full payload is submitted
+    profile.onboarding_status = 'completed'
 
     # Lifestyle upsert
     lifestyle = db.query(UserLifestyle).filter(UserLifestyle.user_id == user.id).first()

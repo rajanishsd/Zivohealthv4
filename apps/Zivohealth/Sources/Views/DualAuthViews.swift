@@ -100,6 +100,15 @@ struct DualLoginView: View {
         .navigationBarTitleDisplayMode(.inline)
         .modifier(HideNavBarCompat())
         .background(Color.white)
+        .sheet(isPresented: $showOnboarding, onDismiss: {
+            onSuccess()
+        }) {
+            OnboardingFlowView(
+                prefilledEmail: email,
+                prefilledFullName: GoogleSignInService.shared.currentUser?.profile?.name
+            )
+            .environmentObject(NetworkService.shared)
+        }
     }
     
     // MARK: - Method Selection View
@@ -412,7 +421,12 @@ struct DualLoginView: View {
                 NetworkService.shared.handleRoleChange()
                 _ = try await NetworkService.shared.loginWithPassword(email: email, password: password)
                 await MainActor.run {
-                    if !NetworkService.shared.isOnboardingCompleted() { showOnboarding = true } else { onSuccess() }
+                    isLoading = false
+                    if !NetworkService.shared.isOnboardingCompleted() {
+                        showOnboarding = true
+                    } else {
+                        onSuccess()
+                    }
                 }
             } catch {
                 await MainActor.run {

@@ -41,10 +41,20 @@ restart_service() {
     case $service in
         "dashboard")
             print_status "Restarting dashboard only..."
-            if [ -f "backend/scripts/restart_dashboard.sh" ]; then
-                ./backend/scripts/restart_dashboard.sh
+            if [ -f "./scripts/dev/stop-all.sh" ]; then
+                ./scripts/dev/stop-all.sh "dashboard"
             else
-                print_error "Dashboard restart script not found!"
+                print_error "Stop script not found!"
+                exit 1
+            fi
+            echo ""
+            print_status "Waiting 3 seconds before restart..."
+            sleep 3
+            echo ""
+            if [ -f "./scripts/dev/start-all.sh" ]; then
+                ./scripts/dev/start-all.sh "dashboard"
+            else
+                print_error "Start script not found!"
                 exit 1
             fi
             ;;
@@ -80,9 +90,28 @@ restart_service() {
                 exit 1
             fi
             ;;
+        "reminders")
+            print_status "Restarting reminders only..."
+            if [ -f "./scripts/dev/stop-all.sh" ]; then
+                ./scripts/dev/stop-all.sh "reminders"
+            else
+                print_error "Stop script not found!"
+                exit 1
+            fi
+            echo ""
+            print_status "Waiting 3 seconds before restart..."
+            sleep 3
+            echo ""
+            if [ -f "./scripts/dev/start-all.sh" ]; then
+                ./scripts/dev/start-all.sh "reminders"
+            else
+                print_error "Start script not found!"
+                exit 1
+            fi
+            ;;
         *)
             print_error "Unknown service: $service"
-            print_status "Available services: postgresql, redis, password-reset, backend, dashboard"
+            print_status "Available services: postgresql, redis, password-reset, backend, reminders, dashboard"
             exit 1
             ;;
     esac
@@ -133,7 +162,7 @@ main() {
     echo ""
     echo "💡 Tip: You can restart individual services with:"
     echo "   ./scripts/dev/restart-all.sh [service]"
-    echo "   Available services: postgresql, redis, password-reset, backend, dashboard"
+    echo "   Available services: postgresql, redis, password-reset, backend, reminders, dashboard"
 }
 
 # Run main function

@@ -33,6 +33,7 @@ public class NetworkService: ObservableObject {
     @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
     @AppStorage("lastKnownApiEndpoint") private var lastKnownApiEndpoint: String = AppConfig.defaultAPIEndpoint
     @AppStorage("userMode") private var userMode: UserMode = .patient
+    @AppStorage("hasLaunchedBefore") private var hasLaunchedBefore: Bool = false
     
     // Use Keychain for secure token storage
     private let keychain = KeychainService.shared
@@ -41,12 +42,14 @@ public class NetworkService: ObservableObject {
     private var cachedAuthToken: String?
     private var lastTokenCacheTime: Date?
     private let tokenCacheValidityDuration: TimeInterval = 5.0 // Cache for 5 seconds
+    // In-memory fallback for token expiration to bridge immediate post-login window
+    private var inMemoryTokenExpiry: Date?
     
-    // API Key for ZivoHealth iOS app
-    private let apiKey = "UMYpN67NeR0W13cP13O62Mn04yG3tpEx" // Replace with actual key from generate_api_keys.py
+    // API Key for ZivoHealth iOS app (moved to AppConfig)
+    private let apiKey = AppConfig.apiKey
     
     // App Secret for HMAC signature (optional - set to nil to disable)
-    private let appSecret = "c7357b83f692134381cbd7cadcd34be9c6150121aa274599317b5a1283c0205f" // Replace with actual secret from generate_api_keys.py
+    private let appSecret = AppConfig.appSecret
     
     // HMAC signature configuration
     private let enableHMAC = true // Set to false to disable HMAC signatures
@@ -171,20 +174,20 @@ public class NetworkService: ObservableObject {
         }
     }
 
-    // Role-based demo credentials
-    private var currentCredentials: (email: String, password: String, name: String) {
-        switch userMode {
-        case .patient:
-            return ("patient@zivohealth.com", "patient123", "Demo Patient")
-        case .doctor:
-            return ("doctor@zivohealth.com", "doctor123", "Demo Doctor")
-        }
-    }
+    // Removed legacy demo credentials fallback
 
     // Compute baseURL dynamically so endpoint changes take effect immediately
     private var baseURL: String { "\(apiEndpoint)\(apiVersion)" }
 
     private init() {
+        // On a true fresh install, UserDefaults are empty but Keychain may persist from prior installs.
+        // Ensure we clear any lingering tokens once on the very first launch after install.
+        if !hasLaunchedBefore {
+            print("🧼 [NetworkService] First launch detected - clearing any lingering keychain tokens")
+            clearAllTokens()
+            hasLaunchedBefore = true
+        }
+
         // Check if we should force clear tokens on app launch
         if AppConfig.shouldClearTokensOnAppLaunch {
             print("🧹 [NetworkService] shouldClearTokensOnAppLaunch=true - clearing all tokens on app launch")
@@ -233,6 +236,15 @@ public class NetworkService: ObservableObject {
         do {
             try await ensureAuthentication()
             print("✅ [NetworkService] Authentication initialized successfully")
+            
+            // If authenticated, check onboarding status from backend
+            if isAuthenticated() {
+                print("🔍 [NetworkService] User is authenticated, checking backend onboarding status...")
+                let backendOnboardingStatus = await checkOnboardingStatusFromBackend()
+                print("🔍 [NetworkService] Backend onboarding status result: \(backendOnboardingStatus)")
+            } else {
+                print("🔍 [NetworkService] User is not authenticated, skipping backend onboarding check")
+            }
         } catch {
             print("ℹ️ [NetworkService] No valid authentication available on startup: \(error)")
         }
@@ -384,30 +396,57 @@ public class NetworkService: ObservableObject {
             return true
         }
         
+        // Fast path: if we have a recent in-memory expiry, use it first
+        if let expiry = inMemoryTokenExpiry {
+            let isExpired = Date() >= expiry
+            print("🔍 [NetworkService] Using in-memory token expiry - expiresAt: \(expiry), isExpired: \(isExpired)")
+            return isExpired
+        }
+
         // Check token info for expiration
         let key = (userMode == .patient) ? "patient_token_info" : "doctor_token_info"
-        if let tokenData = UserDefaults.standard.data(forKey: key),
-           let tokenInfo = try? decoder.decode(TokenInfo.self, from: tokenData) {
-            let isExpired = Date() >= tokenInfo.expiresAt
-            print("🔍 [NetworkService] Token expiration check - expiresAt: \(tokenInfo.expiresAt), isExpired: \(isExpired)")
-            return isExpired
+        print("🔍 [NetworkService] Checking token expiration for key: \(key)")
+        
+        if let tokenData = UserDefaults.standard.data(forKey: key) {
+            print("🔍 [NetworkService] Found token data in UserDefaults, attempting to decode...")
+            do {
+                let tokenInfo = try decoder.decode(TokenInfo.self, from: tokenData)
+                let isExpired = Date() >= tokenInfo.expiresAt
+                print("🔍 [NetworkService] Token expiration check - expiresAt: \(tokenInfo.expiresAt), isExpired: \(isExpired)")
+                return isExpired
+            } catch {
+                print("❌ [NetworkService] Failed to decode token info: \(error)")
+                // If we can't decode the token info, consider it expired
+                return true
+            }
+        } else {
+            print("🔍 [NetworkService] No token data found in UserDefaults for key: \(key)")
         }
         
         // Fallback: try legacy/interpolated key if present
-        if let legacyData = UserDefaults.standard.data(forKey: "\(userMode)_token_info"),
-           let legacyInfo = try? decoder.decode(TokenInfo.self, from: legacyData) {
-            // Migrate to explicit key
-            UserDefaults.standard.set(legacyData, forKey: key)
-            UserDefaults.standard.removeObject(forKey: "\(userMode)_token_info")
-            let isExpired = Date() >= legacyInfo.expiresAt
-            print("🔍 [NetworkService] Legacy token expiration check - expiresAt: \(legacyInfo.expiresAt), isExpired: \(isExpired)")
-            return isExpired
+        let legacyKey = "\(userMode)_token_info"
+        if let legacyData = UserDefaults.standard.data(forKey: legacyKey) {
+            print("🔍 [NetworkService] Found legacy token data for key: \(legacyKey)")
+            do {
+                let legacyInfo = try decoder.decode(TokenInfo.self, from: legacyData)
+                // Migrate to explicit key
+                UserDefaults.standard.set(legacyData, forKey: key)
+                UserDefaults.standard.removeObject(forKey: legacyKey)
+                let isExpired = Date() >= legacyInfo.expiresAt
+                print("🔍 [NetworkService] Legacy token expiration check - expiresAt: \(legacyInfo.expiresAt), isExpired: \(isExpired)")
+                return isExpired
+            } catch {
+                print("❌ [NetworkService] Failed to decode legacy token info: \(error)")
+                return true
+            }
+        } else {
+            print("🔍 [NetworkService] No legacy token data found for key: \(legacyKey)")
         }
         
-        // If we have a token but no expiration info, assume it's valid for now
-        // This handles the case where token info wasn't saved properly
-        print("🔍 [NetworkService] No token info found but token exists, assuming valid")
-        return false
+        // If we have a token but no expiration info, treat as expired to force re-authentication.
+        // This ensures first launch shows login, and subsequent launches properly refresh/restore.
+        print("🔍 [NetworkService] No token expiration metadata found; treating token as expired")
+        return true
     }
 
     private func tryRefreshAccessTokenIfNeeded() async -> Bool {
@@ -447,11 +486,29 @@ public class NetworkService: ObservableObject {
 
     private func saveTokenInfo(_ tokenResponse: TokenResponse) {
         let tokenInfo = TokenInfo(from: tokenResponse)
-        if let encoded = try? encoder.encode(tokenInfo) {
+        print("🔐 [NetworkService] Saving token info for \(userMode) - expiresAt: \(tokenInfo.expiresAt)")
+        
+        // Update in-memory expiry immediately to avoid UI race with UserDefaults persistence
+        inMemoryTokenExpiry = tokenInfo.expiresAt
+
+        do {
+            let encoded = try encoder.encode(tokenInfo)
             let key = (userMode == .patient) ? "patient_token_info" : "doctor_token_info"
             UserDefaults.standard.set(encoded, forKey: key)
             // Clean up any legacy key
             UserDefaults.standard.removeObject(forKey: "\(userMode)_token_info")
+            
+            // Force synchronization
+            UserDefaults.standard.synchronize()
+            
+            // Verify the data was actually saved
+            if let savedData = UserDefaults.standard.data(forKey: key) {
+                print("✅ [NetworkService] Token info saved successfully to UserDefaults key: \(key), data size: \(savedData.count) bytes")
+            } else {
+                print("❌ [NetworkService] Token info save verification failed - no data found in UserDefaults")
+            }
+        } catch {
+            print("❌ [NetworkService] Failed to encode token info: \(error)")
         }
     }
 
@@ -459,6 +516,7 @@ public class NetworkService: ObservableObject {
         let key = (userMode == .patient) ? "patient_token_info" : "doctor_token_info"
         UserDefaults.standard.removeObject(forKey: key)
         UserDefaults.standard.removeObject(forKey: "\(userMode)_token_info")
+        inMemoryTokenExpiry = nil
     }
 
     public func clearAuthToken() {
@@ -506,6 +564,14 @@ public class NetworkService: ObservableObject {
     /// Update the published authentication state
     public func updateAuthenticationState() {
         Task { @MainActor in
+            // Debug: Check what's in UserDefaults before calling isAuthenticated
+            let key = (userMode == .patient) ? "patient_token_info" : "doctor_token_info"
+            if let data = UserDefaults.standard.data(forKey: key) {
+                print("🔍 [NetworkService] updateAuthenticationState - Found token data in UserDefaults, size: \(data.count) bytes")
+            } else {
+                print("🔍 [NetworkService] updateAuthenticationState - No token data found in UserDefaults for key: \(key)")
+            }
+            
             isAuthenticatedState = isAuthenticated()
         }
     }
@@ -559,7 +625,7 @@ public class NetworkService: ObservableObject {
 
         // Don't clear the token anymore - each role keeps its own token
         if authToken.isEmpty {
-            print("💡 [NetworkService] No token for \(userMode), will authenticate with \(currentCredentials.email) on next API call")
+            print("💡 [NetworkService] No token for \(userMode)")
         } else {
             print("✅ [NetworkService] Using existing token for \(userMode)")
         }
@@ -580,7 +646,7 @@ public class NetworkService: ObservableObject {
         let doctorToken = (userMode == .doctor) ? authToken : (keychain.retrieveToken(for: .doctor) ?? "")
         print("   Patient Token: \(patientToken.isEmpty ? "Empty" : "Exists (\(patientToken.count) chars)")")
         print("   Doctor Token: \(doctorToken.isEmpty ? "Empty" : "Exists (\(doctorToken.count) chars)")")
-        print("   Current Credentials: \(currentCredentials.email)")
+        // Removed currentCredentials demo logging
         print("   API Endpoint: \(apiEndpoint)")
         print("   AppConfig Environment: \(AppConfig.Environment.current)")
         print("   AppConfig Default Endpoint: \(AppConfig.defaultAPIEndpoint)")
@@ -1195,6 +1261,27 @@ public class NetworkService: ObservableObject {
         return onboardingCompleted
     }
     
+    /// Check onboarding status from backend
+    public func checkOnboardingStatusFromBackend() async -> Bool {
+        print("🔍 [NetworkService] Checking onboarding status from backend (/onboarding/status)")
+        
+        struct OnboardingStatusResponse: Decodable { let completed: Bool }
+        
+        do {
+            let data = try await get("/onboarding/status", requiresAuth: true)
+            let status = try decoder.decode(OnboardingStatusResponse.self, from: data)
+            print("🔍 [NetworkService] Backend onboarding status: \(status.completed)")
+            
+            await MainActor.run {
+                onboardingCompleted = status.completed
+            }
+            return status.completed
+        } catch {
+            print("❌ [NetworkService] Failed to check onboarding status from backend: \(error)")
+            return onboardingCompleted
+        }
+    }
+    
     public func markOnboardingCompleted() {
         print("✅ [NetworkService] Marking onboarding as completed")
         onboardingCompleted = true
@@ -1315,15 +1402,8 @@ public extension NetworkService {
 
         // Fallback for other modes if needed
         print("🔐 [NetworkService] No valid auth token found for \(userMode), attempting authentication...")
-        print("👤 [NetworkService] Will try to authenticate as: \(currentCredentials.email)")
-        do {
-            let token = try await loginWithPassword(email: currentCredentials.email, password: currentCredentials.password)
-            print("✅ [NetworkService] Successfully authenticated \(userMode) with token length: \(token.count)")
-            return
-        } catch {
-            print("❌ [NetworkService] Auto-authentication failed: \(error)")
-            throw NetworkError.authenticationFailed
-        }
+        // No demo fallback: require interactive authentication
+        throw NetworkError.authenticationFailed
     }
 
 
@@ -2225,6 +2305,8 @@ extension NetworkService {
             // Store tokens in Keychain
             authToken = response.tokens.accessToken
             _ = keychain.storeRefreshToken(response.tokens.refreshToken, for: userMode)
+            // Store user id for Reminders device registration
+            _ = KeychainService.shared.store(key: "zivo_user_id", value: String(response.user.id))
             
             // Save token info
             let tokenResponse = TokenResponse(
@@ -2234,13 +2316,24 @@ extension NetworkService {
                 expiresIn: response.tokens.expiresIn,
                 refreshToken: response.tokens.refreshToken
             )
-            saveTokenInfo(tokenResponse)
             
-            // Store current user information
-            setCurrentUserInfo(email: response.user.email, fullName: response.user.fullName ?? "")
+            // Ensure all updates happen on main thread
+            await MainActor.run {
+                saveTokenInfo(tokenResponse)
+                setCurrentUserInfo(email: response.user.email, fullName: response.user.fullName ?? "")
+                
+                // Force UserDefaults synchronization
+                UserDefaults.standard.synchronize()
+                
+                updateAuthenticationState()
+                
+                // Register pending FCM token if available
+                AppDelegate.registerPendingFCMTokenIfNeeded()
+            }
             
-            // Update published authentication state
-            updateAuthenticationState()
+            // After successful login, check onboarding status from backend
+            print("🔍 [NetworkService] Checking backend onboarding status after password login...")
+            _ = await checkOnboardingStatusFromBackend()
             
             print("✅ [NetworkService] Dual auth login successful")
             return response.tokens.accessToken
@@ -2284,6 +2377,8 @@ extension NetworkService {
             // Store tokens in Keychain
             authToken = response.tokens.accessToken
             _ = keychain.storeRefreshToken(response.tokens.refreshToken, for: userMode)
+            // Store user id for Reminders device registration
+            _ = KeychainService.shared.store(key: "zivo_user_id", value: String(response.user.id))
             
             // Save token info
             let tokenResponse = TokenResponse(
@@ -2293,13 +2388,20 @@ extension NetworkService {
                 expiresIn: response.tokens.expiresIn,
                 refreshToken: response.tokens.refreshToken
             )
-            saveTokenInfo(tokenResponse)
             
-            // Store current user information
-            setCurrentUserInfo(email: response.user.email, fullName: response.user.fullName ?? "")
+            // Ensure all updates happen on main thread
+            await MainActor.run {
+                saveTokenInfo(tokenResponse)
+                setCurrentUserInfo(email: response.user.email, fullName: response.user.fullName ?? "")
+                updateAuthenticationState()
+                
+                // Register pending FCM token if available
+                AppDelegate.registerPendingFCMTokenIfNeeded()
+            }
             
-            // Update published authentication state
-            updateAuthenticationState()
+            // After OTP verify, check onboarding status from backend
+            print("🔍 [NetworkService] Checking backend onboarding status after OTP verification...")
+            _ = await checkOnboardingStatusFromBackend()
             
             print("✅ [NetworkService] OTP verification successful")
             return response.tokens.accessToken
@@ -2326,6 +2428,8 @@ extension NetworkService {
             // Store tokens in Keychain
             authToken = response.tokens.accessToken
             _ = keychain.storeRefreshToken(response.tokens.refreshToken, for: userMode)
+            // Store user id for Reminders device registration
+            _ = KeychainService.shared.store(key: "zivo_user_id", value: String(response.user.id))
             
             // Save token info
             let tokenResponse = TokenResponse(
@@ -2335,13 +2439,20 @@ extension NetworkService {
                 expiresIn: response.tokens.expiresIn,
                 refreshToken: response.tokens.refreshToken
             )
-            saveTokenInfo(tokenResponse)
             
-            // Store current user information
-            setCurrentUserInfo(email: response.user.email, fullName: response.user.fullName ?? "")
+            // Ensure all updates happen on main thread
+            await MainActor.run {
+                saveTokenInfo(tokenResponse)
+                setCurrentUserInfo(email: response.user.email, fullName: response.user.fullName ?? "")
+                updateAuthenticationState()
+                
+                // Register pending FCM token if available
+                AppDelegate.registerPendingFCMTokenIfNeeded()
+            }
             
-            // Update published authentication state
-            updateAuthenticationState()
+            // After OTP registration, check onboarding status from backend
+            print("🔍 [NetworkService] Checking backend onboarding status after OTP registration...")
+            _ = await checkOnboardingStatusFromBackend()
             
             print("✅ [NetworkService] OTP registration successful")
             return response.tokens.accessToken
@@ -2384,6 +2495,8 @@ extension NetworkService {
             // Store tokens in Keychain
             authToken = response.tokens.accessToken
             _ = keychain.storeRefreshToken(response.tokens.refreshToken, for: userMode)
+            // Store user id for Reminders device registration
+            _ = KeychainService.shared.store(key: "zivo_user_id", value: String(response.user.id))
             
             // Save token info
             let tokenResponse = TokenResponse(
@@ -2393,13 +2506,20 @@ extension NetworkService {
                 expiresIn: response.tokens.expiresIn,
                 refreshToken: response.tokens.refreshToken
             )
-            saveTokenInfo(tokenResponse)
             
-            // Store current user information
-            setCurrentUserInfo(email: response.user.email, fullName: response.user.fullName ?? "")
+            // Ensure all updates happen on main thread
+            await MainActor.run {
+                saveTokenInfo(tokenResponse)
+                setCurrentUserInfo(email: response.user.email, fullName: response.user.fullName ?? "")
+                updateAuthenticationState()
+                
+                // Register pending FCM token if available
+                AppDelegate.registerPendingFCMTokenIfNeeded()
+            }
             
-            // Update published authentication state
-            updateAuthenticationState()
+            // After Google login, check onboarding status from backend
+            print("🔍 [NetworkService] Checking backend onboarding status after Google login...")
+            _ = await checkOnboardingStatusFromBackend()
             
             print("✅ [NetworkService] Google token verification successful")
             return response.tokens.accessToken

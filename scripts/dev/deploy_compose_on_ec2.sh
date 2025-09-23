@@ -9,6 +9,7 @@ AWS_PROFILE="zivohealth"
 AWS_REGION="us-east-1"
 INSTANCE_ID=""
 PULL_ONLY=false
+DISABLE_REMINDERS=false
 
 # Optional: ensure SSM is seeded from backend/.env and refresh remote .env from SSM
 SEED_FROM_ENV=false
@@ -24,6 +25,7 @@ print_usage() {
   echo "  -r AWS_REGION    (default: us-east-1)"
   echo "  -i INSTANCE_ID   (optional; read from Terraform if omitted)"
   echo "  --pull-only      Only pull images, do not restart"
+  echo "  --disable-reminders  Remove reminders service from docker-compose on EC2 before starting"
   echo "  --seed-from-env  Seed SSM from backend/.env before deploy"
   echo "  --refresh-env    Update /opt/zivohealth/.env OPENAI_API_KEY from SSM before restart"
   echo "  --project NAME   Project namespace for SSM path (e.g., zivohealth)"
@@ -37,6 +39,7 @@ while [[ $# -gt 0 ]]; do
     -r) AWS_REGION="$2"; shift 2 ;;
     -i) INSTANCE_ID="$2"; shift 2 ;;
     --pull-only) PULL_ONLY=true; shift ;;
+    --disable-reminders) DISABLE_REMINDERS=true; shift ;;
     --seed-from-env) SEED_FROM_ENV=true; shift ;;
     --refresh-env) REFRESH_ENV=true; shift ;;
     --project) PROJECT="$2"; shift 2 ;;
@@ -144,6 +147,7 @@ cat > "$SSM_FILE" <<'JSON'
     "bash -lc '. /tmp/deploy_env; if [ -n \"$ECR\" ] && [ -n \"$TAG\" ]; then sudo -E env ECR_REPO_URL=$ECR IMAGE_TAG=$TAG docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml down; else sudo docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml down; fi'",
     "bash -lc '. /tmp/deploy_env; if [ -n \"$ECR\" ] && [ -n \"$TAG\" ]; then sudo -E env ECR_REPO_URL=$ECR IMAGE_TAG=$TAG docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml pull; else echo Skipping compose pull due to missing ECR/TAG; fi'",
     "bash -lc '. /tmp/deploy_env; if [ -n \"$ECR\" ] && [ -n \"$TAG\" ]; then sudo -E env ECR_REPO_URL=$ECR IMAGE_TAG=$TAG docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml up -d; else sudo docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml up -d; fi'",
+    "bash -lc 'if [ \"__DISABLE_REMINDERS__\" = \"true\" ]; then echo Stopping reminders container ...; sudo docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml stop reminders || true; sudo docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml rm -f reminders || true; fi'",
     "bash -lc 'sudo docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml ps'"
   ]
 }
@@ -156,6 +160,7 @@ if command -v sed >/dev/null 2>&1; then
   sed -i '' -e "s|__ECR_HOST__|$ECR_HOST|g" "$SSM_FILE" || sed -i -e "s|__ECR_HOST__|$ECR_HOST|g" "$SSM_FILE"
   sed -i '' -e "s|__ECR_REPO_URL__|$ECR_REPO_URL|g" "$SSM_FILE" || sed -i -e "s|__ECR_REPO_URL__|$ECR_REPO_URL|g" "$SSM_FILE"
   sed -i '' -e "s|__IMAGE_TAG_VALUE__|$IMAGE_TAG_VALUE|g" "$SSM_FILE" || sed -i -e "s|__IMAGE_TAG_VALUE__|$IMAGE_TAG_VALUE|g" "$SSM_FILE"
+  sed -i '' -e "s|__DISABLE_REMINDERS__|$DISABLE_REMINDERS|g" "$SSM_FILE" || sed -i -e "s|__DISABLE_REMINDERS__|$DISABLE_REMINDERS|g" "$SSM_FILE"
 fi
 
 # If pull-only, remove the up -d line from the JSON

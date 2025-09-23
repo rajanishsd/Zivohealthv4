@@ -138,6 +138,34 @@ start_redis() {
     fi
 }
 
+# Function to start RabbitMQ
+start_rabbitmq() {
+    print_status "Starting RabbitMQ broker..."
+    
+    if check_service "RabbitMQ" "5672"; then
+        return 0
+    fi
+    
+    if command -v brew >/dev/null 2>&1; then
+        brew services start rabbitmq >/dev/null 2>&1 || true
+        # Wait briefly for the service
+        sleep 2
+        if check_service "RabbitMQ" "5672"; then
+            print_success "RabbitMQ started via Homebrew services"
+            return 0
+        fi
+    fi
+    
+    # Fallback: try foreground server (user can Ctrl+C separate process)
+    if [ -x "/opt/homebrew/opt/rabbitmq/sbin/rabbitmq-server" ]; then
+        print_warning "RabbitMQ not running; try: brew services start rabbitmq"
+        return 1
+    fi
+    
+    print_error "RabbitMQ not running and could not be started automatically"
+    return 1
+}
+
 # Function to start Backend server
 start_backend() {
     print_status "Starting FastAPI backend server..."
@@ -149,7 +177,8 @@ start_backend() {
     # Use existing backend startup script
     if [ -f "backend/scripts/start_server.sh" ]; then
         print_status "Using existing backend startup script..."
-        ./backend/scripts/start_server.sh > backend/server.log 2>&1 &
+        mkdir -p backend/logs
+        ./backend/scripts/start_server.sh > backend/logs/server.log 2>&1 &
         
         # Wait for backend to start
         local attempts=0
@@ -167,6 +196,38 @@ start_backend() {
     else
         print_error "Backend startup script not found"
         return 1
+    fi
+}
+
+# Function to start Reminders service
+start_reminders() {
+    print_status "Starting Reminders service (API, worker, beat)..."
+    
+    # If API already running on 8085, assume service is up
+    if check_service "Reminders API" "8085"; then
+        return 0
+    fi
+    
+    if [ -f "backend/scripts/start_reminders.sh" ]; then
+        mkdir -p backend/logs
+        ./backend/scripts/start_reminders.sh > backend/logs/reminders-combined.log 2>&1 &
+        
+        # Wait for API to be reachable
+        local attempts=0
+        while [ $attempts -lt 30 ]; do
+            if curl -s http://localhost:8085/metrics > /dev/null 2>&1; then
+                print_success "Reminders service started successfully"
+                return 0
+            fi
+            sleep 2
+            attempts=$((attempts + 1))
+        done
+        
+        print_warning "Reminders API may still be starting (check http://localhost:8085/metrics)"
+        return 0
+    else
+        print_warning "Reminders start script not found, skipping..."
+        return 0
     fi
 }
 
@@ -207,7 +268,8 @@ start_dashboard() {
     # Use existing dashboard startup script
     if [ -f "backend/scripts/start_dashboard.sh" ]; then
         print_status "Using existing dashboard startup script..."
-        ./backend/scripts/start_dashboard.sh > backend/dashboard.log 2>&1 &
+        mkdir -p backend/logs
+        ./backend/scripts/start_dashboard.sh > backend/logs/dashboard.log 2>&1 &
         
         # Wait for dashboard to start
         sleep 10
@@ -240,6 +302,9 @@ start_service() {
         "redis")
             start_redis
             ;;
+        "rabbitmq")
+            start_rabbitmq
+            ;;
         "password-reset"|"reset-app")
             build_password_reset_app
             ;;
@@ -250,9 +315,12 @@ start_service() {
         "dashboard")
             start_dashboard
             ;;
+        "reminders")
+            start_reminders
+            ;;
         *)
             print_error "Unknown service: $service"
-            print_status "Available services: postgresql, redis, password-reset, backend, dashboard"
+            print_status "Available services: postgresql, redis, rabbitmq, password-reset, backend, reminders, dashboard"
             exit 1
             ;;
     esac
@@ -342,18 +410,29 @@ main() {
     fi
     echo ""
     
-    # Step 3: Build Password Reset App
+    # Step 3: Start RabbitMQ
+    if ! start_rabbitmq; then
+        print_error "Failed to start RabbitMQ, aborting..."
+        exit 1
+    fi
+    echo ""
+    
+    # Step 4: Build Password Reset App
     build_password_reset_app
     echo ""
     
-    # Step 4: Start Backend
+    # Step 5: Start Backend
     if ! start_backend; then
         print_error "Failed to start Backend, aborting..."
         exit 1
     fi
     echo ""
     
-    # Step 5: Start Dashboard
+    # Step 6: Start Reminders
+    start_reminders
+    echo ""
+    
+    # Step 7: Start Dashboard
     start_dashboard
     echo ""
     
@@ -382,10 +461,29 @@ main() {
         echo "❌ Backend: Not running"
     fi
     
+    if check_service "RabbitMQ" "5672"; then
+        echo "✅ RabbitMQ: Running on port 5672"
+    else
+        echo "❌ RabbitMQ: Not running"
+    fi
+    
+    if check_service "Reminders API" "8085"; then
+        echo "✅ Reminders: Running on port 8085"
+    else
+        echo "❌ Reminders: Not running"
+    fi
+    
     if check_service "Dashboard" "3000"; then
         echo "✅ Dashboard: Running on port 3000"
     else
         echo "⏳ Dashboard: Starting... (check http://localhost:3000)"
+    fi
+    
+    # Password Reset App status
+    if [ -d "backend/www/reset-password" ] || [ -d "backend/password-reset-app/build" ]; then
+        echo "ℹ️  Password Reset App: Built assets present"
+    else
+        echo "ℹ️  Password Reset App: No built assets"
     fi
     
     echo ""
@@ -398,7 +496,7 @@ main() {
     echo "🔄 To restart all services: ./scripts/restart-all.sh"
     echo "💡 To start with specific environment: ./scripts/start-all.sh [dev|prod]"
     echo "💡 To start individual services: ./scripts/start-all.sh [dev|prod] [service]"
-    echo "   Available services: postgresql, redis, password-reset, backend, dashboard"
+    echo "   Available services: postgresql, redis, password-reset, backend, reminders, dashboard"
     echo "📊 To view dashboard logs: ./backend/scripts/logs_dashboard.sh"
 }
 

@@ -68,3 +68,18 @@ opentelemetry-instrumentation-redis>=0.41b0
 
 # Guardrails (imported by app.agents.guardrails_system)
 guardrails-ai>=0.6.6
+
+# Task queues and scheduling
+celery>=5.3.0,<5.4.0
+kombu>=5.3.0,<5.4.0
+amqp>=5.1.1,<6.0.0
+
+# Cron parsing
+croniter>=2.0.5
+
+# Notifications (FCM)
+firebase-admin>=6.5.0,<7.0.0
+
+# Monitoring and metrics
+prometheus-client>=0.17.0,<1.0.0
+prometheus-fastapi-instrumentator>=6.1.0,<7.0.0httpx

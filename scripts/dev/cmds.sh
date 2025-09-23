@@ -45,6 +45,13 @@ sudo vim /opt/zivohealth/.env
 
 sudo docker compose -f /opt/zivohealth/docker-compose.yml logs --tail 200 api || true
 
+sudo docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml logs -f --tail=200 reminders
+sudo docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml logs -f --tail=200 reminders-beat
+sudo docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml logs -f --tail=200 reminders-worker
+
+sudo docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml exec reminders bash -lc 'tail -f -n 200 /var/log/reminders-worker.log'
+
+patient@zivohealth.com
 
 rebuild
 
@@ -293,3 +300,16 @@ echo "sudo docker compose -f /opt/zivohealth/docker-compose.yml logs -f api | gr
 echo "10. Emergency fix for stuck workers:"
 echo "./scripts/dev/emergency_worker_fix.sh"
 
+
+
+curl -sS -X POST "${BASE_URL}/" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -d "{
+    \"user_id\": \"1\",
+    \"reminder_type\": \"test\",
+    \"title\": \"Test from localhost\",
+    \"message\": \"Should fire in 1 minute\",
+    \"reminder_time\": \"${REMINDER_TIME}\",
+    \"payload\": { \"source\": \"localhost\" }
+  }" | jq .

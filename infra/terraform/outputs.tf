@@ -9,7 +9,7 @@ output "ecr_repository_url" {
 }
 
 output "rds_endpoint" {
-  value       = module.db.endpoint
+  value       = data.aws_db_instance.existing.endpoint
   description = "RDS PostgreSQL endpoint"
 }
 

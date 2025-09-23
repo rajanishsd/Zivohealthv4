@@ -538,7 +538,7 @@ def analyze_image_with_gpt4v(file_path: str, image_base64: Optional[str] = None,
         # Analysis prompt for medical document classification
         user_context = f"\n\nUSER REQUEST: {user_prompt}" if user_prompt else ""
         
-        analysis_prompt = f"""Analyze this image and classify it into one of these medical document categories:{user_context}
+        analysis_prompt_header = f"""Analyze this image and classify it into one of these medical document categories:{user_context}
 
 1. **Clinical Notes - Handwritten notes by doctors, outpatient records, consultation sheets. These often include the doctor’s name, patient’s name, and free-form notes. Even if lab values are mentioned, it is still a clinical note unless it is structured like a lab report.
     Characteristics:
@@ -594,7 +594,9 @@ def analyze_image_with_gpt4v(file_path: str, image_base64: Optional[str] = None,
 **IMPORTANT**: For Lab Report, Prescription, Pharmacy Bill, and Vitals Details, extract ALL text content from the image. For other categories, focus only on classification.
 
 Provide your analysis in this JSON format:
-{
+"""
+
+        analysis_prompt_json = """{
     "document_type": "Lab Report/Prescription/Pharmacy Bill/Medical Imaging/Body Images/Vitals Details/Nutrition/Other",
     "confidence": 0.8,
     "sub_category": "blood test/medication/x-ray/chest/breakfast/etc",
@@ -603,12 +605,34 @@ Provide your analysis in this JSON format:
     "extracted_text": "All text content extracted from the image (only for Lab Report, Prescription, Pharmacy Bill, Vitals Details)"
 }"""
 
+        analysis_prompt = analysis_prompt_header + analysis_prompt_json
+
         # Analyze image
+        # Determine correct MIME type for data URL
+        def _infer_mime_type(fp: str, provided_b64: Optional[str]) -> str:
+            # If provided_b64 already looks like a data URL, trust its prefix
+            if provided_b64 and provided_b64.strip().lower().startswith("data:image/"):
+                # Extract mime before ";base64,"
+                try:
+                    prefix = provided_b64.split(",", 1)[0]
+                    # e.g., data:image/png;base64
+                    return prefix.split(":", 1)[1].split(";")[0]
+                except Exception:
+                    pass
+            ext = Path(fp).suffix.lower()
+            if ext == ".png":
+                return "image/png"
+            if ext in (".jpg", ".jpeg"):
+                return "image/jpeg"
+            # Default to jpeg if unknown
+            return "image/jpeg"
+
+        mime_type = _infer_mime_type(file_path, image_base64)
         messages = [
             SystemMessage(content="You are an expert at analyzing medical documents and images to classify them into appropriate categories."),
             HumanMessage(content=[
                 {"type": "text", "text": analysis_prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}}
+                {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_data}"}}
             ])
         ]
         

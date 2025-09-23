@@ -27,7 +27,7 @@ enum AppConfig {
 	static let defaultAPIEndpoint: String = {
 		switch Environment.current {
 		case .local:
-			return "http://192.168.0.106:8000"
+			return "http://192.168.0.105:8000"
 		case .staging:
 			return "https://staging-api.zivohealth.ai"
 		case .production:
@@ -93,6 +93,14 @@ enum AppConfig {
 		Build Configuration: \(isDebug ? "DEBUG" : "RELEASE")
 		"""
 	}
+
+	// API key for backend authentication from the iOS app
+	// Move from NetworkService to a single source of truth here
+	static let apiKey: String = "UMYpN67NeR0W13cP13O62Mn04yG3tpEx" // TODO: replace via build config if needed
+
+	// App Secret used for optional HMAC signing of requests (if enabled)
+	// Move from NetworkService to a single source of truth here
+	static let appSecret: String = "c7357b83f692134381cbd7cadcd34be9c6150121aa274599317b5a1283c0205f" // TODO: replace via build config/secrets if needed
 	
 	static var isDebug: Bool {
 		#if DEBUG

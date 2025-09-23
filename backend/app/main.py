@@ -30,12 +30,18 @@ from app.middleware.performance import PerformanceMiddleware
 from app.middleware.api_auth import APIKeyMiddleware
 
 # Configure logging
+# Ensure logs directory exists
+try:
+    os.makedirs("logs", exist_ok=True)
+except Exception:
+    pass
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("server.log")
+        logging.FileHandler(os.path.join("logs", "server.log"))
     ]
 )
 

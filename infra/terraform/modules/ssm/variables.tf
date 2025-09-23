@@ -11,3 +11,16 @@ variable "db_password_plain" {
   description = "Optional plaintext DB password to store in SSM; if empty, a random password is generated"
   default     = ""
 }
+
+variable "reminders_fcm_credentials_json" {
+  type        = string
+  description = "Optional FCM service account JSON credentials for reminders service"
+  default     = ""
+  sensitive   = true
+}
+
+variable "reminders_fcm_project_id" {
+  type        = string
+  description = "Optional FCM project ID for reminders service"
+  default     = ""
+}

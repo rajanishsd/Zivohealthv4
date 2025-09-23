@@ -57,6 +57,7 @@ infra/terraform/.terraform/modules/
 local_data.dump
 generated_api_keys.json
 backend/data/*.pid
+backend/keys/
 
 # Xcode user data
 **/xcuserdata/

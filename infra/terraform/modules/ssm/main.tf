@@ -36,3 +36,18 @@ resource "aws_ssm_parameter" "s3_bucket" {
   type  = "String"
   value = var.s3_bucket_name
 }
+
+# Reminder service parameters (optional - can be set manually in AWS console)
+resource "aws_ssm_parameter" "reminders_fcm_credentials_json" {
+  count = var.reminders_fcm_credentials_json != "" ? 1 : 0
+  name  = "/${var.project}/${var.environment}/reminders/fcm_credentials_json"
+  type  = "SecureString"
+  value = var.reminders_fcm_credentials_json
+}
+
+resource "aws_ssm_parameter" "reminders_fcm_project_id" {
+  count = var.reminders_fcm_project_id != "" ? 1 : 0
+  name  = "/${var.project}/${var.environment}/reminders/fcm_project_id"
+  type  = "String"
+  value = var.reminders_fcm_project_id
+}

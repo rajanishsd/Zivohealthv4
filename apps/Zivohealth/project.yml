@@ -16,6 +16,9 @@ packages:
   GoogleSignIn:
     url: https://github.com/google/GoogleSignIn-iOS.git
     from: 9.0.0
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk
+    from: 12.0.0
 
 targets:
   ZivoHealth:
@@ -45,6 +48,10 @@ targets:
       - package: Alamofire
       - package: LiveKit
       - package: GoogleSignIn
+      - package: Firebase
+        product: FirebaseCore
+      - package: Firebase
+        product: FirebaseMessaging
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zivohealth.app

@@ -1130,6 +1130,7 @@ class ChatViewModel: ObservableObject {
                             self.lastInteractionWasFileUpload = false
                             self.isAnalyzingFile = false
                             self.currentUploadFilename = ""
+                            print("🏁 [ChatViewModel] Exact 'complete' status received - cleared all analysis states")
                         }
                         return // Skip automatic reload beyond the explicit fallback above
                     }
@@ -1146,6 +1147,9 @@ class ChatViewModel: ObservableObject {
                         self.lastInteractionWasFileUpload = false
                         self.isAnalyzingFile = false
                         self.currentUploadFilename = ""
+                        self.isLoading = false
+                        self.isTyping = false
+                        self.isStreaming = false
                     } else if statusText.lowercased().contains("waiting for user") || statusText.lowercased().contains("awaiting_user") || statusText.lowercased().contains("awaiting user") {
                         // Backend indicates it needs user input now
                         self.isAnalyzingFile = false
@@ -1177,6 +1181,10 @@ class ChatViewModel: ObservableObject {
                         self.isAnalyzingFile = false
                         self.lastInteractionWasFileUpload = false
                         self.currentUploadFilename = ""
+                        self.isLoading = false
+                        self.isTyping = false
+                        self.isStreaming = false
+                        print("🏁 [ChatViewModel] Final status clear - analysis complete")
                     }
                     continue
                 }
