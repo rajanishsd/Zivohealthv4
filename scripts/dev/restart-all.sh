@@ -58,7 +58,7 @@ restart_service() {
                 exit 1
             fi
             ;;
-        "postgresql"|"postgres"|"redis"|"backend")
+        "postgresql"|"postgres"|"redis"|"backend"|"livekit")
             print_status "Restarting $service only..."
             # Stop the service
             if [ -f "./scripts/dev/stop-all.sh" ]; then
@@ -111,7 +111,7 @@ restart_service() {
             ;;
         *)
             print_error "Unknown service: $service"
-            print_status "Available services: postgresql, redis, password-reset, backend, reminders, dashboard"
+            print_status "Available services: postgresql, redis, password-reset, backend, reminders, dashboard, livekit"
             exit 1
             ;;
     esac
@@ -162,7 +162,30 @@ main() {
     echo ""
     echo "💡 Tip: You can restart individual services with:"
     echo "   ./scripts/dev/restart-all.sh [service]"
-    echo "   Available services: postgresql, redis, password-reset, backend, reminders, dashboard"
+    echo "   Available services: postgresql, redis, password-reset, backend, reminders, dashboard, livekit"
+
+    echo ""
+    echo "Service Status:"
+    echo "==============="
+    # LiveKit status check
+    # Detect binary process
+    if [ -f "backend/data/livekit.pid" ]; then
+        LPID=$(cat backend/data/livekit.pid 2>/dev/null || true)
+        if [ -n "$LPID" ] && kill -0 "$LPID" 2>/dev/null; then
+            echo "✅ LiveKit (binary): Running (PID: $LPID)"
+        fi
+    fi
+
+    # Detect docker container if present
+    if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -q '^zivohealth-livekit$'; then
+        echo "✅ LiveKit (container): Running (zivohealth-livekit)"
+    fi
+
+    if lsof -ti:7880 >/dev/null 2>&1; then
+        echo "✅ LiveKit signaling: Port 7880 is open"
+    else
+        echo "❌ LiveKit: Not running (video calls disabled)"
+    fi
 }
 
 # Run main function

@@ -63,7 +63,7 @@ def get_current_doctor(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",
         )
-    doctor = crud.doctor.get(db, id=token_data.sub)
+    doctor = crud.doctor.get(db, doctor_id=token_data.sub)
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
     return doctor
@@ -114,7 +114,7 @@ def get_current_user_or_doctor(
     
     # Check if it's a doctor token
     if payload.get("is_doctor", False):
-        doctor = crud.doctor.get(db, id=token_data.sub)
+        doctor = crud.doctor.get(db, doctor_id=token_data.sub)
         if not doctor:
             raise HTTPException(status_code=404, detail="Doctor not found")
         return doctor

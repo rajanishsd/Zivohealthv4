@@ -12,6 +12,7 @@ from .unified_schemas import (
     RecurringReminderCreate, OneTimeReminderCreate
 )
 from app.utils.timezone import to_utc_aware
+from app.utils.timezone import get_zoneinfo
 
 
 class UnifiedReminderService:
@@ -119,6 +120,11 @@ class UnifiedReminderService:
         if not reminder:
             return None
         
+        # Track whether timing/recurrence anchors changed for recalculation
+        time_changed = False
+        start_changed = False
+        pattern_changed = False
+
         # Update basic fields
         if data.title is not None:
             reminder.title = data.title
@@ -128,6 +134,7 @@ class UnifiedReminderService:
             reminder.payload = data.payload
         if data.reminder_time is not None:
             reminder.reminder_time = to_utc_aware(data.reminder_time)
+            time_changed = True
         if data.status is not None:
             reminder.status = data.status
         
@@ -135,14 +142,58 @@ class UnifiedReminderService:
         if reminder.is_recurring:
             if data.recurrence_pattern is not None:
                 reminder.recurrence_pattern = data.recurrence_pattern
-                # Recalculate next occurrence
-                reminder.next_occurrence = self._recalculate_next_occurrence(reminder)
+                pattern_changed = True
+            if data.start_date is not None:
+                reminder.start_date = to_utc_aware(data.start_date)
+                start_changed = True
             if data.end_date is not None:
                 reminder.end_date = to_utc_aware(data.end_date)
             if data.timezone is not None:
                 reminder.timezone = data.timezone
             if data.is_active is not None:
                 reminder.is_active = data.is_active
+
+            # Recalculate next occurrence when anchors change
+            if pattern_changed or time_changed:
+                if time_changed:
+                    # Business rule: if the updated time today (in user's tz) is in the future, fire today; else advance by interval
+                    tz = None
+                    try:
+                        if getattr(reminder, "timezone", None):
+                            from zoneinfo import ZoneInfo
+                            tz = ZoneInfo(reminder.timezone)
+                    except Exception:
+                        tz = None
+
+                    now_utc = datetime.now(dt_timezone.utc)
+                    now_local = now_utc.astimezone(tz) if tz else now_utc
+                    # Compose candidate today at new hour:minute
+                    base_local = now_local
+                    new_hour = reminder.reminder_time.astimezone(tz).hour if tz else reminder.reminder_time.hour
+                    new_minute = reminder.reminder_time.astimezone(tz).minute if tz else reminder.reminder_time.minute
+                    candidate_local = base_local.replace(hour=new_hour, minute=new_minute, second=0, microsecond=0)
+                    if candidate_local <= now_local:
+                        # Determine interval days from recurrence pattern (default 1)
+                        interval_days = 1
+                        try:
+                            pat = reminder.recurrence_pattern or {}
+                            if isinstance(pat, dict) and pat.get("type") == "daily":
+                                interval_days = int(pat.get("interval", 1)) or 1
+                        except Exception:
+                            interval_days = 1
+                        from datetime import timedelta as _td
+                        candidate_local = candidate_local + _td(days=interval_days)
+                    # Store as UTC-aware
+                    reminder.next_occurrence = candidate_local.astimezone(dt_timezone.utc) if candidate_local.tzinfo else candidate_local.replace(tzinfo=dt_timezone.utc)
+                else:
+                    # Only pattern changed: use calculator fallback
+                    base_time_for_calc = reminder.last_occurrence or reminder.start_date or reminder.reminder_time
+                    pattern = self._parse_recurrence_pattern(reminder.recurrence_pattern)
+                    reminder.next_occurrence = RecurrenceCalculator.calculate_next_occurrence(
+                        pattern,
+                        base_time_for_calc,
+                        datetime.now(dt_timezone.utc)
+                    )
         
         reminder.updated_at = datetime.utcnow()
         

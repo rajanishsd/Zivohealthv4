@@ -15,6 +15,10 @@ from psycopg2.extras import RealDictCursor
 import base64
 import os
 import re
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
 
 from pathlib import Path
 import sys
@@ -34,7 +38,7 @@ from langchain_core.tools import tool
 from app.core.config import settings
 from app.core.database_utils import execute_query_safely_json, get_table_schema_safely, get_raw_db_connection
 from app.agentsv2.tools.nutrition_tools import internet_search_tool
-from app.utils.timezone import now_local, isoformat_now
+from app.utils.timezone import now_local, isoformat_now, get_user_timezone, user_now
 from app.core.background_worker import trigger_smart_aggregation
 
 # Import nutrition configuration
@@ -340,6 +344,14 @@ class NutritionAgentLangGraph:
         
         return [query_nutrition_db, describe_nutrition_table_schema, internet_search_tool]
 
+    def _get_user_timezone(self, user_id: Optional[int]) -> Optional[str]:
+        """Fetch the user's timezone from user_profiles, if available (delegates to utils)."""
+        return get_user_timezone(user_id)
+
+    def _get_user_now(self, user_id: Optional[int]) -> datetime:
+        """Return current datetime in the user's timezone if set; fallback to server default local."""
+        return user_now(user_id)
+
 
     def log_execution_step(self, state: NutritionAgentState, step_name: str, status: str, details: Dict = None):
         """Log execution step with context"""
@@ -527,7 +539,7 @@ class NutritionAgentLangGraph:
         **Response Format**: Respond with a valid JSON object containing all the above information. Use 0.0 for nutrients that are not significantly present or cannot be estimated.
 
 {{
-    "meal_type": Based on the time of the day and not based on the food items,
+    "meal_type": Based on the time of the day and not based on the food items, current time is {current_datetime},
     "food_entries": [
         {{
             "dish_name": "Grilled Chicken Caesar Salad",
@@ -609,8 +621,8 @@ IMPORTANT:
 - Use consistent units (grams for macronutrients, mg for micronutrients)""".format(
                 original_prompt=state.original_prompt,
                 user_id=state.user_id,
-                current_date=now_local().strftime("%Y-%m-%d"),
-                current_datetime=isoformat_now()
+                current_date=self._get_user_now(state.user_id).strftime("%Y-%m-%d"),
+                current_datetime=self._get_user_now(state.user_id).isoformat()
             )
             
             # Analyze image
@@ -636,8 +648,8 @@ IMPORTANT:
                     content = content[3:-3].strip()
                 
                 nutrition_data = json.loads(content)
-                # Use configured timezone for timestamps to avoid server-region dependence
-                now = now_local()
+                # Use user's timezone for timestamps to avoid server-region dependence
+                now = self._get_user_now(state.user_id)
                 nutrition_data["meal_date"] = now.strftime("%Y-%m-%d")
                 nutrition_data["meal_time"] = now.strftime("%Y-%m-%d %H:%M:%S")
                 print(f"🔍 [DEBUG] Successfully extracted nutrition from image: {len(nutrition_data.get('food_entries', []))} foods")
@@ -710,7 +722,7 @@ IMPORTANT:
         **Response Format**: Respond with a valid JSON object containing all the above information. Use 0.0 for nutrients that are not significantly present or cannot be estimated.
 
 {{
-    "meal_type": "lunch, dinner, breakfast, snack, etc",
+    "meal_type": "lunch, dinner, breakfast, snack, etc" based on the time of the day and current time is {current_datetime},
     "food_entries": [
         {{
             "dish_name": "Grilled Chicken Caesar Salad",
@@ -791,8 +803,8 @@ IMPORTANT:
 - Use consistent units (grams for macronutrients, mg for micronutrients)""".format(
     original_prompt=state.original_prompt,
     user_id=state.user_id,
-    current_date=now_local().strftime("%Y-%m-%d"),
-    current_datetime=now_local().strftime("%Y-%m-%d %H:%M:%S")
+    current_date=self._get_user_now(state.user_id).strftime("%Y-%m-%d"),
+    current_datetime=self._get_user_now(state.user_id).strftime("%Y-%m-%d %H:%M:%S")
 )
 
             
@@ -833,8 +845,8 @@ IMPORTANT:
                 cleaned_content = cleaned_content.strip()
                 
                 nutrition_data = json.loads(cleaned_content)
-                # Override timestamps for text-only inputs using runtime variables
-                now = now_local()
+                # Override timestamps for text-only inputs using user's timezone
+                now = self._get_user_now(state.user_id)
                 nutrition_data["meal_date"] = now.strftime("%Y-%m-%d")
                 nutrition_data["meal_time"] = now.strftime("%Y-%m-%d %H:%M:%S")
                 print(f"🔍 [DEBUG] Successfully extracted nutrition from text: {len(nutrition_data.get('food_entries', []))} foods")

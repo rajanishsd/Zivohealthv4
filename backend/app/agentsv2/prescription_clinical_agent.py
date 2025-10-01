@@ -724,6 +724,7 @@ class PrescriptionClinicalAgentLangGraph:
             vitals_result = await self.vitals_agent.run(
                 prompt=vitals_prompt,
                 user_id=state.user_id,
+                session_id=state.session_id,
                 extracted_text=state.extracted_text,
                 image_path=state.image_path,
                 image_base64=state.image_base64
@@ -751,6 +752,7 @@ class PrescriptionClinicalAgentLangGraph:
             lab_result = await self.lab_agent.run(
                 prompt=lab_prompt,
                 user_id=state.user_id,
+                session_id=state.session_id,
                 extracted_text=state.extracted_text,
                 image_path=state.image_path,
                 image_base64=state.image_base64

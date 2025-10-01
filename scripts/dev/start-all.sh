@@ -166,6 +166,55 @@ start_rabbitmq() {
     return 1
 }
 
+# Function to start LiveKit (local container)
+start_livekit() {
+    print_status "Starting LiveKit media server (Docker)..."
+
+    # If signaling port is busy, assume LiveKit is up
+    if check_service "LiveKit" "7880"; then
+        return 0
+    fi
+
+    # Require Docker for local LiveKit
+    if ! command -v docker >/dev/null 2>&1; then
+        print_error "Docker is required for local LiveKit. Install Docker Desktop."
+        return 1
+    fi
+
+    # Default keys for local testing if not provided via env
+    LIVEKIT_API_KEY_LOCAL=${LIVEKIT_API_KEY:-devkey}
+    LIVEKIT_API_SECRET_LOCAL=${LIVEKIT_API_SECRET:-devsecret}
+    LIVEKIT_DOCKER_TAG=${LIVEKIT_DOCKER_TAG:-v1.9.1}
+
+    # Create a bridge network to allow backend to reach LiveKit by name
+    docker network inspect zivo-net >/dev/null 2>&1 || docker network create zivo-net >/dev/null 2>&1 || true
+
+    # If an old container exists, remove it
+    docker rm -f zivohealth-livekit >/dev/null 2>&1 || true
+
+    # Start container
+    docker run -d \
+        --name zivohealth-livekit \
+        --network zivo-net \
+        -p 7880:7880 \
+        -p 7881:7881 \
+        -p 50000-60000:50000-60000/udp \
+        -e LIVEKIT_KEYS="${LIVEKIT_API_KEY_LOCAL}:${LIVEKIT_API_SECRET_LOCAL}" \
+        livekit/livekit-server:${LIVEKIT_DOCKER_TAG} \
+        --bind 0.0.0.0 --port 7880 \
+        --rtc.port-range-start 50000 --rtc.port-range-end 60000 >/dev/null 2>&1
+
+    # Wait briefly for startup
+    sleep 2
+    if check_service "LiveKit" "7880"; then
+        print_success "LiveKit (Docker) started on ws://localhost:7880"
+        return 0
+    else
+        print_error "Failed to start LiveKit (Docker)"
+        return 1
+    fi
+}
+
 # Function to start Backend server
 start_backend() {
     print_status "Starting FastAPI backend server..."
@@ -312,6 +361,9 @@ start_service() {
             build_password_reset_app  # Build reset app before backend
             start_backend
             ;;
+        "livekit")
+            start_livekit
+            ;;
         "dashboard")
             start_dashboard
             ;;
@@ -320,7 +372,7 @@ start_service() {
             ;;
         *)
             print_error "Unknown service: $service"
-            print_status "Available services: postgresql, redis, rabbitmq, password-reset, backend, reminders, dashboard"
+            print_status "Available services: postgresql, redis, rabbitmq, password-reset, backend, reminders, dashboard, livekit"
             exit 1
             ;;
     esac
@@ -416,6 +468,12 @@ main() {
         exit 1
     fi
     echo ""
+
+    # Step 3.5: Start LiveKit locally for video calls (optional, continue on failure)
+    if ! start_livekit; then
+        print_warning "LiveKit not started. Video calls will not work locally until it's running."
+    fi
+    echo ""
     
     # Step 4: Build Password Reset App
     build_password_reset_app
@@ -459,6 +517,12 @@ main() {
         echo "✅ Backend: Running on port 8000"
     else
         echo "❌ Backend: Not running"
+    fi
+
+    if check_service "LiveKit" "7880"; then
+        echo "✅ LiveKit: Running on port 7880 (ws://localhost:7880)"
+    else
+        echo "❌ LiveKit: Not running (video calls disabled)"
     fi
     
     if check_service "RabbitMQ" "5672"; then

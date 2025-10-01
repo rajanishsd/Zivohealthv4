@@ -22,6 +22,14 @@ from app.schemas.nutrition_goals import (
     ProgressResponseOut,
     NutritionGoalDetailOut,
 )
+from sqlalchemy import text as _sa_text
+from datetime import datetime as _dt
+from typing import Dict, Optional
+import json
+from app.core.config import settings
+from zoneinfo import ZoneInfo
+import os
+import requests
 
 router = APIRouter()
 
@@ -238,6 +246,263 @@ def get_current_goal_detail(
     )
 
 
+@router.get("/goals/{goal_id}/reminders")
+def list_goal_reminders(
+    goal_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """Return reminder configurations and identifiers for a specific nutrition goal."""
+    # Ensure goal belongs to the user
+    goal = crud.nutrition_goals.get_with_targets(db, goal_id, current_user.id)
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    rows = db.execute(
+        _sa_text(
+            """
+            SELECT external_id, key, active, config_json
+            FROM user_reminder_configs
+            WHERE user_id = :uid AND context = 'nutrition_goal' AND context_id = :gid
+            ORDER BY key
+            """
+        ),
+        {"uid": str(current_user.id), "gid": str(goal_id)},
+    ).mappings().all()
+
+    if not rows:
+        return {
+            "group_id": f"v1:{current_user.id}:nutrition_goal:{goal_id}",
+            "timezone": getattr(getattr(goal, 'timezone', None), 'name', None) or None,
+            "items": [],
+        }
+
+    # Use the first row's config_json as the base preferences
+    try:
+        base_cfg = rows[0]["config_json"] or {}
+    except Exception:
+        base_cfg = {}
+    tz = base_cfg.get("timezone")
+    reminders = base_cfg.get("reminders") or []
+    meal_to_cfg = {}
+    for it in reminders:
+        meal = str(it.get("meal", "")).lower()
+        if meal:
+            meal_to_cfg[meal] = it
+
+    # Build items from stored rows merged with base config
+    items = []
+    for r in rows:
+        key = str(r["key"]).lower()
+        cfg = meal_to_cfg.get(key, {})
+        items.append({
+            "meal": key,
+            "time_local": cfg.get("time_local"),
+            "frequency": cfg.get("frequency"),
+            "external_id": r["external_id"],
+            "status": "active" if r["active"] else "disabled",
+        })
+
+    return {
+        "group_id": f"v1:{current_user.id}:nutrition_goal:{goal_id}",
+        "timezone": tz,
+        "items": items,
+    }
+
+
+@router.get("/current/reminders")
+def list_current_goal_reminders(
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """Return reminder configurations for the CURRENT active nutrition goal only."""
+    goal = crud.nutrition_goals.get_active_for_user(db, current_user.id)
+    if not goal:
+        raise HTTPException(status_code=404, detail="No active goal")
+
+    rows = db.execute(
+        _sa_text(
+            """
+            SELECT external_id, key, active, config_json
+            FROM user_reminder_configs
+            WHERE user_id = :uid AND context = 'nutrition_goal' AND context_id = :gid
+            ORDER BY key
+            """
+        ),
+        {"uid": str(current_user.id), "gid": str(goal.id)},
+    ).mappings().all()
+
+    if not rows:
+        return {
+            "group_id": f"v1:{current_user.id}:nutrition_goal:{goal.id}",
+            "timezone": None,
+            "items": [],
+        }
+
+    try:
+        base_cfg = rows[0]["config_json"] or {}
+    except Exception:
+        base_cfg = {}
+    tz = base_cfg.get("timezone")
+    reminders = base_cfg.get("reminders") or []
+    meal_to_cfg = {}
+    for it in reminders:
+        meal = str(it.get("meal", "")).lower()
+        if meal:
+            meal_to_cfg[meal] = it
+
+    items = []
+    for r in rows:
+        key = str(r["key"]).lower()
+        cfg = meal_to_cfg.get(key, {})
+        items.append({
+            "meal": key,
+            "time_local": cfg.get("time_local"),
+            "frequency": cfg.get("frequency"),
+            "external_id": r["external_id"],
+            "status": "active" if r["active"] else "disabled",
+        })
+
+    return {
+        "group_id": f"v1:{current_user.id}:nutrition_goal:{goal.id}",
+        "timezone": tz,
+        "items": items,
+    }
+
+
+@router.patch("/current/reminders/{meal}")
+def update_current_goal_reminder(
+    meal: str,
+    time_local: Optional[str] = Query(None, description="HH:MM in user's timezone"),
+    frequency: Optional[str] = Query(None, description="daily|every_2_days|weekly"),
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """Update time/frequency for a specific meal reminder of the current goal.
+    This updates:
+    - user_reminder_configs.config_json (single JSON with timezone/reminders array)
+    - reminders (recurring template) via Reminders service using the stored external_id
+    """
+    meal_key = str(meal).lower()
+    goal = crud.nutrition_goals.get_active_for_user(db, current_user.id)
+    if not goal:
+        raise HTTPException(status_code=404, detail="No active goal")
+
+    # Fetch existing rows
+    rows = db.execute(
+        _sa_text(
+            """
+            SELECT id, external_id, key, active, config_json
+            FROM user_reminder_configs
+            WHERE user_id = :uid AND context = 'nutrition_goal' AND context_id = :gid AND key = :key
+            """
+        ),
+        {"uid": str(current_user.id), "gid": str(goal.id), "key": meal_key},
+    ).mappings().all()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="Reminder config not found for meal")
+
+    # Use the first row's config_json as the base preferences and upsert the change
+    try:
+        base_cfg: Dict = rows[0]["config_json"] or {}
+    except Exception:
+        base_cfg = {}
+
+    reminders_cfg = base_cfg.get("reminders") or []
+    updated = False
+    for it in reminders_cfg:
+        if str(it.get("meal", "")).lower() == meal_key:
+            if time_local is not None:
+                it["time_local"] = time_local
+            if frequency is not None:
+                it["frequency"] = frequency
+            updated = True
+            break
+    if not updated:
+        # insert if missing
+        entry = {"meal": meal_key}
+        if time_local is not None:
+            entry["time_local"] = time_local
+        if frequency is not None:
+            entry["frequency"] = frequency
+        reminders_cfg.append(entry)
+    base_cfg["reminders"] = reminders_cfg
+
+    # Persist JSON back to user_reminder_configs for all rows in the group (keep them consistent)
+    from sqlalchemy.dialects.postgresql import JSONB
+    db.execute(
+        _sa_text(
+            """
+            UPDATE user_reminder_configs
+            SET config_json = CAST(:cfg AS JSONB), updated_at = now()
+            WHERE user_id = :uid AND context = 'nutrition_goal' AND context_id = :gid
+            """
+        ),
+        {"cfg": json.dumps(base_cfg), "uid": str(current_user.id), "gid": str(goal.id)},
+    )
+    db.commit()
+
+    # Update recurring template in reminders service using external_id
+    external_id = rows[0]["external_id"]
+
+    # Reminders service configuration is handled by the shared client
+
+    # Look up reminder by external_id, then PATCH it
+    try:
+        from app.reminders.client import push_list_reminders, push_update_reminder
+        # List to find id by external_id
+        items = push_list_reminders(str(current_user.id))
+        match = next((i for i in items if i.get("external_id") == external_id), None)
+        if not match:
+            # If not found, we cannot update the reminders table now; continue after config update
+            return {"updated": True, "warning": "reminder template not found; config saved"}
+
+        reminder_id = match["id"]
+        payload: Dict[str, object] = {}
+        if time_local is not None:
+            # Keep the same anchor date but update HH:mm and zero seconds
+            try:
+                from datetime import datetime as _dt_
+                dt_str = match.get("reminder_time")
+                tz_name = base_cfg.get("timezone") or getattr(settings, "DEFAULT_TIMEZONE", "UTC")
+                tz = None
+                try:
+                    tz = ZoneInfo(tz_name)
+                except Exception:
+                    tz = None
+                if isinstance(dt_str, str):
+                    base_dt = _dt_.fromisoformat(dt_str)
+                else:
+                    base_dt = _dt_.utcnow()
+                # Convert base to user's local timezone before applying HH:mm
+                if tz is not None:
+                    if base_dt.tzinfo is None:
+                        base_local = base_dt.replace(tzinfo=tz)
+                    else:
+                        base_local = base_dt.astimezone(tz)
+                else:
+                    base_local = base_dt
+                hh, mm = [int(x) for x in time_local.split(":")] if ":" in time_local else (0, 0)
+                new_local = base_local.replace(hour=hh, minute=mm, second=0, microsecond=0)
+                payload["reminder_time"] = new_local.isoformat()
+            except Exception:
+                pass
+        if frequency is not None and match.get("is_recurring"):
+            # Map frequency string to recurrence pattern
+            interval = 1 if frequency == "daily" else (2 if frequency == "every_2_days" else 7)
+            payload["recurrence_pattern"] = {"type": "daily", "interval": interval}
+
+        if payload:
+            pr = push_update_reminder(reminder_id, payload, timeout=10)
+            pr.raise_for_status()
+    except Exception as e:
+        # Best-effort: configuration JSON persisted even if reminders service update fails
+        return {"updated": True, "warning": f"partial update: {e}"}
+
+    return {"updated": True}
+
+
 @router.patch("/goals/{goal_id}/activate")
 def activate_goal(
     goal_id: int,
@@ -252,10 +517,112 @@ def activate_goal(
     # Perform atomic status switch using direct UPDATEs to avoid stale ORM states
     from datetime import datetime
     # Deactivate all current actives for this user
+    # Capture the currently active goal ids so we can pause their reminders
+    active_ids = [g.id for g in db.query(NutritionGoal.id).filter(NutritionGoal.user_id == current_user.id, NutritionGoal.status == "active").all()]
     db.query(NutritionGoal).filter(NutritionGoal.user_id == current_user.id, NutritionGoal.status == "active").update({"status": "inactive"}, synchronize_session=False)
     # Activate requested goal
     db.query(NutritionGoal).filter(NutritionGoal.id == goal.id, NutritionGoal.user_id == current_user.id).update({"status": "active", "effective_at": datetime.utcnow()}, synchronize_session=False)
     db.commit()
+    
+    # Pause reminders linked to previously active goals: mark user_reminder_configs inactive and set reminders is_active=false
+    try:
+        if active_ids:
+            gid_strs = [str(x) for x in active_ids]
+            # Mark configs inactive
+            db.execute(
+                _sa_text(
+                    """
+                    UPDATE user_reminder_configs
+                    SET active = false, updated_at = now()
+                    WHERE user_id = :uid AND context = 'nutrition_goal' AND context_id = ANY(:gids)
+                    """
+                ),
+                {"uid": str(current_user.id), "gids": gid_strs},
+            )
+            # Fetch external_ids to pause
+            rows = db.execute(
+                _sa_text(
+                    """
+                    SELECT external_id
+                    FROM user_reminder_configs
+                    WHERE user_id = :uid AND context = 'nutrition_goal' AND context_id = ANY(:gids)
+                    """
+                ),
+                {"uid": str(current_user.id), "gids": gid_strs},
+            ).mappings().all()
+            external_ids = [r["external_id"] for r in rows if r.get("external_id")]
+        else:
+            external_ids = []
+        # Persist inactive flag immediately
+        db.commit()
+    except Exception:
+        external_ids = []
+
+    # Best-effort call to reminders service
+    try:
+        if external_ids:
+            from app.reminders.client import push_list_reminders, push_update_reminder
+            items = push_list_reminders(str(current_user.id))
+            ext_to_item = {i.get("external_id"): i for i in items if i.get("external_id")}
+            for ext in external_ids:
+                it = ext_to_item.get(ext)
+                if not it:
+                    continue
+                rid = it.get("id")
+                if rid:
+                    try:
+                        push_update_reminder(rid, {"is_active": False}, timeout=8)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    # Reactivate configs and reminders for the newly activated goal
+    try:
+        # Mark configs for target goal active=true
+        db.execute(
+            _sa_text(
+                """
+                UPDATE user_reminder_configs
+                SET active = true, updated_at = now()
+                WHERE user_id = :uid AND context = 'nutrition_goal' AND context_id = :gid
+                """
+            ),
+            {"uid": str(current_user.id), "gid": str(goal.id)},
+        )
+        # Fetch external_ids for target goal
+        rows2 = db.execute(
+            _sa_text(
+                """
+                SELECT external_id
+                FROM user_reminder_configs
+                WHERE user_id = :uid AND context = 'nutrition_goal' AND context_id = :gid
+                """
+            ),
+            {"uid": str(current_user.id), "gid": str(goal.id)},
+        ).mappings().all()
+        to_activate = [r["external_id"] for r in rows2 if r.get("external_id")]
+        db.commit()
+    except Exception:
+        to_activate = []
+
+    try:
+        if to_activate:
+            from app.reminders.client import push_list_reminders, push_update_reminder
+            items = push_list_reminders(str(current_user.id))
+            ext_to_item = {i.get("external_id"): i for i in items if i.get("external_id")}
+            for ext in to_activate:
+                it = ext_to_item.get(ext)
+                if not it:
+                    continue
+                rid = it.get("id")
+                if rid:
+                    try:
+                        push_update_reminder(rid, {"is_active": True}, timeout=8)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
     # Refresh goal instance
     goal = crud.nutrition_goals.get_with_targets(db, goal_id, current_user.id)
 
@@ -299,13 +666,62 @@ def delete_goal(
     if goal.status == "active":
         raise HTTPException(status_code=400, detail="Cannot delete active goal. Activate another goal first.")
 
+    # Gather reminder external_ids for this goal before removing configs
+    external_ids: list[str] = []
+    try:
+        rows = db.execute(
+            _sa_text(
+                """
+                SELECT external_id
+                FROM user_reminder_configs
+                WHERE user_id = :uid AND context = 'nutrition_goal' AND context_id = :gid
+                """
+            ),
+            {"uid": str(current_user.id), "gid": goal.id},
+        ).mappings().all()
+        external_ids = [r["external_id"] for r in rows if r.get("external_id")]
+    except Exception:
+        external_ids = []
+
     # Delete user focus rows for this goal to avoid FK orphans
     db.query(UserNutrientFocus).filter(UserNutrientFocus.goal_id == goal.id).delete(synchronize_session=False)
     # Delete meal plans for this goal
     db.query(NutritionMealPlan).filter(NutritionMealPlan.goal_id == goal.id).delete(synchronize_session=False)
+    # Delete reminder configs for this goal
+    try:
+        db.execute(
+            _sa_text(
+                """
+                DELETE FROM user_reminder_configs
+                WHERE user_id = :uid AND context = 'nutrition_goal' AND context_id = :gid
+                """
+            ),
+            {"uid": str(current_user.id), "gid": goal.id},
+        )
+    except Exception:
+        pass
     # Deleting the goal cascades to targets via ORM relationship
     db.delete(goal)
     db.commit()
+
+    # Best-effort: delete reminders in reminders service for this plan
+    try:
+        if external_ids:
+            from app.reminders.client import push_list_reminders, push_delete_reminder
+            items = push_list_reminders(str(current_user.id))
+            ext_to_item = {i.get("external_id"): i for i in items if i.get("external_id")}
+            for ext in external_ids:
+                it = ext_to_item.get(ext)
+                if not it:
+                    continue
+                rid = it.get("id")
+                if rid:
+                    try:
+                        push_delete_reminder(rid, timeout=8)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
     return {"success": True}
 
 

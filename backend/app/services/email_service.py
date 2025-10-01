@@ -36,9 +36,8 @@ class EmailService:
         Send password reset email to user
         """
         try:
-            # Use the configured password reset URL (can be different from frontend URL)
-            password_reset_base_url = getattr(settings, 'PASSWORD_RESET_BASE_URL', self.frontend_url)
-            reset_url = f"{password_reset_base_url}/reset-password?token={reset_token}"
+            # Build reset URL using FRONTEND_URL only
+            reset_url = f"{self.frontend_url.rstrip('/')}/reset-password?token={reset_token}"
             
             # Create message
             msg = MIMEMultipart("alternative")
@@ -162,8 +161,7 @@ class EmailService:
             if os.getenv("ENVIRONMENT") == "development":
                 print(f"📧 [DEV] Would send email to {to_email}")
                 print(f"📧 [DEV] Subject: {msg['Subject']}")
-                password_reset_base_url = getattr(settings, 'PASSWORD_RESET_BASE_URL', self.frontend_url)
-                print(f"📧 [DEV] Reset URL: {password_reset_base_url}/reset-password?token=...")
+                print(f"📧 [DEV] Reset URL: {self.frontend_url.rstrip('/')}/reset-password?token=...")
                 return True  # Return True in dev mode to not break the flow
             return False
 

@@ -110,6 +110,9 @@ async def get_s3_presigned_url(
     """
     try:
         from app.services.s3_service import generate_presigned_get_url, is_s3_uri
+        # Normalize common legacy path 'uploads/chat/plots' -> 'uploads/plots'
+        if "/uploads/chat/plots/" in s3_uri:
+            s3_uri = s3_uri.replace("/uploads/chat/plots/", "/uploads/plots/")
         if not is_s3_uri(s3_uri):
             raise HTTPException(status_code=400, detail="Invalid S3 URI; must start with s3://")
         if expires_in <= 0 or expires_in > 86400:

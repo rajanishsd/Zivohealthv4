@@ -7,6 +7,7 @@ except Exception:  # pragma: no cover
     ZoneInfo = None  # type: ignore
 
 from app.core.config import settings
+from app.core.database_utils import get_raw_db_connection
 from sqlalchemy.sql import text, func
 
 
@@ -98,3 +99,39 @@ def local_now_db_func():
     """
     tz_name = getattr(settings, "DEFAULT_TIMEZONE", "UTC")
     return func.timezone(tz_name, func.now())
+
+
+# --- User-specific timezone helpers ---
+def get_user_timezone(user_id: Optional[int]) -> Optional[str]:
+    """
+    Fetch the user's timezone from user_profiles, if available.
+    Returns a TZ database name like 'America/Los_Angeles' or None if unavailable.
+    """
+    if not user_id:
+        return None
+    try:
+        with get_raw_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT timezone FROM user_profiles WHERE user_id = %s",
+                    (int(user_id),)
+                )
+                row = cursor.fetchone()
+                if row and row[0]:
+                    return str(row[0])
+    except Exception:
+        return None
+    return None
+
+
+def user_now(user_id: Optional[int]) -> datetime:
+    """
+    Return current datetime in the user's timezone if set; fallback to server default local.
+    """
+    tz_name = get_user_timezone(user_id)
+    if tz_name and ZoneInfo is not None:
+        try:
+            return datetime.now(ZoneInfo(tz_name))
+        except Exception:
+            pass
+    return now_local()

@@ -1,6 +1,7 @@
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import os
@@ -50,7 +51,8 @@ def _enrich_visualizations_with_presigned_urls(visualizations):
         if not isinstance(viz, dict):
             enriched_list.append(viz)
             continue
-        s3_path = viz.get("file_path") or viz.get("path") or viz.get("s3_uri")
+        # Prefer canonical s3_uri if present; fallback to file_path/path
+        s3_path = viz.get("s3_uri") or viz.get("file_path") or viz.get("path")
         presigned_url = None
         if s3_path and is_s3_uri and is_s3_uri(s3_path):
             try:
@@ -60,6 +62,10 @@ def _enrich_visualizations_with_presigned_urls(visualizations):
         if presigned_url:
             updated = dict(viz)
             updated["presigned_url"] = presigned_url
+            # Also ensure top-level path fields are aligned to the canonical S3 URI
+            if viz.get("s3_uri"):
+                updated.setdefault("file_path", viz.get("s3_uri"))
+                updated.setdefault("plot_path", viz.get("s3_uri"))
             enriched_list.append(updated)
         else:
             enriched_list.append(viz)
@@ -72,6 +78,8 @@ class ChatConnectionManager:
     
     def __init__(self):
         self.active_connections: dict[int, list[WebSocket]] = {}  # session_id -> [websockets]
+        # Track last status per session to let heartbeat logic stop after completion
+        self.last_status_by_session: dict[int, str] = {}
     
     async def connect(self, websocket: WebSocket, session_id: int):
         await websocket.accept()
@@ -108,6 +116,12 @@ class ChatConnectionManager:
             # Clean up disconnected connections
             for connection in disconnected:
                 self.disconnect(connection, session_id)
+            # Record last status (except heartbeats) for heartbeat control
+            try:
+                if status_message.status and status_message.status != "heartbeat":
+                    self.last_status_by_session[session_id] = status_message.status
+            except Exception:
+                pass
         else:
             print(f"⚠️ [Status] No active connections for session {session_id}")
     
@@ -832,9 +846,78 @@ async def websocket_chat_status(
     except Exception:
         pass
     try:
+        # Heartbeat to keep the WebSocket alive and detect disconnects
+        heartbeat_interval = 25  # seconds
+        last_heartbeat = asyncio.get_event_loop().time()
+        session_start_ts = last_heartbeat
         while True:
             # Keep connection alive and listen for disconnect
             await asyncio.sleep(1)
+            now = asyncio.get_event_loop().time()
+            # Proactively detect disconnects
+            try:
+                if session_id not in connection_manager.active_connections or \
+                   websocket not in connection_manager.active_connections.get(session_id, []):
+                    print(f"❌ [WebSocket] Connection no longer tracked for session {session_id}; exiting loop")
+                    break
+                if getattr(websocket, "client_state", None) and websocket.client_state != WebSocketState.CONNECTED:
+                    print(f"❌ [WebSocket] Client state not CONNECTED for session {session_id}; exiting loop")
+                    break
+            except Exception:
+                pass
+            if now - last_heartbeat >= heartbeat_interval:
+                # Stop heartbeats after completion to avoid confusing clients
+                try:
+                    if connection_manager.last_status_by_session.get(session_id) == "complete":
+                        print(f"💤 [WebSocket] Heartbeat paused after completion for session {session_id}")
+                        last_heartbeat = now
+                        continue
+                except Exception:
+                    pass
+                # Enforce a max heartbeat window; after timeout, force a final complete
+                try:
+                    from app.core.config import settings as _settings
+                    max_window = int(getattr(_settings, "CHAT_WS_HEARTBEAT_MAX_SECONDS", 300) or 300)
+                except Exception:
+                    max_window = 300
+                if now - session_start_ts >= max_window:
+                    try:
+                        # Send a final synthetic completion so clients clear analyzing state
+                        await connection_manager.send_status_update(
+                            session_id,
+                            ChatStatusMessage(
+                                session_id=session_id,
+                                status="complete",
+                                message=None,
+                                progress=1.0,
+                                agent_name="System"
+                            )
+                        )
+                        connection_manager.last_status_by_session[session_id] = "complete"
+                        print(f"⏱️ [WebSocket] Max heartbeat window reached; sent complete for session {session_id}")
+                    except Exception as _ce:
+                        print(f"⚠️ [WebSocket] Failed to send forced complete for session {session_id}: {_ce}")
+                    # After forced complete, continue the loop; subsequent iterations will pause HB
+                    last_heartbeat = now
+                    continue
+                try:
+                    hb = ChatStatusMessage(
+                        session_id=session_id,
+                        status="heartbeat",
+                        message=None,
+                        progress=0.0,
+                        agent_name="System"
+                    )
+                    await websocket.send_text(hb.model_dump_json())
+                    print(f"💓 [WebSocket] Heartbeat sent for session {session_id}")
+                except Exception as _hb_e:
+                    print(f"❌ [WebSocket] Heartbeat failed for session {session_id}: {_hb_e}")
+                    try:
+                        connection_manager.disconnect(websocket, session_id)
+                    except Exception:
+                        pass
+                    break
+                last_heartbeat = now
     except WebSocketDisconnect:
         print(f"❌ [WebSocket] Client disconnected from session {session_id}")
         connection_manager.disconnect(websocket, session_id)
@@ -1455,9 +1538,9 @@ async def process_streaming_response(
                 "visualizations": _enrich_visualizations_with_presigned_urls(ai_msg_payload["visualizations"]),
             }
         }
-        # If the client temporarily disconnected, wait briefly for WS to reattach before sending final status
+        # If the client temporarily disconnected, wait for WS to reattach before sending final status
         try:
-            await _wait_for_ws_connection(session_id, 10.0)
+            await _wait_for_ws_connection(session_id, 30.0)
         except Exception:
             pass
 

@@ -47,6 +47,7 @@ class LabAgentState:
     # Input data
     original_prompt: str = ""
     user_id: Optional[int] = None
+    session_id: Optional[int] = None
     extracted_text: Optional[str] = None
     image_path: Optional[str] = None  # Path to lab image for processing (only if no extracted_text)
     image_base64: Optional[str] = None  # Base64 encoded image data
@@ -973,6 +974,7 @@ class LabAgentLangGraph:
             initial_state = LabAgentState(
                 original_prompt=prompt,
                 user_id=user_id,
+                session_id=session_id,
                 extracted_text=extracted_text,
                 image_path=image_path,
                 image_base64=image_base64,
@@ -990,7 +992,7 @@ class LabAgentLangGraph:
             config = None
             if callbacks:
                 config = {
-                    "configurable": {"thread_id": f"lab-agent-{user_id}"},
+                    "configurable": {"thread_id": f"lab-agent-{user_id}-{session_id}" if session_id is not None else f"lab-agent-{user_id}"},
                     "callbacks": [LangChainTracer()]
                 }
             if config:

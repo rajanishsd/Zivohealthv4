@@ -16,7 +16,6 @@ FROM_EMAIL=noreply@zivohealth.ai
 FRONTEND_URL=https://zivohealth.ai
 
 # Password Reset Configuration
-PASSWORD_RESET_BASE_URL=https://api.zivohealth.ai  # Optional: Base URL for password reset links (defaults to FRONTEND_URL)
 PASSWORD_RESET_TOKEN_EXPIRY_MINUTES=30
 ```
 

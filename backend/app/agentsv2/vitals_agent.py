@@ -119,6 +119,7 @@ class VitalsAgentState:
     # Input data
     original_prompt: str = ""
     user_id: Optional[int] = None
+    session_id: Optional[int] = None
     extracted_text: Optional[str] = None
     image_path: Optional[str] = None  # Path to vitals image for processing (only if no extracted_text)
     image_base64: Optional[str] = None  # Base64 encoded image data
@@ -1039,7 +1040,7 @@ IMPORTANT:
         
         return state
 
-    async def run(self, prompt: str, user_id: int, extracted_text: str = None, image_path: str = None, image_base64: str = None, source_file_path: str = None) -> Dict[str, Any]:
+    async def run(self, prompt: str, user_id: int, session_id: int = None, extracted_text: str = None, image_path: str = None, image_base64: str = None, source_file_path: str = None) -> Dict[str, Any]:
         """
         Execute the vitals agent workflow.
         
@@ -1058,6 +1059,7 @@ IMPORTANT:
             initial_state = VitalsAgentState(
                 original_prompt=prompt,
                 user_id=user_id,
+                session_id=session_id,
                 extracted_text=extracted_text,
                 image_path=image_path,
                 image_base64=image_base64,
@@ -1068,7 +1070,7 @@ IMPORTANT:
             config = None
             if hasattr(settings, 'LANGCHAIN_TRACING_V2') and settings.LANGCHAIN_TRACING_V2:
                 config = {
-                    "configurable": {"thread_id": f"vitals-agent-{user_id}"},
+                    "configurable": {"thread_id": f"vitals-agent-{user_id}-{session_id}" if session_id is not None else f"vitals-agent-{user_id}"},
                     "callbacks": [LangChainTracer()]
                 }
             if config:

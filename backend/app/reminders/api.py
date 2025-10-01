@@ -1,11 +1,12 @@
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.api.deps import verify_api_key_dependency
-from .unified_schemas import ReminderCreate, ReminderRead, ReminderAck, DeviceTokenCreate, DeviceTokenRead, ReminderQueued
+from .unified_schemas import ReminderCreate, ReminderRead, ReminderAck, DeviceTokenCreate, DeviceTokenRead, ReminderQueued, ReminderUpdate
+from .unified_models import Reminder
 from .repository import get_reminder, list_reminders, mark_acknowledged, upsert_device_token
 from .unified_service import UnifiedReminderService
 from .celery_app import celery_app
@@ -38,6 +39,52 @@ def create_reminder_endpoint(payload: ReminderCreate, db: Session = Depends(get_
     return ReminderQueued(external_id=payload.external_id, queued_at=datetime.utcnow())
 
 
+@router.patch("/{reminder_id}", response_model=ReminderRead)
+def update_reminder_endpoint(reminder_id: str, payload: ReminderUpdate, db: Session = Depends(get_db)):
+    """Update an existing reminder (supports both one-time and recurring)."""
+    service = UnifiedReminderService(db)
+    r = service.update_reminder(reminder_id, payload)
+    if not r:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    return ReminderRead(
+        id=str(r.id),
+        user_id=r.user_id,
+        reminder_time=r.reminder_time,
+        reminder_type=r.reminder_type,
+        title=r.title,
+        message=r.message,
+        payload=r.payload,
+        status=r.status,
+        is_recurring=r.is_recurring,
+        recurrence_pattern=r.recurrence_pattern,
+        parent_reminder_id=str(r.parent_reminder_id) if getattr(r, "parent_reminder_id", None) else None,
+        occurrence_number=r.occurrence_number,
+        is_generated=r.is_generated,
+        start_date=r.start_date,
+        end_date=r.end_date,
+        max_occurrences=r.max_occurrences,
+        timezone=r.timezone,
+        last_occurrence=r.last_occurrence,
+        next_occurrence=r.next_occurrence,
+        occurrence_count=r.occurrence_count,
+        is_active=r.is_active,
+        external_id=r.external_id,
+        created_at=r.created_at,
+        updated_at=r.updated_at,
+    )
+
+
+@router.delete("/{reminder_id}", status_code=204)
+def delete_reminder_endpoint(reminder_id: str, db: Session = Depends(get_db)):
+    """Delete a reminder by ID (supports both one-time and recurring templates)."""
+    r = db.get(Reminder, reminder_id)
+    if not r:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    db.delete(r)
+    db.commit()
+    return Response(status_code=204)
+
+
 @router.get("/", response_model=List[ReminderRead])
 def list_reminders_endpoint(
     user_id: Optional[str] = None,
@@ -52,10 +99,26 @@ def list_reminders_endpoint(
         ReminderRead(
             id=str(i.id),
             user_id=i.user_id,
-            reminder_time=i.reminder_time,
             reminder_type=i.reminder_type,
+            title=getattr(i, "title", None),
+            message=getattr(i, "message", None),
             payload=i.payload,
+            reminder_time=i.reminder_time,
             status=i.status,
+            external_id=getattr(i, "external_id", None),
+            is_recurring=bool(getattr(i, "is_recurring", False)),
+            recurrence_pattern=getattr(i, "recurrence_pattern", None),
+            parent_reminder_id=str(getattr(i, "parent_reminder_id", "")) if getattr(i, "parent_reminder_id", None) else None,
+            occurrence_number=getattr(i, "occurrence_number", None),
+            is_generated=bool(getattr(i, "is_generated", False)),
+            start_date=getattr(i, "start_date", None),
+            end_date=getattr(i, "end_date", None),
+            max_occurrences=getattr(i, "max_occurrences", None),
+            timezone=getattr(i, "timezone", None),
+            last_occurrence=getattr(i, "last_occurrence", None),
+            next_occurrence=getattr(i, "next_occurrence", None),
+            occurrence_count=int(getattr(i, "occurrence_count", 0)),
+            is_active=bool(getattr(i, "is_active", True)),
             created_at=i.created_at,
             updated_at=i.updated_at,
         )

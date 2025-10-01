@@ -34,6 +34,41 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Function to stop LiveKit (Docker container)
+stop_livekit() {
+    print_status "Stopping LiveKit media server..."
+    local PID_FILE="backend/data/livekit.pid"
+
+    # Try stopping binary if running
+    if [ -f "$PID_FILE" ]; then
+        local PID=$(cat "$PID_FILE" 2>/dev/null || true)
+        if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+            kill "$PID" 2>/dev/null || true
+            sleep 1
+            if kill -0 "$PID" 2>/dev/null; then
+                print_warning "Force killing LiveKit process (PID: $PID)..."
+                kill -9 "$PID" 2>/dev/null || true
+            fi
+            rm -f "$PID_FILE" || true
+            print_success "LiveKit (binary) stopped"
+        else
+            rm -f "$PID_FILE" || true
+        fi
+    fi
+
+    # Also stop container if present
+    if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -q '^zivohealth-livekit$'; then
+        docker rm -f zivohealth-livekit >/dev/null 2>&1 || true
+        print_success "LiveKit container stopped"
+    fi
+
+    # Free port if still busy
+    if lsof -ti:7880 >/dev/null 2>&1; then
+        print_warning "LiveKit signaling port still busy; retrying kill..."
+        kill $(lsof -ti:7880) 2>/dev/null || true
+    fi
+}
+
 # Function to check if a service is running
 check_service_running() {
     local service=$1
@@ -231,6 +266,9 @@ stop_service() {
         "dashboard")
             stop_dashboard
             ;;
+        "livekit")
+            stop_livekit
+            ;;
         "backend")
             stop_backend
             ;;
@@ -245,7 +283,7 @@ stop_service() {
             ;;
         *)
             print_error "Unknown service: $service"
-            print_status "Available services: dashboard, backend, redis, postgresql, reminders"
+            print_status "Available services: dashboard, backend, redis, postgresql, reminders, livekit"
             exit 1
             ;;
     esac
@@ -276,6 +314,9 @@ main() {
     stop_reminders
     echo ""
     
+    stop_livekit
+    echo ""
+
     stop_backend
     echo ""
     

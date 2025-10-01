@@ -64,12 +64,12 @@ class ReminderRead(BaseModel):
     id: str
     user_id: str
     reminder_type: str
-    title: Optional[str]
-    message: Optional[str]
+    title: Optional[str] = None
+    message: Optional[str] = None
     payload: Dict[str, Any]
     reminder_time: datetime
     status: str
-    external_id: Optional[str]
+    external_id: Optional[str] = None
     
     # Recurrence fields
     is_recurring: bool
@@ -100,6 +100,7 @@ class ReminderUpdate(BaseModel):
     
     # Recurrence fields
     recurrence_pattern: Optional[Dict[str, Any]] = None
+    start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     timezone: Optional[str] = None
     is_active: Optional[bool] = None

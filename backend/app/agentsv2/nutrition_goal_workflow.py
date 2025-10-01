@@ -47,6 +47,9 @@ class NutritionalGoalState(TypedDict):
     plan_confirmed: bool
     revision_count: int
     user_revision_request: Optional[str]
+    # Reminder setup fields
+    reminders_confirmed: bool
+    reminder_preferences: Dict[str, Any]
 
 
 class NutritionalGoalWorkflow:
@@ -61,6 +64,7 @@ class NutritionalGoalWorkflow:
         g.add_node("collect_and_update_data", self.collect_and_update_data)
         g.add_node("prepare_nutrition_goal", self.prepare_nutrition_goal)
         g.add_node("confirm_nutrition_plan", self.confirm_nutrition_plan)
+        g.add_node("collect_meal_reminder_preferences", self.collect_meal_reminder_preferences)
         g.add_node("set_nutrition_goal", self.set_nutrition_goal)
         g.add_node("set_nutrition_targets", self.set_nutrition_targets)
         g.add_node("set_nutrition_meal_plans", self.set_nutrition_meal_plans)
@@ -80,7 +84,12 @@ class NutritionalGoalWorkflow:
         g.add_conditional_edges(
             "confirm_nutrition_plan",
             self.route_after_confirm,
-            {"accept": "set_nutrition_goal", "revise": "prepare_nutrition_goal", "error": "handle_error"},
+            {"accept": "collect_meal_reminder_preferences", "revise": "prepare_nutrition_goal", "error": "handle_error"},
+        )
+        g.add_conditional_edges(
+            "collect_meal_reminder_preferences",
+            self.route_after_collect_reminders,
+            {"ok": "set_nutrition_goal", "error": "handle_error"},
         )
         g.add_conditional_edges(
             "set_nutrition_goal",
@@ -116,6 +125,9 @@ class NutritionalGoalWorkflow:
         if state.get("plan_confirmed"):
             return "accept"
         return "error"
+    
+    def route_after_collect_reminders(self, state: NutritionalGoalState) -> str:
+        return "ok" if state.get("reminders_confirmed") else "error"
     
     def route_after_set_targets(self, state: NutritionalGoalState) -> str:
         return "ok" if state.get("targets_created") else "error"
@@ -159,6 +171,7 @@ class NutritionalGoalWorkflow:
                     JSON string with all responses organized by category
                 """
                 import json
+                from app.agentsv2.tools.chat_context_utils import ask_question_with_post_context
                 
                 # Split questions by newlines
                 question_list = [q.strip() for q in questions.split('\n') if q.strip()]
@@ -181,16 +194,8 @@ class NutritionalGoalWorkflow:
                         question_text += '?'
                     
                     print(f"🤖 Agent asked: {question_text}")
-                    
-                    # Use ask_user_question_and_wait directly to bypass session lock
-                    try:
-                        from app.api.v1.endpoints.chat_sessions import ask_user_question_and_wait
-                        response = await ask_user_question_and_wait(session_id, str(user_id), question_text, timeout_sec=300.0)
-                    except Exception as e:
-                        print(f"❌ Error asking question: {e}")
-                        response = f"Error asking question: {e}"
-                    
-                    print(f"👤 User responded: {response}")
+                    result = await ask_question_with_post_context(session_id, str(user_id), question_text, timeout_sec=300.0)
+                    response = result.get("response", "")
                     
                     # Organize by category
                     if category not in responses:
@@ -200,7 +205,9 @@ class NutritionalGoalWorkflow:
                     key = question_text.lower().replace('?', '').replace(' ', '_')[:30]
                     responses[category][key] = {
                         "question": question_text,
-                        "response": response
+                        "response": response,
+                        "post_question_context": result.get("post_question_context", []),
+                        "context_plus_response": result.get("context_plus_response", "")
                     }
                 
                 return json.dumps(responses)
@@ -250,33 +257,11 @@ class NutritionalGoalWorkflow:
                     "GOALS_OBJECTIVES: What is your expected timeframe for achieving these goals?\n"
                     "GOALS_OBJECTIVES: When do you want to start this nutrition plan? (e.g., immediately, next week, specific date)\n"
                     "GOALS_OBJECTIVES: What is your target completion date or duration for achieving your goals?( Don't ask this question if user has already provided the timeframe, calculate it from the start date and timeframe)\n"
-                    "LIFESTYLE_ACTIVITY: What does your typical daily routine look like?\n"
-                    "LIFESTYLE_ACTIVITY: How would you describe your physical activity level?\n"
-                    "LIFESTYLE_ACTIVITY: What type of exercise do you do regularly?\n"
-                    "LIFESTYLE_ACTIVITY: How often and for how long do you exercise?\n"
-                    "LIFESTYLE_ACTIVITY: What type of work do you do?\n"
-                    "DIETARY_HABITS_PREFERENCES: How many meals and snacks do you typically have per day?\n"
-                    "DIETARY_HABITS_PREFERENCES: What is your dietary preference?\n"
-                    "DIETARY_HABITS_PREFERENCES: What foods do you dislike?\n"
-                    "DIETARY_HABITS_PREFERENCES: Do you cook at home or eat out frequently?\n"
-                    "DIETARY_HABITS_PREFERENCES: Do you consume alcohol, smoke, or drink caffeine?\n"
-                    "BODY_COMPOSITION_METABOLISM: How much water do you drink per day?\n"
-                    "PSYCHOLOGICAL_BEHAVIORAL: How motivated are you to make dietary changes?\n"
-                    "PSYCHOLOGICAL_BEHAVIORAL: Do you have any emotional eating patterns?\n"
-                    "PSYCHOLOGICAL_BEHAVIORAL: Have you tried dieting before? What worked or didn't work?\n"
-                    "SPECIAL_CONSIDERATIONS: Do you have any religious or cultural dietary restrictions?\n"
-                    "SPECIAL_CONSIDERATIONS: Do you travel frequently or eat out often?\n"
-                    "SPECIAL_CONSIDERATIONS: Do you have any specific health concerns?\n\n"
                     "OUTPUT FORMAT (return ONLY JSON; no commentary): Capture all the units for the values in the JSON.\n"
                     "{\n"
                     "  \"personal_demographics\": { \"age\": number, \"gender\": string, \"height_cm\": number, \"weight_kg\": number, \"waist_circumference_cm\": number | null, \"hip_circumference_cm\": number | null, \"neck_circumference_cm\": number | null, \"waist_to_hip_ratio\": number | null, \"bmi\": number, \"bmr_kcal\": number, \"tdee_kcal\": number, \"body_fat_percentage\": number | null },\n"
                     "  \"health_medical_profile\": { ... },\n"
                     "  \"goals_objectives\": { \"goal_name: Derive this from the user input objective\": string, \"goal_description: Derive this from the user input objective\": string, \"primary_goal\": string | null, \"secondary_goals\": [string], \"start_date\": string, \"target_completion_date\": string, \"timeframe_duration\": string },\n"
-                    "  \"lifestyle_activity\": { ... },\n"
-                    "  \"dietary_habits_preferences\": { ... },\n"
-                    "  \"body_composition_metabolism\": { ... },\n"
-                    "  \"psychological_behavioral\": { ... },\n"
-                    "  \"special_considerations\": { ... }\n"
                     "}"
                 )
 
@@ -355,7 +340,13 @@ class NutritionalGoalWorkflow:
             @tool
             async def ask_clarifying_question(question: str) -> str:
                 """Ask the user a clarifying question and return their response."""
-                return await ask_user_question(question, session_id, str(user_id))
+                from app.agentsv2.tools.chat_context_utils import ask_question_with_post_context
+                result = await ask_question_with_post_context(session_id, str(user_id), question, timeout_sec=300.0)
+                ctx = result.get("post_question_context") or []
+                if ctx:
+                    lines = [f"{m.get('role')}: {m.get('content')}" for m in ctx]
+                    return (str(result.get("response", "")) + "\n\nContext since question:\n" + "\n".join(lines)).strip()
+                return str(result.get("response", ""))
             tools.append(ask_clarifying_question)
 
         @tool
@@ -621,9 +612,13 @@ class NutritionalGoalWorkflow:
             - Do not call confirm_plan_acceptance() or request_plan_revision() in the same turn
               that you are still clarifying.
             """
-            # Use the imported function directly to allow mocking
-            from app.agentsv2.customer_workflow import ask_user_question
-            return await ask_user_question(question, session_id, str(user_id))
+            from app.agentsv2.tools.chat_context_utils import ask_question_with_post_context
+            result = await ask_question_with_post_context(session_id, str(user_id), question, timeout_sec=300.0)
+            ctx = result.get("post_question_context") or []
+            if ctx:
+                lines = [f"{m.get('role')}: {m.get('content')}" for m in ctx]
+                return (str(result.get("response", "")) + "\n\nContext since question:\n" + "\n".join(lines)).strip()
+            return str(result.get("response", ""))
 
         @tool
         async def confirm_plan_acceptance() -> str:
@@ -765,6 +760,178 @@ class NutritionalGoalWorkflow:
             state["plan_confirmed"] = True
             return state
 
+    async def collect_meal_reminder_preferences(self, state: NutritionalGoalState) -> NutritionalGoalState:
+        """Collect and confirm daily meal reminder preferences (JSON-only) after plan acceptance."""
+        user_id = state["user_id"]
+        session_id = state.get("session_id")
+        state["reminders_confirmed"] = bool(state.get("reminders_confirmed"))
+        if not (session_id and user_id):
+            # No interactive session; set sensible defaults
+            tz = getattr(settings, "DEFAULT_TIMEZONE", "Asia/Kolkata")
+            from datetime import date
+            state["reminder_preferences"] = {
+                "timezone": tz,
+                "start_date": date.today().isoformat(),
+                "reminders": [
+                    {"meal": "breakfast", "time_local": "09:00", "frequency": "daily"},
+                    {"meal": "lunch", "time_local": "13:00", "frequency": "daily"},
+                    {"meal": "dinner", "time_local": "20:00", "frequency": "daily"},
+                ],
+                "source": "default",
+            }
+            state["reminders_confirmed"] = True
+            return state
+
+        @tool
+        async def ask_for_reminders(prompt: str) -> str:
+            """Ask the user to reply ONLY with JSON per schema for meal reminders."""
+            from app.agentsv2.customer_workflow import ask_user_question
+            return await ask_user_question(prompt, session_id, str(user_id))
+
+        @tool
+        async def save_reminder_preferences(reminders_json: str) -> str:
+            """Validate and save reminder preferences JSON into state. Returns 'ok' or error string."""
+            try:
+                data = json.loads(reminders_json)
+            except Exception as e:
+                return f"invalid_json: {e}"
+
+            # Normalize and validate
+            tz = data.get("timezone") or getattr(settings, "DEFAULT_TIMEZONE", "Asia/Kolkata")
+            start_date = data.get("start_date")
+            reminders = data.get("reminders")
+            if not isinstance(reminders, list):
+                return "invalid_schema: reminders must be a list"
+            allowed_meals = {"breakfast", "lunch", "dinner"}
+            seen = set()
+            normalized = []
+            def _normalize_time(s: str) -> str | None:
+                """Accepts 'HH:MM', 'H:MM', 'HH', 'H', '10am', '10 pm', '10:30AM' and returns 24h 'HH:MM'."""
+                if s is None:
+                    return None
+                raw = str(s).strip().lower().replace(".", "")
+                # Extract am/pm
+                meridian = None
+                if raw.endswith("am"):
+                    meridian = "am"
+                    raw = raw[:-2].strip()
+                elif raw.endswith("pm"):
+                    meridian = "pm"
+                    raw = raw[:-2].strip()
+                # Split hour and minute
+                if ":" in raw:
+                    parts = raw.split(":", 1)
+                    hh_str, mm_str = parts[0].strip(), parts[1].strip()
+                else:
+                    hh_str, mm_str = raw, "00"
+                if not hh_str.isdigit() or not mm_str.isdigit():
+                    return None
+                hh, mm = int(hh_str), int(mm_str)
+                if meridian:
+                    if hh == 12:
+                        hh = 0 if meridian == "am" else 12
+                    elif 1 <= hh <= 11 and meridian == "pm":
+                        hh += 12
+                # Bounds
+                if not (0 <= hh <= 23 and 0 <= mm <= 59):
+                    return None
+                return f"{hh:02d}:{mm:02d}"
+            for r in reminders:
+                if not isinstance(r, dict):
+                    return "invalid_schema: reminder item must be object"
+                meal = str(r.get("meal", "")).lower()
+                time_local = r.get("time_local")
+                freq = r.get("frequency") or "daily"
+                if meal not in allowed_meals:
+                    return f"invalid_meal: {meal}"
+                if meal in seen:
+                    return f"duplicate_meal: {meal}"
+                normalized_time = _normalize_time(time_local)
+                if not normalized_time:
+                    return f"invalid_time: {time_local}"
+                if freq not in ("daily", "every_2_days", "weekly"):
+                    return f"invalid_frequency: {freq}"
+                seen.add(meal)
+                normalized.append({"meal": meal, "time_local": normalized_time, "frequency": freq})
+            if seen != allowed_meals:
+                missing = ",".join(sorted(allowed_meals - seen))
+                return f"missing_meals: {missing}"
+
+            # Default start_date to today if absent
+            from datetime import date
+            if not start_date:
+                start_date = date.today().isoformat()
+
+            state["reminder_preferences"] = {
+                "timezone": tz,
+                "start_date": start_date,
+                "reminders": normalized,
+                "source": "user",
+            }
+            state["reminders_confirmed"] = True
+            return "ok"
+
+        tools = [ask_for_reminders, save_reminder_preferences]
+        llm = ChatOpenAI(
+            model=getattr(settings, 'CUSTOMER_AGENT_MODEL', None) or getattr(settings, 'DEFAULT_AI_MODEL', 'gpt-4o-mini'),
+            openai_api_key=settings.OPENAI_API_KEY,
+            temperature=0.0,
+        )
+        agent = create_react_agent(model=llm, tools=tools, prompt=None)
+
+        tz = state.get("user_timezone") or getattr(settings, "DEFAULT_TIMEZONE", "Asia/Kolkata")
+        from datetime import date
+        today_iso = date.today().isoformat()
+        system = (
+            "You are a reminder-setup assistant. Ask the user (in natural language) to confirm or edit daily reminder times for breakfast, lunch, and dinner to log nutrition.\n"
+            "- Suggest default local times: breakfast 09:00, lunch 13:00, dinner 20:00.\n"
+            "- Default frequency: 'daily'. Allowed: 'daily', 'every_2_days', 'weekly'.\n"
+            "- The USER will reply in free text. YOU must parse their reply and produce a JSON object matching the schema below. Do NOT ask the user to reply in JSON.\n\n"
+            "Schema (your internal output):\n"
+            "{\n"
+            "  \"timezone\": \"IANA timezone string (e.g., Asia/Kolkata)\",\n"
+            "  \"start_date\": \"YYYY-MM-DD\",\n"
+            "  \"reminders\": [\n"
+            "    {\"meal\": \"breakfast\", \"time_local\": \"HH:MM\", \"frequency\": \"daily|every_2_days|weekly\"},\n"
+            "    {\"meal\": \"lunch\",     \"time_local\": \"HH:MM\", \"frequency\": \"daily|every_2_days|weekly\"},\n"
+            "    {\"meal\": \"dinner\",    \"time_local\": \"HH:MM\", \"frequency\": \"daily|every_2_days|weekly\"}\n"
+            "  ]\n"
+            "}\n\n"
+            "Flow:\n"
+            "1) First, ask one concise clarification question via ask_for_reminders() that presents defaults and invites changes.\n"
+            "2) After receiving the user's free-text reply, generate the JSON yourself.\n"
+            "3) Validate it against the schema; if ambiguous or missing fields, ask ONE follow-up via ask_for_reminders(), then finalize.\n"
+            "4) Finally, call save_reminder_preferences(reminders_json) with the JSON string."
+        )
+
+        user_instruction = (
+            f"Context: timezone={tz}, today={today_iso}. Defaults: breakfast 09:00, lunch 13:00, dinner 20:00; frequency 'daily'.\n\n"
+            "Task: 1) Use ask_for_reminders() to ask the user in plain language to confirm or modify the times and frequency for each meal.\n"
+            "2) Parse their free-text reply and construct the JSON per schema.\n"
+            "3) Call save_reminder_preferences(reminders_json) with the finalized JSON."
+        )
+
+        try:
+            await agent.ainvoke(
+                {"messages": [SystemMessage(content=system), HumanMessage(content=user_instruction)]},
+                {"return_intermediate_steps": True, "recursion_limit": 10, "configurable": {"thread_id": state.get("request_id")}},
+            )
+        except Exception:
+            # On failure, fall back to defaults but continue flow
+            tz = getattr(settings, "DEFAULT_TIMEZONE", "Asia/Kolkata")
+            state["reminder_preferences"] = {
+                "timezone": tz,
+                "start_date": today_iso,
+                "reminders": [
+                    {"meal": "breakfast", "time_local": "09:00", "frequency": "daily"},
+                    {"meal": "lunch", "time_local": "13:00", "frequency": "daily"},
+                    {"meal": "dinner", "time_local": "20:00", "frequency": "daily"},
+                ],
+                "source": "default_error",
+            }
+            state["reminders_confirmed"] = True
+        return state
+
     async def set_nutrition_goal(self, state: NutritionalGoalState) -> NutritionalGoalState:
         """Create the nutrition goal record in the database using data from prepare node."""
         from datetime import datetime
@@ -792,6 +959,12 @@ class NutritionalGoalWorkflow:
             from psycopg2.extras import RealDictCursor
             with get_raw_db_connection() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    # Capture currently active goal ids to pause their reminders after deactivation
+                    cursor.execute(
+                        "SELECT id FROM nutrition_goals WHERE user_id = %s AND status = 'active'",
+                        [user_id],
+                    )
+                    previously_active_goal_ids = [int(r["id"]) for r in cursor.fetchall()] if cursor.rowcount else []
                     # First, deactivate any existing active goals for this user
                     deactivate_query = (
                         "UPDATE nutrition_goals SET status = 'inactive', updated_at = NOW() "
@@ -808,6 +981,35 @@ class NutritionalGoalWorkflow:
                     cursor.execute(insert_query, [user_id, str(goal_name), str(goal_description), "active", effective_at, expires_at])
                     row = cursor.fetchone()
                     goal_id = row["id"] if row else None
+
+                    # Mark existing reminder configs for the previously active goals as inactive
+                    try:
+                        if previously_active_goal_ids:
+                            _gid_strs = [str(x) for x in previously_active_goal_ids]
+                            cursor.execute(
+                                """
+                                UPDATE user_reminder_configs
+                                SET active = false, updated_at = NOW()
+                                WHERE user_id = %s AND context = 'nutrition_goal' AND context_id = ANY(%s)
+                                """,
+                                [str(user_id), _gid_strs],
+                            )
+
+                            # Fetch external_ids of those reminder configs to pause reminders service templates
+                            cursor.execute(
+                                """
+                                SELECT external_id
+                                FROM user_reminder_configs
+                                WHERE user_id = %s AND context = 'nutrition_goal' AND context_id = ANY(%s)
+                                """,
+                                [str(user_id), _gid_strs],
+                            )
+                            rows_ext = cursor.fetchall() or []
+                            external_ids_to_pause = [r["external_id"] for r in rows_ext if r.get("external_id")]
+                        else:
+                            external_ids_to_pause = []
+                    except Exception:
+                        external_ids_to_pause = []
         except Exception as e:
             state["set_goal_result"] = {"success": False, "goal_id": None, "errors": [str(e)], "message": "Failed to create nutrition goal"}
             state["goal_created"] = False
@@ -828,6 +1030,27 @@ class NutritionalGoalWorkflow:
             "message": message
         }
         state["goal_created"] = True
+
+        # Best-effort: pause reminders in Reminders service for previously active goals
+        try:
+            if 'external_ids_to_pause' in locals() and external_ids_to_pause:
+                from app.reminders.client import push_list_reminders, push_update_reminder
+                # List all reminders for the user and map by external_id
+                items = push_list_reminders(str(user_id))
+                ext_to_item = {i.get("external_id"): i for i in items if i.get("external_id")}
+                for ext in external_ids_to_pause:
+                    it = ext_to_item.get(ext)
+                    if not it:
+                        continue
+                    reminder_id = it.get("id")
+                    if reminder_id:
+                        try:
+                            # Set is_active=false to pause recurrence
+                            push_update_reminder(reminder_id, {"is_active": False}, timeout=8)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
         return state
 
     async def set_nutrition_targets(self, state: NutritionalGoalState) -> NutritionalGoalState:
@@ -930,6 +1153,167 @@ class NutritionalGoalWorkflow:
         sgr["targets_created"] = created_count
         state["set_goal_result"] = sgr
         state["targets_created"] = True
+
+        # Schedule daily reminders for meals via Reminders API if preferences are confirmed
+        try:
+            prefs = state.get("reminder_preferences") or {}
+            if state.get("reminders_confirmed") and isinstance(prefs, dict) and prefs.get("reminders"):
+                import os
+                import requests
+                from datetime import datetime as _dt
+                from datetime import time as _time
+                from datetime import date as _date
+                try:
+                    from zoneinfo import ZoneInfo as _ZoneInfo
+                except Exception:
+                    _ZoneInfo = None
+
+                tz_name = prefs.get("timezone") or getattr(settings, "DEFAULT_TIMEZONE", "Asia/Kolkata")
+                tz = None
+                try:
+                    tz = _ZoneInfo(tz_name) if _ZoneInfo else None
+                except Exception:
+                    tz = None
+
+                start_date_str = prefs.get("start_date")
+                try:
+                    start_date = _date.fromisoformat(str(start_date_str)) if start_date_str else _date.today()
+                except Exception:
+                    start_date = _date.today()
+
+                reminders = prefs.get("reminders") or []
+
+                # Map frequency to interval days
+                def _interval_days(freq: str) -> int:
+                    return 1 if freq == "daily" else (2 if freq == "every_2_days" else 7)
+
+                # Use shared reminders client
+                from app.reminders.client import push_create_reminder
+
+                # Prepare result list for UI
+                created_external_ids = []
+                # Persist config rows for each reminder key
+                def _save_config_row(meal_key: str, external_id_val: str):
+                    try:
+                        from psycopg2.extras import RealDictCursor as _RDC
+                        with get_raw_db_connection() as _conn:
+                            with _conn.cursor(cursor_factory=_RDC) as _cur:
+                                sql = (
+                                    "INSERT INTO user_reminder_configs (user_id, context, context_id, reminder_type, key, external_id, group_id, config_json, active, created_at, updated_at) "
+                                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, true, now(), now()) "
+                                    "ON CONFLICT (external_id) DO UPDATE SET config_json = EXCLUDED.config_json, updated_at = now(), active = true"
+                                )
+                                _cur.execute(sql, [
+                                    str(state["user_id"]),
+                                    "nutrition_goal",
+                                    str(goal_id),
+                                    "nutrition_log",
+                                    meal_key,
+                                    external_id_val,
+                                    group_id,
+                                    json.dumps(prefs),
+                                ])
+                    except Exception:
+                        pass
+
+                for r in reminders:
+                    meal = str(r.get("meal", "")).lower()
+                    time_local = str(r.get("time_local", "09:00"))
+                    freq = str(r.get("frequency", "daily"))
+                    # Build start datetime in local tz
+                    try:
+                        hh, mm = time_local.split(":")
+                        tobj = _time(hour=int(hh), minute=int(mm))
+                    except Exception:
+                        tobj = _time(hour=9, minute=0)
+                    dt_local = _dt.combine(start_date, tobj)
+                    if tz is not None:
+                        dt_local = dt_local.replace(tzinfo=tz)
+                    # Ensure first occurrence is in the future; if time already passed today, roll forward by interval
+                    try:
+                        if tz is not None:
+                            now_local = _dt.now(tz)
+                        else:
+                            now_local = _dt.now()
+                        interval = _interval_days(freq)
+                        if dt_local <= now_local:
+                            from datetime import timedelta as _td
+                            dt_local = dt_local + _td(days=interval)
+                    except Exception:
+                        pass
+
+                    title = f"Log your {meal}"
+                    message = f"Please log your {meal} intake."
+                    group_id = f"v1:{state['user_id']}:nutrition_goal:{goal_id}"
+                    external_id = f"v1:{state['user_id']}:nutrition_log:nutrition_goal:{goal_id}:{meal}"
+                    payload = {
+                        "type": "nutrition_log",
+                        "meal": meal,
+                        "goal_id": goal_id,
+                        "context": {
+                            "domain": "nutrition",
+                            "entity": "goal",
+                            "entity_id": goal_id,
+                            "key": meal,
+                            "group_id": group_id,
+                            "version": 1
+                        }
+                    }
+                    recurrence_pattern = {"type": "daily", "interval": _interval_days(freq)}
+
+                    body = {
+                        "user_id": str(state["user_id"]),
+                        "reminder_type": "nutrition_log",
+                        "title": title,
+                        "message": message,
+                        "payload": payload,
+                        "reminder_time": dt_local.isoformat(),
+                        "recurrence_pattern": recurrence_pattern,
+                        "start_date": dt_local.isoformat(),
+                        "timezone": tz_name,
+                        "external_id": external_id,
+                    }
+
+                    try:
+                        resp = push_create_reminder(body, timeout=10)
+                        print(f"resp in set_nutrition_targets: {resp}")
+                        if resp.status_code in (200, 201):
+                            created_external_ids.append({
+                                "meal": meal,
+                                "external_id": external_id,
+                                "reminder_type": "nutrition_log",
+                                "group_id": group_id
+                            })
+                            _save_config_row(meal, external_id)
+                        else:
+                            # Record failure with response details
+                            try:
+                                err_detail = resp.text[:500]
+                            except Exception:
+                                err_detail = str(resp.status_code)
+                            state["set_goal_result"] = {
+                                **state.get("set_goal_result", {}),
+                                "errors": state.get("set_goal_result", {}).get("errors", []) + [
+                                    f"reminders: failed to create {meal} ({resp.status_code}): {err_detail}"
+                                ],
+                            }
+                    except Exception as e:
+                        # Continue on individual failures but record the error
+                        state["set_goal_result"] = {
+                            **state.get("set_goal_result", {}),
+                            "errors": state.get("set_goal_result", {}).get("errors", []) + [
+                                f"reminders: exception creating {meal}: {e}"
+                            ],
+                        }
+
+                # Attach to result for UI display
+                if created_external_ids:
+                    sgr = state.get("set_goal_result", {})
+                    sgr["reminders"] = created_external_ids
+                    state["set_goal_result"] = sgr
+        except Exception as e:
+            # Non-fatal: attach error but do not block targets
+            state["set_goal_result"] = {**state.get("set_goal_result", {}), "errors": state.get("set_goal_result", {}).get("errors", []) + [f"reminders: {e}"]}
         return state
 
     async def set_nutrition_meal_plans(self, state: NutritionalGoalState) -> NutritionalGoalState:

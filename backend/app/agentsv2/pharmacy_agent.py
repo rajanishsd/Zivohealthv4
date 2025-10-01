@@ -111,6 +111,7 @@ class PharmacyAgentState:
     # Input data
     original_prompt: str = ""
     user_id: Optional[int] = None
+    session_id: Optional[int] = None
     extracted_text: Optional[str] = None
     image_path: Optional[str] = None  # Path to medication image for processing (only if no extracted_text)
     image_base64: Optional[str] = None  # Base64 encoded image data
@@ -1341,13 +1342,14 @@ class PharmacyAgentLangGraph:
         return await self.run(
             prompt=prompt,
             user_id=user_id,
+            session_id=session_id,
             extracted_text=extracted_text,
             image_path=image_path,
             image_base64=image_base64,
             source_file_path=source_file_path
         )
 
-    async def run(self, prompt: str, user_id: int, extracted_text: str = None, image_path: str = None, image_base64: str = None, source_file_path: str = None) -> Dict[str, Any]:
+    async def run(self, prompt: str, user_id: int, session_id: int = None, extracted_text: str = None, image_path: str = None, image_base64: str = None, source_file_path: str = None) -> Dict[str, Any]:
         """
         Execute the pharmacy agent workflow.
         
@@ -1366,6 +1368,7 @@ class PharmacyAgentLangGraph:
             initial_state = PharmacyAgentState(
                 original_prompt=prompt,
                 user_id=user_id,
+                session_id=session_id,
                 extracted_text=extracted_text,
                 image_path=image_path,
                 image_base64=image_base64,
@@ -1376,7 +1379,7 @@ class PharmacyAgentLangGraph:
             config = None
             if hasattr(settings, 'LANGCHAIN_TRACING_V2') and settings.LANGCHAIN_TRACING_V2:
                 config = {
-                    "configurable": {"thread_id": f"pharmacy-agent-{user_id}"},
+                    "configurable": {"thread_id": f"pharmacy-agent-{user_id}-{session_id}" if session_id is not None else f"pharmacy-agent-{user_id}"},
                     "callbacks": [LangChainTracer()]
                 }
             if config:

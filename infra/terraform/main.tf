@@ -55,6 +55,33 @@ resource "aws_security_group" "ec2_existing_vpc" {
     description = "HTTPS access"
   }
 
+  # LiveKit signaling (HTTP/WS)
+  ingress {
+    from_port   = 7880
+    to_port     = 7880
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "LiveKit signaling (WS)"
+  }
+
+  # LiveKit TCP fallback/TURN
+  ingress {
+    from_port   = 7881
+    to_port     = 7881
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "LiveKit TCP fallback/TURN"
+  }
+
+  # LiveKit RTP/RTCP media over UDP
+  ingress {
+    from_port   = 50000
+    to_port     = 60000
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "LiveKit media (UDP 50000-60000)"
+  }
+
   egress {
     from_port   = 0
     to_port     = 0

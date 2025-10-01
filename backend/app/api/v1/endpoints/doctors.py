@@ -17,7 +17,7 @@ from app.schemas.doctor import (
     SummaryRequest
 )
 from app.schemas.chat_session import PrescriptionCreate
-from app.agents.openai_client import get_chat_completion
+from app.doctoragentsv2.doctor_agent import generate_consultation_summary
 import uuid
 
 router = APIRouter()
@@ -180,7 +180,7 @@ async def update_consultation_request_status(
     request_id: int,
     update_data: ConsultationRequestUpdate,
     db: Session = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_active_user)
+    current_doctor: Doctor = Depends(deps.get_current_active_doctor)
 ):
     """
     Update consultation request status (accept/reject/complete).
@@ -195,8 +195,13 @@ async def update_consultation_request_status(
             detail="Consultation request not found"
         )
     
-    # For demo: Allow any user to update any consultation request
-    # In production, you would verify doctor ownership here
+    # Only the assigned doctor can update the consultation status
+    if consultation_request.doctor_id != current_doctor.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: Not assigned to this consultation"
+        )
+    
     print(f"🔄 [Doctor Dashboard] Updating consultation request {request_id} status to {update_data.status}")
     
     updated_request = crud.consultation_request.update_status(
@@ -253,15 +258,15 @@ async def update_consultation_request_status(
 async def generate_summary(
     summary_request: SummaryRequest,
     db: Session = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_active_user)
+    current_doctor: Doctor = Depends(deps.get_current_active_doctor)
 ):
     """
     Generate an AI summary of a consultation request for doctors.
     
-    Creates a structured summary with:
-    - Questions: What the patient asked
-    - Proposed Solution: AI-generated recommendations  
-    - Precautions: Important warnings and next steps
+    Creates a structured summary emphasizing:
+    - Primary Patient Question (single, most recent)
+    - Symptom Summary, Agent Responses to Symptoms, Conversation Q&A
+    - Report-based addendum when applicable
     """
     consultation_request = crud.consultation_request.get(db, summary_request.request_id)
     if not consultation_request:
@@ -270,71 +275,19 @@ async def generate_summary(
             detail="Consultation request not found"
         )
     
-    # For demo purposes, allow any user to generate summaries
-    # In production, restrict to assigned doctor only
-    
-    # Create structured prompt for OpenAI
-    prompt_messages = [
-        {
-            "role": "system", 
-            "content": """You are a medical assistant helping doctors review patient consultations. 
-
-First, analyze if this consultation involves a medical report/document (lab results, imaging, test reports, etc.) or is a general medical question.
-
-**For REPORT-BASED consultations:**
-Create a structured summary with exactly these 3 sections:
-
-## Report Findings Summary
-- Summarize the key findings from the uploaded medical report/document
-- List abnormal values, significant results, and clinical interpretations 
-- Include specific measurements, ranges, and their clinical significance
-- Highlight any concerning or notable findings that require attention
-
-## Medical Interpretation & Recommendations  
-- Provide evidence-based medical interpretation of the report findings
-- Suggest 3-4 specific clinical recommendations based on the actual results
-- Include lifestyle modifications or interventions relevant to the findings
-- Emphasize need for proper medical evaluation and follow-up
-
-## Precautions & Next Steps
-- List specific precautions based on the actual report findings
-- Identify any urgent findings that need immediate medical attention
-- Include follow-up recommendations specific to the test results
-- Mention any additional tests or monitoring that may be needed
-
-**For GENERAL MEDICAL consultations (no reports):**
-Create a structured summary with exactly these 3 sections:
-
-## Questions
-- List only the exact health questions and concerns the patient asked
-
-## Proposed Solution  
-- Provide 3-4 bullet points with evidence-based medical recommendations in single sentences
-- Focus on key treatments, lifestyle modifications, or interventions
-- Keep recommendations general and emphasize need for proper medical evaluation
-
-## Precautions
-- List 2-4 bullet points with important warnings or red flags in single sentences
-- Specify when immediate medical attention is needed
-- Include essential follow-up recommendations
-
-Use only bullet points with single sentences. Keep it concise and medically accurate. Focus on actual data and findings when reports are involved."""
-        },
-        {
-            "role": "user", 
-            "content": f"""Please analyze this patient consultation and create a structured summary:
-
-**Patient Question:** {consultation_request.user_question}
-
-**Full Conversation Context:** {consultation_request.context}
-
-Please provide the summary in the exact format specified in the system prompt."""
-        }
-    ]
+    # Only the assigned doctor can generate the summary
+    if consultation_request.doctor_id != current_doctor.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: Not assigned to this consultation"
+        )
     
     try:
-        # Generate AI summary
-        ai_summary = await get_chat_completion(prompt_messages)
+        # Generate AI summary using centralized doctor agent
+        ai_summary = await generate_consultation_summary(
+            patient_question=consultation_request.user_question or "",
+            conversation_context=consultation_request.context or ""
+        )
         print(f"📋 [Doctor API] Generated summary for consultation {summary_request.request_id}")
         
         # Update consultation request with the generated summary
@@ -361,7 +314,7 @@ def save_prescriptions_for_consultation(
     request_id: int,
     prescriptions_data: dict,
     db: Session = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_active_user)
+    current_doctor: Doctor = Depends(deps.get_current_active_doctor)
 ):
     """
     Save prescriptions for a completed consultation request.
@@ -378,8 +331,12 @@ def save_prescriptions_for_consultation(
             detail="Consultation request not found"
         )
     
-    # For demo purposes, allow any user to save prescriptions
-    # In production, verify doctor ownership
+    # Only assigned doctor can save prescriptions
+    if consultation_request.doctor_id != current_doctor.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: Not assigned to this consultation"
+        )
     
     prescriptions = prescriptions_data.get("prescriptions", [])
     if not prescriptions:
@@ -400,8 +357,10 @@ def save_prescriptions_for_consultation(
                     dosage=prescription_data.get("dosage", ""),
                     frequency=prescription_data.get("frequency", ""),
                     instructions=prescription_data.get("instructions", ""),
-                    prescribed_by=prescription_data.get("prescribed_by", ""),
-                    consultation_request_id=request_id
+                    duration=prescription_data.get("duration", ""),
+                    prescribed_by=prescription_data.get("prescribed_by", current_doctor.full_name or ""),
+                    consultation_request_id=request_id,
+                    user_id=consultation_request.user_id
                 )
                 
                 crud.prescription.create_with_session(
@@ -442,8 +401,10 @@ def save_prescriptions_for_consultation(
                 dosage=prescription_data.get("dosage", ""),
                 frequency=prescription_data.get("frequency", ""),
                 instructions=prescription_data.get("instructions", ""),
-                prescribed_by=prescription_data.get("prescribed_by", ""),
-                consultation_request_id=request_id
+                duration=prescription_data.get("duration", ""),
+                prescribed_by=prescription_data.get("prescribed_by", current_doctor.full_name or ""),
+                consultation_request_id=request_id,
+                user_id=consultation_request.user_id
             )
             
             crud.prescription.create_with_session(

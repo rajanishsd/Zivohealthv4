@@ -725,8 +725,10 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         final_source_file_path = state.get("source_file_path", "")
         final_image_base64 = state.get("image_base64", None)
         
-        # Get image path from uploaded file if available (prefer temp_path if present)
-        final_image_path = state.get("file_path", None) if state.get("is_image") else None
+        # Get image path from uploaded file if available (prefer persisted S3 path; fallback to source_file_path)
+        final_image_path = None
+        if state.get("is_image"):
+            final_image_path = state.get("file_path") or state.get("source_file_path")
         
         from app.agentsv2.vitals_agent import VitalsAgentLangGraph
         agent = VitalsAgentLangGraph()
@@ -763,8 +765,10 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         final_source_file_path = state.get("source_file_path", "")
         final_image_base64 = state.get("image_base64", None)
         
-        # Get image path from uploaded file if available (prefer temp_path if present)
-        final_image_path = state.get("file_path", None) if state.get("is_image") else None
+        # Get image path from uploaded file if available (prefer persisted S3 path; fallback to source_file_path)
+        final_image_path = None
+        if state.get("is_image"):
+            final_image_path = state.get("file_path") or state.get("source_file_path")
         
         from app.agentsv2.nutrition_agent import NutritionAgentLangGraph
         agent = NutritionAgentLangGraph()
@@ -856,7 +860,7 @@ async def execute_user_request(state: CustomerState) -> CustomerState:
         agent = LabAgentLangGraph()
         # Combine tool-specified prompt with assessed user input, de-duplicating
         effective_prompt = _compose_effective_prompt(prompt_with_user_input)
-        result = await agent.run(effective_prompt, user_id, session_id,final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
+        result = await agent.run(effective_prompt, user_id, session_id, final_extracted_text, final_image_path, final_image_base64, final_source_file_path)
         
         # Debug: Log what the lab agent returns to the LangChain agent
         print(f"🔍 [DEBUG] lab_agent_tool returning to LangChain agent:")

@@ -85,6 +85,11 @@ SERPAPI_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --n
 AWS_ACCESS_KEY_ID=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/aws/access_key_id" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 AWS_SECRET_ACCESS_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/aws/secret_access_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 
+# LiveKit configuration from SSM (fallbacks provided)
+LIVEKIT_URL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/livekit/url" --query "Parameter.Value" --output text 2>/dev/null || echo "ws://\${HOST_PUBLIC_DNS:-localhost}:7880")
+LIVEKIT_API_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/livekit/api_key" --query "Parameter.Value" --output text 2>/dev/null || echo "devkey")
+LIVEKIT_API_SECRET=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/livekit/api_secret" --query "Parameter.Value" --output text 2>/dev/null || echo "devsecret")
+
 # Get reminder-specific config from SSM
 REMINDER_FCM_CREDENTIALS_JSON=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/reminders/fcm_credentials_json" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 REMINDER_FCM_PROJECT_ID=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/reminders/fcm_project_id" --query "Parameter.Value" --output text 2>/dev/null || echo "")
@@ -211,9 +216,11 @@ PHARMACY_AGENT_MODEL=o4-mini
 PHARMACY_VISION_MODEL=gpt-4.1-mini
 
 # LiveKit Configuration
-LIVEKIT_URL=ws://192.168.0.100:7880
-LIVEKIT_API_KEY=devkey
-LIVEKIT_API_SECRET=devsecret
+LIVEKIT_URL=$${LIVEKIT_URL}
+LIVEKIT_API_KEY=$${LIVEKIT_API_KEY}
+LIVEKIT_API_SECRET=$${LIVEKIT_API_SECRET}
+# Convenience combined key for LiveKit server container
+LIVEKIT_KEYS=$${LIVEKIT_API_KEY}:$${LIVEKIT_API_SECRET}
 
 # S3 Configuration
 UPLOADS_S3_PREFIX=uploads/chat
@@ -280,6 +287,27 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # LiveKit self-hosted media server
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: zivohealth-livekit
+    ports:
+      - "7880:7880"   # HTTP/WS signaling
+      - "7881:7881"   # TCP fallback/TURN
+      - "50000-60000:50000-60000/udp"  # RTP/RTCP media
+    env_file:
+      - .env
+    environment:
+      # Many LiveKit deployments use LIVEKIT_KEYS env var in the format key:secret
+      - LIVEKIT_KEYS=$${LIVEKIT_KEYS}
+    command: [
+      "--bind", "0.0.0.0",
+      "--port", "7880",
+      "--rtc.port-range-start", "50000",
+      "--rtc.port-range-end", "60000"
+    ]
+    restart: unless-stopped
 
   # Reminder service API
   reminders:
@@ -372,6 +400,7 @@ services:
       - caddy_config:/config
     depends_on:
       - api
+      - livekit
     environment:
       - REMINDER_SERVICE_PORT=${reminder_service_port}
 

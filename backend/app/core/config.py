@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     UPLOADS_TMP_DIR: Optional[str] = None  # Local temp directory for processing (derived if not set)
     UPLOADS_LOCAL_DIR: Optional[str] = None  # Local durable storage when S3 disabled (derived if not set)
 
+    # Chat / WebSocket behavior
+    CHAT_WS_HEARTBEAT_MAX_SECONDS: int  # After this duration, auto-send complete to clear UI
+
     # --- Validators & Derived Settings ---
     @field_validator("AWS_S3_BUCKET", mode="before")
     @classmethod
@@ -232,8 +235,7 @@ class Settings(BaseSettings):
     SMTP_USERNAME: str  # SMTP username
     SMTP_PASSWORD: str  # SMTP password
     FROM_EMAIL: str  # From email address
-    FRONTEND_URL: str  # Frontend URL for reset links
-    PASSWORD_RESET_BASE_URL: Optional[str] = None  # Base URL for password reset links (defaults to FRONTEND_URL)
+    FRONTEND_URL: str  # Base URL for password reset links and user-facing redirects
     PASSWORD_RESET_TOKEN_EXPIRY_MINUTES: str = "30"  # Token expiry in minutes
     
     # Derived API URL for React app (automatically generated from FRONTEND_URL)
