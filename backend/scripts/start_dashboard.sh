@@ -35,6 +35,31 @@ if [ ! -d "$DASHBOARD_DIR" ]; then
     exit 1
 fi
 
+# Single-source env: parse only REACT_APP_* from backend/.env
+ENV_FILE="$SCRIPT_DIR/../.env"
+if [ -f "$ENV_FILE" ]; then
+    print_status "Loading environment from: $ENV_FILE (REACT_APP_* only)"
+    while IFS= read -r line; do
+        case "$line" in
+            REACT_APP_*=*) export "$line" ;;
+        esac
+    done < "$ENV_FILE"
+else
+    print_warning "No backend/.env found; UI will rely on process env"
+fi
+
+# Show which CRA vars are set (mask long values)
+if [ -n "$REACT_APP_API_BASE_URL" ]; then
+    print_status "REACT_APP_API_BASE_URL=$REACT_APP_API_BASE_URL"
+else
+    print_warning "REACT_APP_API_BASE_URL not set"
+fi
+if [ -n "$REACT_APP_API_KEY" ]; then
+    print_status "REACT_APP_API_KEY is set"
+else
+    print_warning "REACT_APP_API_KEY not set"
+fi
+
 # Change to dashboard directory
 cd "$DASHBOARD_DIR"
 
@@ -50,6 +75,7 @@ fi
 
 # Start the dashboard
 print_status "Starting React development server..."
+# Ensure CRA picks up current shell env (including REACT_APP_*)
 npm start > dashboard.log 2>&1 &
 DASHBOARD_PID=$!
 

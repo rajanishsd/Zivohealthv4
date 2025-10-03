@@ -1,0 +1,142 @@
+services:
+  api:
+    image: 474221740916.dkr.ecr.us-east-1.amazonaws.com/zivohealth-dev-backend:latest
+    container_name: zivohealth-api
+    ports:
+      - "8000:8000"
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1
+    env_file:
+      - .env
+    volumes:
+      - ./keys:/app/keys:ro
+    depends_on:
+      - redis
+      - rabbitmq
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: zivohealth-livekit
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "50000-60000:50000-60000/udp"
+    env_file:
+      - .env
+    environment:
+      - LIVEKIT_KEYS=devkey:devsecret
+    command: [
+      "--bind", "0.0.0.0",
+      "--port", "7880",
+      "--rtc.port-range-start", "50000",
+      "--rtc.port-range-end", "60000"
+    ]
+    restart: unless-stopped
+
+  reminders:
+    image: 474221740916.dkr.ecr.us-east-1.amazonaws.com/zivohealth-dev-backend:latest
+    container_name: zivohealth-reminders
+    ports:
+      - "8085:8085"
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1
+    env_file:
+      - .env
+    volumes:
+      - ./keys:/app/keys:ro
+    command: ["python", "-m", "uvicorn", "app.reminders.service:app", "--host", "0.0.0.0", "--port", "8085"]
+    depends_on:
+      - redis
+      - rabbitmq
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/api/v1/reminders/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  reminders-worker:
+    image: 474221740916.dkr.ecr.us-east-1.amazonaws.com/zivohealth-dev-backend:latest
+    container_name: zivohealth-reminders-worker
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1
+    env_file:
+      - .env
+    volumes:
+      - ./keys:/app/keys:ro
+    command: ["python", "-m", "celery", "-A", "app.reminders.celery_app:celery_app", "worker", "--loglevel=INFO", "-Q", "reminders.input.v1,reminders.output.v1", "--concurrency=4"]
+    depends_on:
+      - redis
+      - rabbitmq
+    restart: unless-stopped
+
+  reminders-beat:
+    image: 474221740916.dkr.ecr.us-east-1.amazonaws.com/zivohealth-dev-backend:latest
+    container_name: zivohealth-reminders-beat
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1
+    env_file:
+      - .env
+    volumes:
+      - ./keys:/app/keys:ro
+    command: ["python", "-m", "celery", "-A", "app.reminders.celery_app:celery_app", "beat", "--loglevel=INFO"]
+    depends_on:
+      - redis
+      - rabbitmq
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: zivohealth-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: zivohealth-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    restart: unless-stopped
+
+  dashboard:
+    image: 474221740916.dkr.ecr.us-east-1.amazonaws.com/zivohealth-dev-dashboard:latest
+    container_name: zivohealth-dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1
+    env_file:
+      - .env
+    depends_on:
+      - api
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  caddy:
+    image: 474221740916.dkr.ecr.us-east-1.amazonaws.com/zivohealth-dev-caddy:latest
+    container_name: zivohealth-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - api
+      - livekit
+      - dashboard
+    restart: unless-stopped
+    environment:
+      - REMINDER_SERVICE_PORT=8085

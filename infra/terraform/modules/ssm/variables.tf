@@ -24,3 +24,9 @@ variable "reminders_fcm_project_id" {
   description = "Optional FCM project ID for reminders service"
   default     = ""
 }
+
+variable "react_app_api_key" {
+  type        = string
+  description = "API key for React dashboard app"
+  sensitive   = true
+}

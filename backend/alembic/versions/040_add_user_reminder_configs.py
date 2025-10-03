@@ -1,7 +1,7 @@
 """add user_reminder_configs table
 
 Revision ID: 040_add_user_reminder_configs
-Revises: 039_add_unified_recurring_reminders
+Revises: 039_recurring_unified, 4d7b004a58ab
 Create Date: 2025-09-23
 """
 
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '040_add_user_reminder_configs'
-# Merge previous heads into 040 so 040 is the single head
-down_revision = ('4d7b004a58ab', '116081bc4db5')
+# Merge previous heads (recurring reminders chain and other branch) into 040
+down_revision = ('4d7b004a58ab', '039_recurring_unified')
 branch_labels = None
 depends_on = None
 

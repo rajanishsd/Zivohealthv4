@@ -293,7 +293,8 @@ class Settings(BaseSettings):
         return [
             "https://zivohealth.ai",
             "https://www.zivohealth.ai",
-            "https://app.zivohealth.ai"
+            "https://app.zivohealth.ai",
+            "https://dashboard.zivohealth.ai"
         ]
     
     @property

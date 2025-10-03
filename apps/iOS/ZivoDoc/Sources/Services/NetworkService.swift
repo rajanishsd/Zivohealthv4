@@ -31,16 +31,12 @@ public class NetworkService: ObservableObject {
     public static let shared = NetworkService()
 
     @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
-    @AppStorage("patientAuthToken") private var patientAuthToken = ""
     @AppStorage("doctorAuthToken") private var doctorAuthToken = ""
     @AppStorage("doctorRefreshToken") private var doctorRefreshToken = ""
-    @AppStorage("userMode") private var userMode: UserMode = .doctor
     
-    // API Key for ZivoDoc iOS app
-    private let apiKey = "KPUVJoBmITZujZecaOkudjg4OQuBq04M" // Replace with actual key from generate_api_keys.py
-    
-    // App Secret for HMAC signature (optional - set to nil to disable)
-    private let appSecret = "c7357b83f692134381cbd7cadcd34be9c6150121aa274599317b5a1283c0205f" // Replace with actual secret from generate_api_keys.py
+    // API credentials are centralized in AppConfig
+    private let apiKey = AppConfig.apiKey
+    private let appSecret = AppConfig.appSecret
     
     // HMAC signature configuration
     private let enableHMAC = true // Set to false to disable HMAC signatures
@@ -158,15 +154,7 @@ public class NetworkService: ObservableObject {
         }
     }
 
-    // Role-based demo credentials
-    private var currentCredentials: (email: String, password: String, name: String) {
-        switch userMode {
-        case .patient:
-            return ("patient@zivohealth.com", "patient123", "Demo Patient")
-        case .doctor:
-            return ("doctor@zivohealth.com", "doctor123", "Demo Doctor")
-        }
-    }
+    // Removed demo credentials; credentials must come from Keychain or UI login
 
     // Always reflect latest endpoint
     private var baseURL: String { "\(apiEndpoint)\(apiVersion)" }
@@ -244,23 +232,10 @@ public class NetworkService: ObservableObject {
     }
 
     // Get the appropriate token for current role
+    // Doctor-only: always use doctor token
     private var authToken: String {
-        get {
-            switch userMode {
-            case .patient:
-                return patientAuthToken
-            case .doctor:
-                return doctorAuthToken
-            }
-        }
-        set {
-            switch userMode {
-            case .patient:
-                patientAuthToken = newValue
-            case .doctor:
-                doctorAuthToken = newValue
-            }
-        }
+        get { doctorAuthToken }
+        set { doctorAuthToken = newValue }
     }
 
     // MARK: - Token Management
@@ -279,7 +254,7 @@ public class NetworkService: ObservableObject {
     }
 
     private func isTokenExpired() -> Bool {
-        guard let tokenData = UserDefaults.standard.data(forKey: "\(userMode)_token_info"),
+        guard let tokenData = UserDefaults.standard.data(forKey: "doctor_token_info"),
               let tokenInfo = try? decoder.decode(TokenInfo.self, from: tokenData) else {
             return true
         }
@@ -288,8 +263,8 @@ public class NetworkService: ObservableObject {
 
     private func tryRefreshAccessTokenIfNeeded() async -> Bool {
         guard isTokenExpired() else { return true }
-        // Only doctor flow uses refresh token for now
-        guard userMode == .doctor, !doctorRefreshToken.isEmpty else { return false }
+        // Doctor-only refresh
+        guard !doctorRefreshToken.isEmpty else { return false }
         do {
             let body: [String: Any] = ["refresh_token": doctorRefreshToken]
             let data = try await post("/auth/refresh", body: body, requiresAuth: false)
@@ -306,24 +281,27 @@ public class NetworkService: ObservableObject {
     private func saveTokenInfo(_ tokenResponse: TokenResponse) {
         let tokenInfo = TokenInfo(from: tokenResponse)
         if let encoded = try? encoder.encode(tokenInfo) {
-            UserDefaults.standard.set(encoded, forKey: "\(userMode)_token_info")
+            UserDefaults.standard.set(encoded, forKey: "doctor_token_info")
         }
+        _ = KeychainService.shared.storeDoctorToken(tokenResponse.accessToken)
+        if let refresh = tokenResponse.refreshToken { _ = KeychainService.shared.storeDoctorRefresh(refresh) }
     }
 
     private func clearTokenInfo() {
-        UserDefaults.standard.removeObject(forKey: "\(userMode)_token_info")
+        UserDefaults.standard.removeObject(forKey: "doctor_token_info")
     }
 
     public func clearAuthToken() {
-        print("🗑️ [NetworkService] Clearing stored auth token for \(userMode)")
+        print("🗑️ [NetworkService] Clearing stored auth token for doctor")
         authToken = ""
         clearTokenInfo()
+        _ = KeychainService.shared.clearDoctorTokens()
     }
 
     public func clearAllTokens() {
-        print("🗑️ [NetworkService] Clearing all stored auth tokens")
-        patientAuthToken = ""
+        print("🗑️ [NetworkService] Clearing all stored auth tokens (doctor-only)")
         doctorAuthToken = ""
+        _ = KeychainService.shared.clearDoctorTokens()
     }
 
     public func getCurrentToken() -> String {
@@ -362,37 +340,26 @@ public class NetworkService: ObservableObject {
     }
 
     public func forceReauthentication() async throws {
-        print("🔄 [NetworkService] Forcing re-authentication for \(userMode)")
+        print("🔄 [NetworkService] Forcing re-authentication for doctor")
         clearAuthToken()
         try await ensureAuthentication()
         print("✅ [NetworkService] Re-authentication completed successfully")
     }
 
     public func handleRoleChange() {
-        print("🔄 [NetworkService] User role changed to \(userMode)")
-        print("🔐 [NetworkService] Current \(userMode) token: \(authToken.isEmpty ? "None" : "Exists (\(authToken.count) chars)")")
-
-        // Don't clear the token anymore - each role keeps its own token
-        if authToken.isEmpty {
-            print("💡 [NetworkService] No token for \(userMode), will authenticate with \(currentCredentials.email) on next API call")
-        } else {
-            print("✅ [NetworkService] Using existing token for \(userMode)")
-        }
+        // No-op in doctor-only app; retained for API compatibility
+        print("🔄 [NetworkService] Role change ignored (doctor-only mode)")
     }
 
     public func clearAllStoredData() {
-        print("🗑️ [NetworkService] Clearing ALL stored authentication data")
-        patientAuthToken = ""
+        print("🗑️ [NetworkService] Clearing ALL stored authentication data (doctor-only)")
         doctorAuthToken = ""
-        print("✅ [NetworkService] All tokens cleared - next API call will trigger fresh authentication")
+        print("✅ [NetworkService] Token cleared - next API call will trigger fresh authentication")
     }
     
     public func debugAuthenticationState() {
         print("🔍 [NetworkService] Authentication Debug Info:")
-        print("   Current Mode: \(userMode)")
-        print("   Patient Token: \(patientAuthToken.isEmpty ? "Empty" : "Exists (\(patientAuthToken.count) chars)")")
         print("   Doctor Token: \(doctorAuthToken.isEmpty ? "Empty" : "Exists (\(doctorAuthToken.count) chars)")")
-        print("   Current Credentials: \(currentCredentials.email)")
         print("   API Endpoint: \(apiEndpoint)")
     }
 
@@ -974,85 +941,60 @@ public extension NetworkService {
     private func ensureAuthentication() async throws {
         // Check if we have a valid token that hasn't expired
         if !authToken.isEmpty && !isTokenExpired() {
-            print("🔐 [NetworkService] Using existing valid auth token for \(userMode)")
+            print("🔐 [NetworkService] Using existing valid auth token")
             print("🎫 [NetworkService] Token length: \(authToken.count) characters")
             return
         }
 
         if !authToken.isEmpty {
-            print("⚠️ [NetworkService] Auth token expired for \(userMode), attempting refresh...")
+            print("⚠️ [NetworkService] Auth token expired, attempting refresh...")
             if await tryRefreshAccessTokenIfNeeded() {
-                print("✅ [NetworkService] Token refreshed for \(userMode)")
+                print("✅ [NetworkService] Token refreshed")
                 return
             }
             clearAuthToken()
         }
 
-        print("🔐 [NetworkService] No valid auth token found for \(userMode), attempting authentication...")
-        print("👤 [NetworkService] Will try to authenticate as: \(currentCredentials.email)")
+        print("🔐 [NetworkService] No valid auth token found, attempting authentication...")
+        print("👤 [NetworkService] Will try to authenticate using stored credentials (Keychain/UI)")
 
-        // For ZivoDoc (doctor app), require manual login on cold start. Do not auto-register/login.
-        if userMode == .doctor {
-            print("🛑 [NetworkService] Manual login required for doctor mode - skipping auto login.")
-            throw NetworkError.authenticationFailed
-        }
+        // ZivoDoc is doctor-only: require manual login on cold start, never auto-login as patient
+        print("🛑 [NetworkService] Manual login required for doctor mode - skipping auto login.")
+        throw NetworkError.authenticationFailed
 
-        // Try to login with role-specific credentials
-        do {
-            let token = try await login(email: currentCredentials.email, password: currentCredentials.password)
-            print("✅ [NetworkService] Successfully authenticated \(userMode) with token length: \(token.count)")
-            return
-        } catch let error as NetworkError {
-            print("⚠️ [NetworkService] Login failed with error: \(error)")
-
-            switch error {
-            case let .serverError(message) where message.contains("Incorrect email or password"):
-                // User doesn't exist, try to register
-                print("🔄 [NetworkService] \(userMode.rawValue.capitalized) user doesn't exist, attempting registration...")
-                try await register(email: currentCredentials.email, password: currentCredentials.password, fullName: currentCredentials.name)
-                print("✅ [NetworkService] \(userMode.rawValue.capitalized) user registered successfully")
-
-                // Now login with the newly registered user
-                let token = try await login(email: currentCredentials.email, password: currentCredentials.password)
-                print("✅ [NetworkService] Successfully logged in new \(userMode) user with token length: \(token.count)")
-                return
-            default:
-                print("❌ [NetworkService] Authentication failed with error: \(error)")
-                throw error
-            }
-        } catch {
-            print("❌ [NetworkService] Unexpected authentication error: \(error)")
-            throw NetworkError.authenticationFailed
-        }
+        // Interactive login required; no auto-login path in doctor-only app
     }
 
     func login(email: String, password: String) async throws -> String {
-        print("🔐 [NetworkService] Attempting login for \(userMode): \(email)")
+        print("🔐 [NetworkService] Attempting login for email: \(email)")
 
         let loginData = "username=\(email)&password=\(password)"
         let body = loginData.data(using: .utf8)!
 
         do {
             let data = try await post("/auth/login", body: body, contentType: "application/x-www-form-urlencoded", requiresAuth: false)
-            print("✅ [NetworkService] Login successful for \(userMode)")
+            print("✅ [NetworkService] Login successful")
 
             let tokenResponse = try decoder.decode(TokenResponse.self, from: data)
+
+            // Validate role matches current mode (doctor vs user)
+            // Doctor-only: no user mode checks
             let token = tokenResponse.accessToken
 
-            print("🎫 [NetworkService] Received auth token for \(userMode) (length: \(token.count))")
+            print("🎫 [NetworkService] Received auth token (length: \(token.count))")
             print("🔑 [NetworkService] Token preview: \(token.prefix(20))...")
 
             // Store the token and its expiration info
             authToken = token
             saveTokenInfo(tokenResponse)
-            if userMode == .doctor, let refresh = tokenResponse.refreshToken {
+            if let refresh = tokenResponse.refreshToken {
                 doctorRefreshToken = refresh
             }
-            print("💾 [NetworkService] Stored token and expiration info for \(userMode)")
+            print("💾 [NetworkService] Stored token and expiration info")
 
             return token
         } catch {
-            print("❌ [NetworkService] Login failed for \(userMode): \(error)")
+            print("❌ [NetworkService] Login failed: \(error)")
             throw NetworkError.authenticationFailed
         }
     }
@@ -1471,14 +1413,14 @@ extension NetworkService {
     // Get all appointments for current user
     func getAppointments() async throws -> [AppointmentWithDetails] {
         print("📅 [NetworkService] Getting appointments")
-        print("🔐 [NetworkService] Current user mode: \(userMode)")
+        print("🔐 [NetworkService] Current user mode: doctor")
         print("🎫 [NetworkService] Current auth token: \(authToken.isEmpty ? "EMPTY" : "EXISTS (\(authToken.count) chars)")")
         print("🌐 [NetworkService] API endpoint: \(apiEndpoint)")
         
         do {
             let data = try await get("/appointments/", requiresAuth: true)
             let appointments = try decoder.decode([AppointmentWithDetails].self, from: data)
-            print("✅ [NetworkService] Found \(appointments.count) appointments for \(userMode)")
+            print("✅ [NetworkService] Found \(appointments.count) appointments")
             
             // Log each appointment for debugging
             for (index, appointment) in appointments.enumerated() {

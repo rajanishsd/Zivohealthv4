@@ -13,7 +13,17 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 locals {
-  user_data_rendered = templatefile("${path.module}/user_data.sh.tpl", {
+  rendered_compose = templatefile("${path.module}/docker-compose.yml.tpl", {
+    # Derive the ECR registry host without depending on the ECR module to avoid unnecessary replacements
+    ECR_REGISTRY_HOST = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
+    IMAGE_TAG    = "latest"
+    AWS_REGION   = var.aws_region
+    reminder_service_port = var.reminder_service_port
+  })
+
+  compose_sha256 = sha256(local.rendered_compose)
+
+  user_data_rendered = templatefile("${path.module}/user_data_minimal.sh.tpl", {
     ECR_REPO_URL        = var.ecr_repo_url
     IMAGE_TAG           = "latest"
     SSM_IMAGE_TAG_PARAM = var.ssm_image_tag_param
@@ -33,7 +43,25 @@ locals {
     reminder_scheduler_scan_interval_seconds = var.reminder_scheduler_scan_interval_seconds
     reminder_scheduler_batch_size = var.reminder_scheduler_batch_size
     reminder_metrics_enabled = var.reminder_metrics_enabled
+    REMINDER_FCM_CREDENTIALS_JSON = var.reminders_fcm_credentials_json
+    REMINDER_FCM_PROJECT_ID = var.reminders_fcm_project_id
+    COMPOSE_S3_BUCKET = var.compose_s3_bucket
+    COMPOSE_S3_KEY    = var.compose_s3_key
+    COMPOSE_SHA256    = local.compose_sha256
   })
+}
+
+resource "aws_s3_object" "compose" {
+  bucket  = var.compose_s3_bucket
+  key     = var.compose_s3_key
+  content = local.rendered_compose
+  etag    = md5(local.rendered_compose)
+}
+
+resource "aws_ssm_parameter" "compose_sha256" {
+  name  = "/${var.project}/${var.environment}/deploy/docker_compose_sha256"
+  type  = "String"
+  value = local.compose_sha256
 }
 
 resource "aws_instance" "host" {
@@ -60,14 +88,20 @@ resource "aws_instance" "host" {
 
 # Optionally open SSH on attached Security Group(s) when enable_ssh_tunnel is true
 resource "aws_security_group_rule" "allow_ssh" {
-  count             = var.enable_ssh_tunnel && length(var.ssh_allowed_cidrs) > 0 ? length(var.security_group_ids) : 0
+  count = var.enable_ssh_tunnel && length(var.ssh_allowed_cidrs) > 0 ? 1 : 0
+
   type              = "ingress"
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
   cidr_blocks       = var.ssh_allowed_cidrs
-  security_group_id = var.security_group_ids[count.index]
+  security_group_id = var.security_group_ids[0]
   description       = "Allow SSH tunneling from specified CIDRs"
+
+  lifecycle {
+    create_before_destroy = true
+    ignore_changes        = [cidr_blocks]
+  }
 }
 
 output "public_ip" {

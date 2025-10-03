@@ -495,6 +495,7 @@ class NutritionAgentLangGraph:
         2. **Serving Size Estimation**:
            - Estimate the portion size and appropriate unit (grams, cups, pieces, etc.)
            - Base your estimate on visual cues like plate size, utensils, typical serving portions
+           - if the food is eggs then calculate the number of eggs based on the number of eggs visible in the image and compute the total nutritional values based on per egg 
 
         3. **Macronutrients** (per serving):
            - Calories

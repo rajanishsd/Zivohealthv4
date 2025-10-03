@@ -1,0 +1,28 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY backend-dashboard/package*.json ./
+
+# Install dependencies (including dev dependencies for build)
+RUN npm ci
+
+# Copy source code
+COPY backend-dashboard/ .
+
+# Build the React app with environment variables
+ARG REACT_APP_SECRET_KEY
+ARG REACT_APP_API_KEY
+RUN echo "Building with REACT_APP_API_KEY length: ${#REACT_APP_API_KEY}" && \
+    echo "Building with REACT_APP_SECRET_KEY length: ${#REACT_APP_SECRET_KEY}" && \
+    REACT_APP_SECRET_KEY=$REACT_APP_SECRET_KEY REACT_APP_API_KEY=$REACT_APP_API_KEY npm run build
+
+# Install a simple HTTP server to serve the built files
+RUN npm install -g serve
+
+# Expose port
+EXPOSE 3000
+
+# Start the application by serving the built files
+CMD ["serve", "-s", "build", "-l", "3000"]

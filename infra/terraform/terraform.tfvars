@@ -1,10 +1,11 @@
 # Required
 image_tag = "latest"
+environment = "production"
 
 # Optional: enable SSH tunneling (port 22) alongside SSM
 # Set your IP in CIDR format like "203.0.113.25/32" to restrict access
-enable_ssh_tunnel = true
-ssh_allowed_cidrs = ["0.0.0.0/0"]
+enable_ssh_tunnel = false
+ssh_allowed_cidrs = []
 
 # Optional: existing EC2 key pair name to allow key-based SSH
 # Set to null to skip

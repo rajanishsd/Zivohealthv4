@@ -2,9 +2,9 @@ import SwiftUI
 import UIKit
 
 @main
-struct ZivoHealthApp: App {
+struct ZivoDocApp: App {
     @Environment(\.scenePhase) var scenePhase
-    @AppStorage("apiEndpoint") private var apiEndpoint = ""
+    @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint
     
     init() {
         // Global appearances
@@ -35,13 +35,13 @@ struct ZivoHealthApp: App {
                     handleScenePhaseChange(newPhase)
                 }
                 .onAppear {
-                    // Seed default endpoint on first launch if empty
-                    if apiEndpoint.isEmpty {
-                        apiEndpoint = AppConfig.defaultAPIEndpoint
+                    // Optionally clear tokens on app launch based on AppConfig
+                    if AppConfig.shouldClearTokensOnAppLaunch {
+                        NetworkService.shared.clearAllTokens()
                     }
-                    // One-time migration: force HTTPS domain if an old http/IP endpoint is detected
-                    if apiEndpoint.hasPrefix("http://3.208.12.170") || (apiEndpoint.hasPrefix("http://") && !apiEndpoint.contains("zivohealth.ai")) {
-                        apiEndpoint = "https://api.zivohealth.ai"
+                    // Ensure stored endpoint matches centralized AppConfig
+                    if apiEndpoint != AppConfig.defaultAPIEndpoint {
+                        apiEndpoint = AppConfig.defaultAPIEndpoint
                         NetworkService.shared.handleEndpointChange()
                     }
                 }
@@ -69,3 +69,5 @@ struct ZivoHealthApp: App {
         }
     }
 }
+
+

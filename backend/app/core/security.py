@@ -12,13 +12,13 @@ ALGORITHM = settings.ALGORITHM
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-def create_access_token(subject: Union[str, Any], expires_delta: timedelta = None, is_doctor: bool = False) -> str:
+def create_access_token(subject: Union[str, Any], expires_delta: timedelta = None, is_doctor: bool = False, is_admin: bool = False) -> str:
     if expires_delta:
         expire = now_local() + expires_delta
     else:
         expire = now_local() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
-    to_encode = {"exp": expire, "sub": str(subject), "is_doctor": is_doctor}
+    to_encode = {"exp": expire, "sub": str(subject), "is_doctor": is_doctor, "is_admin": is_admin}
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 

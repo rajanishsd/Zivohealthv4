@@ -47,8 +47,6 @@ sudo docker compose -f /opt/zivohealth/docker-compose.yml logs --tail 200 api ||
 
 sudo docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml logs -f --tail=200 reminders
 sudo docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml logs -f --tail=200 reminders-beat
-sudo docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml logs -f --tail=200 reminders-worker
-
 sudo docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-compose.yml exec reminders bash -lc 'tail -f -n 200 /var/log/reminders-worker.log'
 
 patient@zivohealth.com

@@ -1,65 +1,189 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Complete production deployment workflow
-# 1. Set production environment
-# 2. Build and push Docker image to ECR (React app builds inside Docker)
-# 3. Deploy to EC2
+# Enable shell tracing when DEBUG=1
+if [[ "${DEBUG:-0}" == "1" ]]; then
+  set -x
+fi
 
-echo "🚀 Starting Production Deployment Workflow"
-echo "=========================================="
+# Two-step production deploy: (1) terraform apply (run separately), (2) build/push images and refresh EC2 services.
+
+echo "🚀 Production Deploy (Step 2): Build, Push, Refresh Services"
+echo "============================================================"
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-BACKEND_DIR="$ROOT_DIR/backend"
+TF_DIR="$ROOT_DIR/infra/terraform"
+REGION="us-east-1"
 
-# Step 1: Set production environment
-echo ""
-echo "📋 Step 1: Setting up production environment configuration..."
-cd "$BACKEND_DIR"
+: "${AWS_PROFILE:=zivohealth}"
 
-if [ -f ".env copy.production" ]; then
-    cp ".env copy.production" .env
-    echo "✅ Production environment configuration activated"
-elif [ -f ".env.production" ]; then
-    cp .env.production .env
-    echo "✅ Production environment configuration activated"
-else
-    echo "❌ Error: .env.production or .env copy.production file not found"
-    echo "   Please create backend/.env.production with production configuration"
-    exit 1
+# Helper to run aws with the selected profile and region
+aws_cmd() { aws --profile "$AWS_PROFILE" --region "$REGION" "$@"; }
+
+echo "🔧 Validating Terraform outputs (instance id, ECR registry)..."
+cd "$TF_DIR"
+INSTANCE_ID=$(terraform output -raw ec2_instance_id)
+ECR_BACKEND_URL=$(terraform output -raw ecr_repository_url)
+ECR_REGISTRY_HOST=${ECR_BACKEND_URL%%/*}
+S3_BUCKET=$(aws_cmd ssm get-parameter --name "/zivohealth/production/s3/bucket" --query "Parameter.Value" --output text || echo "zivohealth-data")
+S3_KEY="deploy/production/docker-compose.yml"
+COMPOSE_SSM_KEY="/zivohealth/production/deploy/docker_compose_sha256"
+TAG="latest"
+
+if [[ -z "$INSTANCE_ID" || -z "$ECR_REGISTRY_HOST" ]]; then
+  echo "❌ Could not read Terraform outputs. Ensure Step 1 (terraform apply) completed."
+  exit 1
 fi
 
-# Step 2: Build and push Docker image (React app builds inside Docker)
-echo ""
-echo "🐳 Step 2: Building and pushing Docker image to ECR..."
-cd "$ROOT_DIR"
+echo "📦 Variables:"
+echo "  INSTANCE_ID        = $INSTANCE_ID"
+echo "  ECR_REGISTRY_HOST  = $ECR_REGISTRY_HOST"
+echo "  S3_BUCKET          = $S3_BUCKET"
+echo "  S3_KEY             = $S3_KEY"
+echo "  COMPOSE_SSM_KEY    = $COMPOSE_SSM_KEY"
+echo "  REGION             = $REGION"
 
-if [ -f "scripts/dev/build_ecr_backend.sh" ]; then
-    ./scripts/dev/build_ecr_backend.sh
-    echo "✅ Docker image built and pushed to ECR"
-else
-    echo "❌ Error: build_ecr_backend.sh script not found"
-    exit 1
+echo "🧱 Ensuring docker buildx builder exists..."
+docker buildx ls >/dev/null 2>&1 || docker buildx create --use >/dev/null 2>&1 || true
+
+echo "🔐 Logging into ECR: $ECR_REGISTRY_HOST"
+aws_cmd ecr get-login-password | docker login --username AWS --password-stdin "$ECR_REGISTRY_HOST"
+
+echo "🐳 Building and pushing backend image (linux/amd64)..."
+docker buildx build --platform linux/amd64 -t "$ECR_REGISTRY_HOST/zivohealth-production-backend:$TAG" "$ROOT_DIR/backend" --push
+
+echo "🐳 Building and pushing caddy image (linux/amd64)..."
+docker buildx build --platform linux/amd64 \
+  -f "$ROOT_DIR/infra/terraform/modules/compute/Dockerfile.caddy" \
+  -t "$ECR_REGISTRY_HOST/zivohealth-production-caddy:$TAG" \
+  "$ROOT_DIR/infra/terraform/modules/compute" \
+  --push
+
+echo "🐳 Building and pushing dashboard image (linux/amd64)..."
+docker buildx build --platform linux/amd64 \
+  -f "$ROOT_DIR/backend/Dockerfile.dashboard" \
+  -t "$ECR_REGISTRY_HOST/zivohealth-production-dashboard:$TAG" \
+  "$ROOT_DIR/backend" \
+  --push
+
+echo "☁️  Triggering EC2 to fetch compose from S3, verify checksum, pull & restart services..."
+
+# Build remote script and send via SSM using base64 to avoid quoting issues
+REMOTE_SCRIPT=$(cat <<'EOF'
+set -eo pipefail
+set -x
+export AWS_DEFAULT_REGION="$REGION"
+# Use instance role by clearing any local/stale creds
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE || true
+
+cd /opt/zivohealth
+# Ensure AWS env values and S3 upload settings in /opt/zivohealth/.env (no static access keys)
+if [ -f .env ]; then
+  sudo sed -i.bak \
+    -e "s/^AWS_DEFAULT_REGION=.*/AWS_DEFAULT_REGION=$REGION/" \
+    -e "s/^AWS_REGION=.*/AWS_REGION=$REGION/" \
+    -e "s/^AWS_S3_BUCKET=.*/AWS_S3_BUCKET=zivohealth-data/" \
+    -e "s/^USE_S3_UPLOADS=.*/USE_S3_UPLOADS=true/" \
+    -e "s|^UPLOADS_S3_PREFIX=.*|UPLOADS_S3_PREFIX=uploads/chat|" .env || true
+  grep -q '^AWS_DEFAULT_REGION=' .env || echo "AWS_DEFAULT_REGION=$REGION" | sudo tee -a .env >/dev/null
+  grep -q '^AWS_REGION=' .env || echo "AWS_REGION=$REGION" | sudo tee -a .env >/dev/null
+  grep -q '^AWS_S3_BUCKET=' .env || echo "AWS_S3_BUCKET=zivohealth-data" | sudo tee -a .env >/dev/null
+  grep -q '^USE_S3_UPLOADS=' .env || echo "USE_S3_UPLOADS=true" | sudo tee -a .env >/dev/null
+  grep -q '^UPLOADS_S3_PREFIX=' .env || echo "UPLOADS_S3_PREFIX=uploads/chat" | sudo tee -a .env >/dev/null
+
+  # Fetch and set AI-related API keys from SSM (quoted)
+  LANG_SSM="/zivohealth/production/langchain/api_key"
+  SERP_SSM="/zivohealth/production/serpapi/api_key"
+  LANG=$(aws ssm get-parameter --with-decryption --name "$LANG_SSM" --query 'Parameter.Value' --output text --region $REGION 2>/dev/null || true)
+  SERP=$(aws ssm get-parameter --with-decryption --name "$SERP_SSM" --query 'Parameter.Value' --output text --region $REGION 2>/dev/null || true)
+
+  if [ -n "$LANG" ] && [ "$LANG" != "None" ]; then
+    if grep -q '^LANGCHAIN_API_KEY=' .env; then
+      sudo sed -i "s|^LANGCHAIN_API_KEY=.*|LANGCHAIN_API_KEY=\"$LANG\"|" .env
+    else
+      echo "LANGCHAIN_API_KEY=\"$LANG\"" | sudo tee -a .env >/dev/null
+    fi
+  fi
+  if [ -n "$SERP" ] && [ "$SERP" != "None" ]; then
+    if grep -q '^SERPAPI_KEY=' .env; then
+      sudo sed -i "s|^SERPAPI_KEY=.*|SERPAPI_KEY=\"$SERP\"|" .env
+    else
+      echo "SERPAPI_KEY=\"$SERP\"" | sudo tee -a .env >/dev/null
+    fi
+  fi
 fi
 
-# Step 3: Deploy to EC2
-echo ""
-echo "☁️  Step 3: Deploying to EC2..."
-if [ -f "scripts/dev/deploy_compose_on_ec2.sh" ]; then
-    ./scripts/dev/deploy_compose_on_ec2.sh
-    echo "✅ Deployment to EC2 completed"
-else
-    echo "❌ Error: deploy_compose_on_ec2.sh script not found"
-    exit 1
-fi
+echo "Fetching compose from s3://$S3_BUCKET/$S3_KEY ..."
+aws s3 cp s3://$S3_BUCKET/$S3_KEY docker-compose.yml.tmp --region "$REGION"
+test -s docker-compose.yml.tmp
+DOWN=$(sha256sum docker-compose.yml.tmp | cut -d' ' -f1)
+EXP=$(aws ssm get-parameter --name $COMPOSE_SSM_KEY --region "$REGION" --query 'Parameter.Value' --output text)
+echo "Expected: \"$EXP\" | Got: \"$DOWN\""
+test "$DOWN" = "$EXP"
+echo "Validating compose..."
+docker compose -f docker-compose.yml.tmp config >/dev/null
+echo "Applying..."
+( flock 9; mv docker-compose.yml.tmp docker-compose.yml ) 9>.compose.lock
+echo "Logging into ECR..."
+aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin $ECR_REGISTRY_HOST
+echo "Pulling images..."
+docker compose pull
+echo "Stopping all services..."
+docker compose down
+echo "Starting services with latest images..."
+docker compose up -d
+echo "Waiting for services to start..."
+sleep 10
+echo "Checking service health..."
+docker compose ps
+echo "Waiting for health checks to pass..."
+sleep 30
+docker compose ps
+EOF
+ )
 
-echo ""
-echo "🎉 Production deployment workflow completed successfully!"
-echo ""
-echo "📊 Summary:"
-echo "  • Environment: Production configuration activated"
-echo "  • React App: Built inside Docker image during build process"
-echo "  • Docker Image: Built and pushed to ECR"
-echo "  • EC2 Deployment: Completed"
-echo ""
-echo "🌐 Your production application should now be running on EC2"
+REMOTE_B64=$(printf "%s" "$REMOTE_SCRIPT" | base64)
+
+CMD_ID=$(aws_cmd ssm send-command \
+  --instance-ids "$INSTANCE_ID" \
+  --document-name "AWS-RunShellScript" \
+  --parameters commands="[\"bash\",\"-lc\",\"echo $REMOTE_B64 | base64 -d > /tmp/deploy.sh && chmod +x /tmp/deploy.sh && REGION='$REGION' S3_BUCKET='$S3_BUCKET' S3_KEY='$S3_KEY' COMPOSE_SSM_KEY='$COMPOSE_SSM_KEY' ECR_REGISTRY_HOST='$ECR_REGISTRY_HOST' bash /tmp/deploy.sh\"]" \
+  --query "Command.CommandId" --output text)
+
+echo "⌛ Waiting for SSM command to complete..."
+echo "  CommandId: $CMD_ID"
+# Give SSM a moment to dispatch
+sleep 3
+# Poll for completion up to ~2 minutes
+for i in $(seq 1 24); do
+  STATUS=$(aws_cmd ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query 'Status' --output text 2>/dev/null || echo "Unknown")
+  DETAILS=$(aws_cmd ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query 'StatusDetails' --output text 2>/dev/null || true)
+  STDOUT_URL=$(aws_cmd ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query 'StandardOutputUrl' --output text 2>/dev/null || true)
+  STDERR_URL=$(aws_cmd ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query 'StandardErrorUrl' --output text 2>/dev/null || true)
+  echo "  [$i/24] Status=$STATUS Details=$DETAILS StdoutURL=${STDOUT_URL:-none} StderrURL=${STDERR_URL:-none}"
+  case "$STATUS" in
+    Success)
+      break
+      ;;
+    Failed|Cancelled|TimedOut|Undeliverable)
+      echo "❌ SSM command ended with status: $STATUS ($DETAILS)"
+      echo "  Hint: Undeliverable often means SSM agent is not running or instance role lacks permissions."
+      aws_cmd ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" || true
+      exit 1
+      ;;
+    *)
+      sleep 5
+      ;;
+  esac
+done
+
+# Final invocation details and logs
+echo "----- SSM Invocation Summary -----"
+aws_cmd ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" || true
+echo "----- SSM StandardOutputContent -----"
+aws_cmd ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query 'StandardOutputContent' --output text || true
+echo "----- SSM StandardErrorContent -----"
+aws_cmd ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query 'StandardErrorContent' --output text || true
+
+echo "✅ Deploy step complete. Use this to re-check status any time:"
+echo "aws --profile $AWS_PROFILE --region $REGION ssm send-command --instance-ids $INSTANCE_ID --document-name AWS-RunShellScript --parameters commands='[\"cd /opt/zivohealth\",\"docker compose ps\",\"docker ps --format \"table {{.Names}}\\t{{.Status}}\\t{{.Ports}}\"\"]'"

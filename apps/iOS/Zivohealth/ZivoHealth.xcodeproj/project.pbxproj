@@ -12,6 +12,7 @@
 		07E5B935FA2FC5E4668DDA48 /* HealthKitDataFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6C4C983F601FE2BA241691B /* HealthKitDataFetcher.swift */; };
 		0EEB1249FD99D957D42FF168 /* VisualizationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90616E0A7AABF5703D5C22F4 /* VisualizationView.swift */; };
 		0F09E081F8BBD6D8B18F84ED /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B71E3EFA0A2E40123170C17D /* Assets.xcassets */; };
+		0F225B7991475F5A5281B010 /* ReportIssueSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CB3479E7B348F5FE613874A /* ReportIssueSheet.swift */; };
 		10EC107F34968377E75306F5 /* InfectionMarkersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DD626940C50097C68BC130A /* InfectionMarkersView.swift */; };
 		1265CB6300514CBEDD713FD1 /* NutritionGoalSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC204CE3C3085B925ED8D319 /* NutritionGoalSetupView.swift */; };
 		140A3F4C4DD4B8FC2314620A /* SyncProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B328ADA23AA7DECC626723E0 /* SyncProgressView.swift */; };
@@ -21,9 +22,9 @@
 		1B0373B9827DE543695316A7 /* AttachmentOptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4EBDEE6B3A14F6EF36E5EF5 /* AttachmentOptionsView.swift */; };
 		1D159B86A22A7331D339F8E4 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 11C8CF965BC7361CA8D63A43 /* LaunchScreen.storyboard */; };
 		1D5DBC2C0AAA93CDA6B74AC2 /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 553667075FDD2EB67A50B488 /* ChatMessage.swift */; };
-		1DEBF79537FE4265CA4A934F /* DoctorDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 841583EBB2C87C2F2BD777A9 /* DoctorDashboardView.swift */; };
 		1F8736ACF1845E7232CD7085 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 5F3FA00672B65814D62A6482 /* GoogleService-Info.plist */; };
 		1F8C369E0E5A0490E8A25874 /* DocumentPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57D73EAE8B9CC0028F38A931 /* DocumentPicker.swift */; };
+		21DA7D1D85C914B0302F5B67 /* FeedbackReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92EF0F36B0559F5E087EE029 /* FeedbackReporter.swift */; };
 		22ED174EAF03D714B4A9458F /* ZivoHealthApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 294935B6E923D37F4F09B90D /* ZivoHealthApp.swift */; };
 		2DABB889043362A8BF44C216 /* VitalsSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00669A95E8E6AAB6F40BD1F /* VitalsSyncManager.swift */; };
 		2E82CD86EBADB6AD0CA6CFDF /* LabReportsAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADF32113FC5D3A58C965EE19 /* LabReportsAPIService.swift */; };
@@ -100,7 +101,6 @@
 		D9CE620B435B05EB5F4CD2BB /* OnboardingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D3FA8C38F16BCE2057FBE90 /* OnboardingViewModel.swift */; };
 		DBBF7312AAE137171F6FB982 /* KidneyFunctionTestsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32BA03E3702F3149E66543D2 /* KidneyFunctionTestsView.swift */; };
 		DBFAF118A237276C6321F544 /* SharedTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2A00001B9F3FBC7D4772889 /* SharedTypes.swift */; };
-		E5CB6B5FF2BD458AA0E2D307 /* RoleSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39352E7610A18558ABDA4343 /* RoleSelectionView.swift */; };
 		E5ECCCB4AE3051188AC9C278 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = B21733AF9A6245311EC10B92 /* FirebaseMessaging */; };
 		E645B536597AE9FDC7FA213F /* DualAuthViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91F77634C19BE8E54489984F /* DualAuthViews.swift */; };
 		F2B1166437A5A50B87283E1E /* LabCategoryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC80E73CDC1E65164DE827CC /* LabCategoryDetailView.swift */; };
@@ -125,14 +125,13 @@
 		087F05A6FAB6926BD5398C44 /* BackendVitalsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendVitalsManager.swift; sourceTree = "<group>"; };
 		11C8CF965BC7361CA8D63A43 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		1C7F300B3DCB28DFC9BE34AB /* TestTrendsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestTrendsView.swift; sourceTree = "<group>"; };
+		1CB3479E7B348F5FE613874A /* ReportIssueSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportIssueSheet.swift; sourceTree = "<group>"; };
 		1DE3505F00ED7E06ACDEFA62 /* NutritionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionManager.swift; sourceTree = "<group>"; };
 		294935B6E923D37F4F09B90D /* ZivoHealthApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZivoHealthApp.swift; sourceTree = "<group>"; };
 		32BA03E3702F3149E66543D2 /* KidneyFunctionTestsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KidneyFunctionTestsView.swift; sourceTree = "<group>"; };
 		35024D5191AEBE316AA7D0E2 /* PatientDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatientDetailView.swift; sourceTree = "<group>"; };
-		39352E7610A18558ABDA4343 /* RoleSelectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoleSelectionView.swift; sourceTree = "<group>"; };
 		3AEA3FF72DF1CA1272B9C3B2 /* GoogleSignInService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignInService.swift; sourceTree = "<group>"; };
 		3BA8111F228B9DA9D1CB848E /* CardiacMarkersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardiacMarkersView.swift; sourceTree = "<group>"; };
-		3BF5167D2E8CE53C004569DE /* ZivoHealth.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZivoHealth.entitlements; sourceTree = "<group>"; };
 		3D3FA8C38F16BCE2057FBE90 /* OnboardingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewModel.swift; sourceTree = "<group>"; };
 		430DEE78B83DA8E378F15D54 /* ImagePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePickerView.swift; sourceTree = "<group>"; };
 		4740BB412B3880168CEB48EB /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -172,12 +171,12 @@
 		7B10EA0FB731EFAF03EF303C /* VitalsNetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VitalsNetworkMonitor.swift; sourceTree = "<group>"; };
 		7CCBE82DBF086347F1FA99EC /* ChatHistoryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryManager.swift; sourceTree = "<group>"; };
 		81C087E521FBF0C908617D20 /* WorkoutChartsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutChartsView.swift; sourceTree = "<group>"; };
-		841583EBB2C87C2F2BD777A9 /* DoctorDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoctorDashboardView.swift; sourceTree = "<group>"; };
 		8A0483B8D690AED292CCE15A /* OthersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OthersView.swift; sourceTree = "<group>"; };
 		8DD626940C50097C68BC130A /* InfectionMarkersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InfectionMarkersView.swift; sourceTree = "<group>"; };
 		90616E0A7AABF5703D5C22F4 /* VisualizationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualizationView.swift; sourceTree = "<group>"; };
 		91F77634C19BE8E54489984F /* DualAuthViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DualAuthViews.swift; sourceTree = "<group>"; };
 		922CC732B762E31063304726 /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
+		92EF0F36B0559F5E087EE029 /* FeedbackReporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackReporter.swift; sourceTree = "<group>"; };
 		996146302D47AEED2DEFE7F2 /* MedicationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationsView.swift; sourceTree = "<group>"; };
 		99CB7D1D59CBE1BA24E09EC0 /* BackendMetricsGraphView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendMetricsGraphView.swift; sourceTree = "<group>"; };
 		9A741D030D5D86130CE273DF /* Health360OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Health360OverviewView.swift; sourceTree = "<group>"; };
@@ -283,7 +282,6 @@
 				4740BB412B3880168CEB48EB /* ContentView.swift */,
 				B0976AF923F0A01D5056A701 /* CreateAppointmentView.swift */,
 				4DB053175692F5414A3FFC48 /* DiabetesPanelView.swift */,
-				841583EBB2C87C2F2BD777A9 /* DoctorDashboardView.swift */,
 				57D73EAE8B9CC0028F38A931 /* DocumentPicker.swift */,
 				91F77634C19BE8E54489984F /* DualAuthViews.swift */,
 				FEE7D024CCE93197DEA98B67 /* DynamicTestCategoryView.swift */,
@@ -308,7 +306,6 @@
 				35024D5191AEBE316AA7D0E2 /* PatientDetailView.swift */,
 				6B7B7C2D66A918B7B11C2DF2 /* PatientListView.swift */,
 				5C123B11CB05211DA90A3B1E /* PrescriptionsView.swift */,
-				39352E7610A18558ABDA4343 /* RoleSelectionView.swift */,
 				EE81190A13D4AD9690622971 /* ScheduleConsultationView.swift */,
 				B460E024815D1A3C54529825 /* SettingsView.swift */,
 				4B5E6FE5615603350FA778AF /* SimpleDynamicBiomarkersView.swift */,
@@ -360,6 +357,7 @@
 		49C0E5FCEE723797853EBE0F /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				92EF0F36B0559F5E087EE029 /* FeedbackReporter.swift */,
 				3AEA3FF72DF1CA1272B9C3B2 /* GoogleSignInService.swift */,
 				C7CDB4CE97F9C8842D447B11 /* KeychainService.swift */,
 				ADF32113FC5D3A58C965EE19 /* LabReportsAPIService.swift */,
@@ -375,6 +373,7 @@
 		58BF9597DE34F4F7151F16CD /* Components */ = {
 			isa = PBXGroup;
 			children = (
+				1CB3479E7B348F5FE613874A /* ReportIssueSheet.swift */,
 				A46A620A6F3A9755467E4A17 /* StatusBadge.swift */,
 				90616E0A7AABF5703D5C22F4 /* VisualizationView.swift */,
 			);
@@ -384,7 +383,6 @@
 		7DD21C2CADE5B80EC28AF8EC = {
 			isa = PBXGroup;
 			children = (
-				3BF5167D2E8CE53C004569DE /* ZivoHealth.entitlements */,
 				1BF1C218BE662A5E20E976FF /* Sources */,
 				F9AA7CB0EF09E0E307D34269 /* Products */,
 			);
@@ -587,11 +585,11 @@
 				4EE108F8C91A4063CF00FD27 /* CreateAppointmentView.swift in Sources */,
 				F9296D9BDA2C9266EAFC98F9 /* DatabaseManager.swift in Sources */,
 				8554D2E6C7912CA23CC52F41 /* DiabetesPanelView.swift in Sources */,
-				1DEBF79537FE4265CA4A934F /* DoctorDashboardView.swift in Sources */,
 				1F8C369E0E5A0490E8A25874 /* DocumentPicker.swift in Sources */,
 				E645B536597AE9FDC7FA213F /* DualAuthViews.swift in Sources */,
 				55385569F9B609431ABE06B4 /* DynamicTestCategoryView.swift in Sources */,
 				F4BD5F716E43C45DDCFF033B /* ElectrolytePanelView.swift in Sources */,
+				21DA7D1D85C914B0302F5B67 /* FeedbackReporter.swift in Sources */,
 				7FD81662CB0AC86EE8978409 /* FoodImageViewer.swift in Sources */,
 				A31C506FFE7BD69F5BA9AD41 /* GoogleSignInService.swift in Sources */,
 				9FDE5C15C62814F90EA1937F /* Health360OverviewView.swift in Sources */,
@@ -634,7 +632,7 @@
 				D7FCBD0A326346E448C2A1E0 /* PatientViewModel.swift in Sources */,
 				714B4BE12E644CF71618FCCA /* PrescriptionsView.swift in Sources */,
 				8889FFABF07DE4B6F4E742F4 /* ReminderAPIService.swift in Sources */,
-				E5CB6B5FF2BD458AA0E2D307 /* RoleSelectionView.swift in Sources */,
+				0F225B7991475F5A5281B010 /* ReportIssueSheet.swift in Sources */,
 				85BB4DF2267CE02D49801C85 /* ScheduleConsultationView.swift in Sources */,
 				C7835A22200BC80695259B51 /* SettingsView.swift in Sources */,
 				DBFAF118A237276C6321F544 /* SharedTypes.swift in Sources */,
@@ -667,7 +665,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Zivohealth.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -830,7 +827,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Zivohealth.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;

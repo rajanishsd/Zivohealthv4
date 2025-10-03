@@ -37,3 +37,4 @@ class Token(BaseModel):
 class TokenPayload(BaseModel):
     sub: Optional[int] = None
     is_doctor: Optional[bool] = False 
+    is_admin: Optional[bool] = False

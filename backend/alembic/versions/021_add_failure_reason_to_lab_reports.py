@@ -1,7 +1,7 @@
 """Add failure_reason column to lab_reports table
 
 Revision ID: 021
-Revises: 020
+Revises: 020_add_failure_reason_to_lab_reports
 Create Date: 2025-01-27 12:00:00.000000
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '021'
-down_revision = '020'
+down_revision = '020_add_failure_reason_to_lab_reports'
 branch_labels = None
 depends_on = None
 

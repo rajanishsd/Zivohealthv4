@@ -5,3 +5,8 @@ variable "bucket_name" {
   description = "Optional fixed S3 bucket name"
   default     = ""
 }
+
+variable "ec2_role_arn" {
+  type        = string
+  description = "EC2 role ARN permitted to read compose objects"
+}

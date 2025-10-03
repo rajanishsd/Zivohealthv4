@@ -1,6 +1,6 @@
 """update_pharmacybill_filepath
 
-Revision ID: 020
+Revision ID: 019_update_pharmacybill_filepath
 Revises: 90d1fbcd5617
 Create Date: 2025-01-27 00:00:00.000000
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = '020'
+revision = '019_update_pharmacybill_filepath'
 down_revision = '90d1fbcd5617'
 branch_labels = None
 depends_on = None

@@ -118,3 +118,13 @@ variable "reminders_fcm_project_id" {
   description = "FCM project ID for reminders service"
   default     = ""
 }
+
+variable "compose_s3_bucket" {
+  type        = string
+  description = "S3 bucket to store rendered docker-compose.yml"
+}
+
+variable "compose_s3_key" {
+  type        = string
+  description = "S3 key for rendered docker-compose.yml (e.g., deploy/dev/docker-compose.yml)"
+}

@@ -12,7 +12,9 @@ from app.api.v1.endpoints import nutrition_goals
 from app.api.v1.endpoints import agents
 from app.api.v1.endpoints import lab_reports
 from app.api.v1.endpoints import files
+from app.api.v1.endpoints import feedback
 from app.api.v1.endpoints import video
+from app.api.v1.endpoints import dashboard as dashboard_v1
 from app.api.v1.endpoints import password_reset
 from app.api.v1.endpoints import onboarding
 # Reminders are handled by a separate microservice - no need to import here
@@ -38,8 +40,10 @@ api_router.include_router(audit.router, prefix="/audit", tags=["audit"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(lab_reports.router, prefix="/lab-reports", tags=["lab-reports"])
 api_router.include_router(files.router, prefix="/files", tags=["files"])
+api_router.include_router(feedback.router, prefix="/feedback", tags=["feedback"])
 api_router.include_router(video.router, prefix="/video", tags=["video"])
 api_router.include_router(onboarding.router, prefix="/onboarding", tags=["onboarding"])
+api_router.include_router(dashboard_v1.router, prefix="/dashboard", tags=["dashboard-v1"])
 # Reminders are handled by a separate microservice at http://localhost:8085 
 
 # api_router.include_router(telemetry_dashboard.router, prefix="/telemetry-audit", tags=["telemetry-dashboard"])

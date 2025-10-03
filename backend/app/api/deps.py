@@ -112,6 +112,12 @@ def get_current_user_or_doctor(
             detail="Could not validate credentials",
         )
     
+    # Admin token
+    if payload.get("is_admin", False):
+        admin = crud.admin.get(db, admin_id=token_data.sub)
+        if not admin:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Admin not found")
+        return admin
     # Check if it's a doctor token
     if payload.get("is_doctor", False):
         doctor = crud.doctor.get(db, doctor_id=token_data.sub)
@@ -142,10 +148,14 @@ def get_current_active_doctor(
 
 
 def get_current_active_superuser(
-    current_user: models.User = Depends(get_current_user),
-) -> models.User:
-    if not crud.user.is_superuser(current_user):
-        raise HTTPException(
-            status_code=400, detail="The user doesn't have enough privileges"
-        )
-    return current_user 
+    current_user: Union[models.User, models.Admin] = Depends(get_current_user_or_doctor),
+) -> Union[models.User, models.Admin]:
+    # Allow superadmin admins or superusers
+    if isinstance(current_user, models.Admin):
+        if not crud.admin.is_super_admin(current_user):
+            raise HTTPException(status_code=400, detail="The user doesn't have enough privileges")
+        return current_user
+    else:
+        if not crud.user.is_superuser(current_user):
+            raise HTTPException(status_code=400, detail="The user doesn't have enough privileges")
+        return current_user

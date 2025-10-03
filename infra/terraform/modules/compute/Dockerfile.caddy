@@ -1,0 +1,10 @@
+FROM public.ecr.aws/docker/library/caddy:2-alpine
+
+# Copy the Caddyfile
+COPY Caddyfile /etc/caddy/Caddyfile
+
+# Create necessary directories
+RUN mkdir -p /srv/www
+
+# Expose ports
+EXPOSE 80 443

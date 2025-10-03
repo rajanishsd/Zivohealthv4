@@ -399,25 +399,6 @@ body {
   flex-wrap: wrap;
 }
 
-.agent-badge {
-  padding: 4px 8px;
-  background-color: #f0f7ff;
-  color: #1e88e5;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 600;
-  font-family: 'Monaco', 'Menlo', monospace;
-}
-
-.agent-badge.from {
-  background-color: #e8f5e8;
-  color: #2e7d32;
-}
-
-.agent-badge.to {
-  background-color: #fff3e0;
-  color: #f57c00;
-}
 
 .arrow {
   color: #666666;
@@ -468,11 +449,6 @@ body {
   gap: 12px;
 }
 
-.handoff-agents {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 
 .handoff-reason {
   font-size: 14px;
@@ -505,10 +481,6 @@ body {
   font-size: 13px;
 }
 
-.timeline-agent {
-  font-weight: 600;
-  color: #1e88e5;
-}
 
 .timeline-operation {
   color: #333333;
@@ -1140,18 +1112,6 @@ body {
   border-left-color: #009688; /* Response Time - Teal */
 }
 
-/* Agent Monitoring Specific */
-.monitoring-section:has(.sessions-table) .stat-card:nth-child(1) {
-  border-left-color: #607d8b; /* Sessions - Blue Grey */
-}
-
-.monitoring-section:has(.sessions-table) .stat-card:nth-child(2) {
-  border-left-color: #795548; /* Messages - Brown */
-}
-
-.monitoring-section:has(.sessions-table) .stat-card:nth-child(3) {
-  border-left-color: #e91e63; /* Agents - Pink */
-}
 
 .monitoring-section:has(.sessions-table) .stat-card:nth-child(4) {
   border-left-color: #4caf50; /* Active Sessions - Green */
@@ -1400,8 +1360,8 @@ body {
 .workflow-table .table-header {
   background: #f8f9fa;
   display: grid;
-  grid-template-columns: 120px 100px 150px 1fr 150px 100px 100px 120px;
-  gap: 16px;
+  grid-template-columns: 180px 120px 80px 100px 200px 100px 150px 140px;
+  gap: 12px;
   padding: 16px;
   font-weight: 600;
   color: #333;
@@ -1410,8 +1370,8 @@ body {
 
 .workflow-table .table-row {
   display: grid;
-  grid-template-columns: 120px 100px 150px 1fr 150px 100px 100px 120px;
-  gap: 16px;
+  grid-template-columns: 180px 120px 80px 100px 200px 100px 150px 140px;
+  gap: 12px;
   padding: 16px;
   border-bottom: 1px solid #f0f0f0;
   align-items: center;
@@ -1424,6 +1384,20 @@ body {
 
 .workflow-table .table-row:last-child {
   border-bottom: none;
+}
+
+/* Feedback table specific styles */
+.workflow-table .table-row > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 0;
+}
+
+.workflow-table .table-row > div:last-child {
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .request-id {
@@ -1455,6 +1429,9 @@ body {
   font-weight: 500;
   cursor: pointer;
   transition: background-color 0.2s ease;
+  white-space: nowrap;
+  min-width: 120px;
+  text-align: center;
 }
 
 .view-workflow-btn:hover {
@@ -1642,14 +1619,6 @@ body {
   background: #f44336;
 }
 
-.step-agent {
-  background: #e3f2fd;
-  color: #1565c0;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-}
 
 .step-event {
   background: #f5f5f5;
@@ -1735,6 +1704,22 @@ body {
   .workflow-table .table-row {
     padding: 16px;
     border-bottom: 2px solid #f0f0f0;
+  }
+  
+  .workflow-table .table-row > div {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    white-space: normal;
+  }
+  
+  .workflow-table .table-row > div:before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: #666;
+    font-size: 12px;
+    margin-right: 8px;
   }
   
   .workflow-table .table-row > div {
@@ -1846,14 +1831,6 @@ body {
   text-align: center;
 }
 
-.hierarchical-step .step-agent {
-  background: #28a745;
-  color: white;
-  padding: 4px 12px;
-  border-radius: 6px;
-  font-weight: 600;
-  font-size: 14px;
-}
 
 .hierarchical-step .step-operation {
   background: #17a2b8;
@@ -2011,10 +1988,6 @@ body {
   background: #fdf2f8;
 }
 
-.message-item.agents-summary {
-  border-left-color: #6c757d;
-  background: #f8f9fa;
-}
 
 .message-item.timing {
   border-left-color: #ffc107;
@@ -2109,14 +2082,6 @@ body {
   text-align: center;
 }
 
-.step-agent {
-  background: #28a745;
-  color: white;
-  padding: 6px 12px;
-  border-radius: 20px;
-  font-weight: 600;
-  font-size: 13px;
-}
 
 .step-operation {
   background: #17a2b8;

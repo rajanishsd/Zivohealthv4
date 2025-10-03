@@ -1,11 +1,13 @@
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @AppStorage("userMode") private var userMode: UserMode = .patient
-    @State private var showingRoleSelection = false
     @State private var selectedTab = 0
     @State private var isInitializing = true
     @ObservedObject private var networkService = NetworkService.shared
+    @State private var showReportSheet = false
+    @State private var pendingScreenshot: UIImage? = nil
 
     var body: some View {
         if isInitializing {
@@ -46,74 +48,41 @@ struct ContentView: View {
                 .onAppear {
                     print("📋 [ContentView] Showing onboarding flow - user is authenticated but onboarding not completed")
                 }
-        } else if showingRoleSelection {
-            // Show only role selection without bottom navigation
-            HomeView(onRoleSelected: {
-                showingRoleSelection = false
-            })
         } else {
             // Show main app with role-based navigation
             if #available(iOS 16.0, *) {
                 NavigationStack {
                     TabView(selection: $selectedTab) {
-                        // Home/Role Selection Tab
-                        MainHomeView(onSwitchRole: {
-                            showingRoleSelection = true
-                        })
-                        .id("home-\(userMode.rawValue)")
+                        // Home Tab
+                        MainHomeView()
                         .tabItem {
                             Label("Home", systemImage: "house.fill")
                         }
 
-                        // Role-specific tabs
-                        if userMode == .patient {
-                            Health360OverviewView(healthKitManager: BackendVitalsManager.shared)
-                            .tabItem {
-                                Label("Health 360", systemImage: "heart")
-                            }
-                            .tag(1)
-
-                            ChatView()
-                            .tabItem {
-                                Label("Chat", systemImage: "message")
-                            }
-                            .tag(2)
-
-                            AppointmentsView()
-                            .tabItem {
-                                Label("Appointments", systemImage: "calendar")
-                            }
-                            .tag(3)
-
-                            SettingsView()
-                            .tabItem {
-                                Label("Settings", systemImage: "gear")
-                            }
-                            .tag(4)
-                        } else {
-                            // Doctor tabs
-                            DoctorDashboardView(onSwitchRole: {
-                                showingRoleSelection = true
-                            })
-                            .tabItem {
-                                Label("Dashboard", systemImage: "stethoscope")
-                            }
-                            .tag(1)
-
-                            AppointmentsView()
-                            .tabItem {
-                                Label("Appointments", systemImage: "calendar")
-                            }
-                            .tag(2)
-
-                            SettingsView()
-                            .tabItem {
-                                Label("Settings", systemImage: "gear")
-                            }
-                            .tag(3)
+                        Health360OverviewView(healthKitManager: BackendVitalsManager.shared)
+                        .tabItem {
+                            Label("Health 360", systemImage: "heart")
                         }
+                        .tag(1)
+
+                        ChatView()
+                        .tabItem {
+                            Label("Chat", systemImage: "message")
+                        }
+                        .tag(2)
+
+                        AppointmentsView()
+                        .tabItem {
+                            Label("Appointments", systemImage: "calendar")
+                        }
+                        .tag(3)
+
+                        SettingsView()
+                        .tabItem {
+                            Label("Settings", systemImage: "gear")
+                        }
+                        .tag(4)
                     }
-                    .id(userMode.rawValue) // Force TabView reconstruction when role changes
                     .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToChatTab"))) { _ in
                         selectedTab = 2 // Chat tab for patients
                     }
@@ -170,70 +139,69 @@ struct ContentView: View {
                         UITabBar.appearance().standardAppearance = tabBarAppearance
                         UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
                     }
+                    .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in
+                        // Capture a screenshot of current UI and prompt to report
+                        if let img = ScreenCapture.captureCurrentWindow() {
+                            self.pendingScreenshot = img
+                            self.showReportSheet = true
+                        }
+                    }
                 }
-                .id(userMode.rawValue) // Force NavigationStack reconstruction when role changes
+                .overlay(alignment: .topTrailing) {
+                    Button(action: { triggerReport() }) {
+                        Image(systemName: "ladybug.fill")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(8)
+                            .background(Color.red)
+                            .clipShape(Circle())
+                            .shadow(radius: 2)
+                    }
+                    .padding(.trailing, 8)
+                    .padding(.top, 48)
+                    .accessibilityLabel("Report an issue")
+                }
+                .sheet(isPresented: $showReportSheet) {
+                    if let img = pendingScreenshot {
+                        ReportIssueSheet(image: img) { category, description in
+                            try await FeedbackReporter.shared.report(image: img, category: category, description: description, route: nil)
+                        }
+                    }
+                }
             } else {
                 // iOS 15 fallback - keep original NavigationView
             NavigationView {
                 TabView(selection: $selectedTab) {
-                    // Home/Role Selection Tab
-                    MainHomeView(onSwitchRole: {
-                        showingRoleSelection = true
-                    })
-                    .id("home-\(userMode.rawValue)")
+                    // Home Tab
+                    MainHomeView()
                     .tabItem {
                         Label("Home", systemImage: "house.fill")
                     }
 
-                    // Role-specific tabs
-                    if userMode == .patient {
-                        Health360OverviewView(healthKitManager: BackendVitalsManager.shared)
-                        .tabItem {
-                            Label("Health 360", systemImage: "heart")
-                        }
-                        .tag(1)
-
-                        ChatView()
-                        .tabItem {
-                            Label("Chat", systemImage: "message")
-                        }
-                        .tag(2)
-
-                        AppointmentsView()
-                        .tabItem {
-                            Label("Appointments", systemImage: "calendar")
-                        }
-                        .tag(3)
-
-                        SettingsView()
-                        .tabItem {
-                            Label("Settings", systemImage: "gear")
-                        }
-                        .tag(4)
-                    } else {
-                        // Doctor tabs
-                        DoctorDashboardView(onSwitchRole: {
-                            showingRoleSelection = true
-                        })
-                        .tabItem {
-                            Label("Dashboard", systemImage: "stethoscope")
-                        }
-                        .tag(1)
-
-                        AppointmentsView()
-                        .tabItem {
-                            Label("Appointments", systemImage: "calendar")
-                        }
-                        .tag(2)
-
-                        SettingsView()
-                        .tabItem {
-                            Label("Settings", systemImage: "gear")
-                        }
-                        .tag(3)
+                    Health360OverviewView(healthKitManager: BackendVitalsManager.shared)
+                    .tabItem {
+                        Label("Health 360", systemImage: "heart")
                     }
+                    .tag(1)
+
+                    ChatView()
+                    .tabItem {
+                        Label("Chat", systemImage: "message")
+                    }
+                    .tag(2)
+
+                    AppointmentsView()
+                    .tabItem {
+                        Label("Appointments", systemImage: "calendar")
+                    }
+                    .tag(3)
+
+                    SettingsView()
+                    .tabItem {
+                        Label("Settings", systemImage: "gear")
+                    }
+                    .tag(4)
                 }
-                .id(userMode.rawValue) // Force TabView reconstruction when role changes
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToChatTab"))) { _ in
                     selectedTab = 2 // Chat tab for patients
                 }
@@ -247,10 +215,31 @@ struct ContentView: View {
                     UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
                 }
                 .navigationViewStyle(.stack)
+                .overlay(alignment: .topTrailing) {
+                    Button(action: { triggerReport() }) {
+                        Image(systemName: "ladybug.fill")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(8)
+                            .background(Color.red)
+                            .clipShape(Circle())
+                            .shadow(radius: 2)
+                    }
+                    .padding(.trailing, 8)
+                    .padding(.top, 48)
+                    .accessibilityLabel("Report an issue")
+                }
+                .sheet(isPresented: $showReportSheet) {
+                    if let img = pendingScreenshot {
+                        ReportIssueSheet(image: img) { category, description in
+                            try await FeedbackReporter.shared.report(image: img, category: category, description: description, route: nil)
+                        }
+                    }
+                }
             }
-            .id(userMode.rawValue) // Force NavigationView reconstruction when role changes
             }
         }
+        reportSheetPresenter
     }
     
     // MARK: - Authentication Initialization
@@ -260,6 +249,14 @@ struct ContentView: View {
         
         // Small delay to ensure AppStorage values are loaded
         try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+        
+        // Force Zivohealth app to Patient mode only
+        await MainActor.run {
+            if userMode != .patient {
+                userMode = .patient
+                NetworkService.shared.handleRoleChange()
+            }
+        }
         
         // Check initial state
         let hasTokens = NetworkService.shared.hasStoredTokens()
@@ -279,10 +276,9 @@ struct ContentView: View {
     }
 }
 
-// Main home view that shows current role and allows switching
+// Main home view for patient mode
 struct MainHomeView: View {
     @AppStorage("userMode") private var userMode: UserMode = .patient
-    let onSwitchRole: () -> Void
 
     var body: some View {
         ZStack {
@@ -313,117 +309,46 @@ struct MainHomeView: View {
                         .foregroundColor(.secondary)
                 }
 
-                // Current Role Display
-                VStack(spacing: 12) {
-                    Text("Current Role")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-
-                    HStack {
-                        Image(systemName: userMode == .patient ? "person.circle.fill" : "stethoscope.circle.fill")
-                            .font(.title)
-                            .foregroundColor(.blue)
-
-                        Text(userMode == .patient ? "Patient" : "Doctor")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                    }
-                    .padding()
-                    .background(Color.blue.opacity(0.1))
-                    .cornerRadius(12)
-                }
-
-                // Role-specific welcome message
+                // Welcome message
                 VStack(spacing: 8) {
-                    if userMode == .patient {
-                        Text("Welcome! You can now:")
-                            .font(.headline)
-                            .foregroundColor(.primary)
+                    Text("Welcome! You can now:")
+                        .font(.headline)
+                        .foregroundColor(.primary)
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("• Chat with AI for health guidance")
-                            Text("• Request consultations with doctors")
-                            Text("• Track your health metrics")
-                            Text("• View your chat history")
-                        }
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    } else {
-                        Text("Welcome Doctor! You can now:")
-                            .font(.headline)
-                            .foregroundColor(.primary)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("• Review consultation requests")
-                            Text("• Manage patient cases")
-                            Text("• Provide medical care")
-                            Text("• Update patient records")
-                        }
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("• Chat with AI for health guidance")
+                        Text("• Request consultations with doctors")
+                        Text("• Track your health metrics")
+                        Text("• View your chat history")
                     }
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
                 }
                 .padding()
                 .background(Color.gray.opacity(0.1))
                 .cornerRadius(12)
 
-                // Quick action based on role
+                // Quick actions
                 VStack(spacing: 16) {
-                    if userMode == .patient {
-                        Text("Get started by exploring the tabs below")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
+                    Text("Get started by exploring the tabs below")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
 
-                        HStack(spacing: 20) {
-                            QuickActionButton(
-                                icon: "message.circle.fill",
-                                title: "Start Chat",
-                                subtitle: "Chat tab"
-                            )
-
-                            QuickActionButton(
-                                icon: "heart.circle.fill",
-                                title: "Health Metrics",
-                                subtitle: "Health tab"
-                            )
-                        }
-                    } else {
-                        Text("Check your dashboard for consultation requests")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
+                    HStack(spacing: 20) {
+                        QuickActionButton(
+                            icon: "message.circle.fill",
+                            title: "Start Chat",
+                            subtitle: "Chat tab"
+                        )
 
                         QuickActionButton(
-                            icon: "stethoscope.circle.fill",
-                            title: "Dashboard",
-                            subtitle: "View requests"
+                            icon: "heart.circle.fill",
+                            title: "Health Metrics",
+                            subtitle: "Health tab"
                         )
                     }
                 }
-                
-                // Switch Role Button - Prominent placement
-                Button(action: onSwitchRole) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.title3)
-                        Text("Switch Role")
-                            .font(.headline)
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color.blue, Color.purple]),
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .cornerRadius(12)
-                    .shadow(color: Color.blue.opacity(0.3), radius: 4, x: 0, y: 2)
-                }
-                .padding(.horizontal, 20)
 
                 Spacer()
             }
@@ -431,19 +356,6 @@ struct MainHomeView: View {
         }
         .navigationTitle("ZivoHealth")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: onSwitchRole) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.caption)
-                        Text("Switch Role")
-                            .font(.caption)
-                    }
-                    .foregroundColor(.blue)
-                }
-            }
-        }
     }
 }
 
@@ -474,139 +386,6 @@ struct QuickActionButton: View {
     }
 }
 
-// Role Selection Sheet
-struct HomeView: View {
-    @AppStorage("userMode") private var userMode: UserMode = .patient
-    @State private var selectedRole: UserMode = .patient
-    let onRoleSelected: () -> Void
-
-    init(onRoleSelected: @escaping () -> Void = {}) {
-        self.onRoleSelected = onRoleSelected
-    }
-
-    var body: some View {
-        NavigationView {
-            ZStack {
-                // Background gradient
-                LinearGradient(
-                    gradient: Gradient(colors: [Color.blue.opacity(0.1), Color.purple.opacity(0.1)]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
-
-                VStack(spacing: 40) {
-                    Spacer()
-
-                    // App Logo and Title
-                    VStack(spacing: 16) {
-                        Image(systemName: "heart.circle.fill")
-                            .font(.system(size: 80))
-                            .foregroundColor(.blue)
-
-                        Text("ZivoHealth")
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
-                            .foregroundColor(.primary)
-
-                        Text("Smart Healthcare Platform")
-                            .font(.title3)
-                            .foregroundColor(.secondary)
-                    }
-
-                    // Current Role Display
-                    VStack(spacing: 12) {
-                        Text("Current Role")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-
-                        HStack {
-                            Image(systemName: userMode == .patient ? "person.circle.fill" : "stethoscope.circle.fill")
-                                .font(.title)
-                                .foregroundColor(.blue)
-
-                            Text(userMode == .patient ? "Patient" : "Doctor")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                        }
-                        .padding()
-                        .background(Color.blue.opacity(0.1))
-                        .cornerRadius(12)
-                    }
-
-                    Spacer()
-
-                    // Role Selection Cards
-                    VStack(spacing: 20) {
-                        Text("Switch Role")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .padding(.bottom, 10)
-
-                        // Patient Role Card
-                        RoleCard(
-                            role: .patient,
-                            title: "Patient",
-                            subtitle: "Access healthcare services",
-                            icon: "person.circle.fill",
-                            description: "Chat with AI, consult doctors, and manage your health",
-                            isSelected: selectedRole == .patient
-                        ) {
-                            selectedRole = .patient
-                        }
-
-                        // Doctor Role Card
-                        RoleCard(
-                            role: .doctor,
-                            title: "Doctor",
-                            subtitle: "Manage patient consultations",
-                            icon: "stethoscope.circle.fill",
-                            description: "Review consultation requests, manage patient cases, and provide care",
-                            isSelected: selectedRole == .doctor
-                        ) {
-                            selectedRole = .doctor
-                        }
-
-                        // Switch Role Button
-                        if selectedRole != userMode {
-                            Button(action: {
-                                userMode = selectedRole
-
-                                // Clear auth token when role changes
-                                NetworkService.shared.handleRoleChange()
-
-                                // Notify parent that role was selected
-                                onRoleSelected()
-                            }) {
-                                HStack {
-                                    Text("Switch to \(selectedRole == .patient ? "Patient" : "Doctor")")
-                                    Image(systemName: "arrow.right")
-                                }
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.blue)
-                                .cornerRadius(12)
-                            }
-                            .padding(.horizontal, 40)
-                            .padding(.top, 20)
-                        }
-                    }
-
-                    Spacer()
-                }
-                .padding()
-            }
-            .navigationTitle("Switch Role")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-        .onAppear {
-            selectedRole = userMode
-        }
-    }
-}
-
 #Preview {
     ContentView()
 }
@@ -615,5 +394,27 @@ struct HomeView: View {
 struct PatientChatHistoryView: View {
     var body: some View {
         ChatHistoryView(fromTab: true)
+    }
+}
+
+// Present report sheet for feedback submission
+extension ContentView {
+    @ViewBuilder
+    private var reportSheetPresenter: some View {
+        EmptyView()
+            .sheet(isPresented: $showReportSheet) {
+                if let img = pendingScreenshot {
+                    ReportIssueSheet(image: img) { category, description in
+                        try await FeedbackReporter.shared.report(image: img, category: category, description: description, route: nil)
+                    }
+                }
+            }
+    }
+
+    private func triggerReport() {
+        if let img = ScreenCapture.captureCurrentWindow() {
+            self.pendingScreenshot = img
+            self.showReportSheet = true
+        }
     }
 }

@@ -704,12 +704,9 @@ public class NetworkService: ObservableObject {
     public func debugAuthenticationState() {
         print("🔍 [NetworkService] Authentication Debug Info:")
         print("   Current Mode: \(userMode)")
-        
-        // Use cached values to avoid redundant KeychainService calls
+        // Patient-only diagnostics
         let patientToken = (userMode == .patient) ? authToken : (keychain.retrieveToken(for: .patient) ?? "")
-        let doctorToken = (userMode == .doctor) ? authToken : (keychain.retrieveToken(for: .doctor) ?? "")
         print("   Patient Token: \(patientToken.isEmpty ? "Empty" : "Exists (\(patientToken.count) chars)")")
-        print("   Doctor Token: \(doctorToken.isEmpty ? "Empty" : "Exists (\(doctorToken.count) chars)")")
         // Removed currentCredentials demo logging
         print("   API Endpoint: \(apiEndpoint)")
         print("   AppConfig Environment: \(AppConfig.Environment.current)")

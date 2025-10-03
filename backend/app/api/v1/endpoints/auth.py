@@ -1,6 +1,6 @@
 from datetime import timedelta
-from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app import crud
@@ -9,7 +9,7 @@ from app.core import security
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.user import User as UserSchema, UserCreate, Token
+from app.schemas.user import User as UserSchema, UserCreate
 
 router = APIRouter()
 
@@ -85,8 +85,6 @@ async def login(
     # Neither user nor doctor authentication succeeded
     raise HTTPException(status_code=400, detail="Incorrect email or password")
 
-from fastapi import Body
-
 @router.post("/refresh", response_model=dict)
 async def refresh_token(
     *,
@@ -125,3 +123,34 @@ def read_users_me(
     Get current user.
     """
     return current_user 
+
+
+# Admin login issuing admin JWT (is_admin=true)
+@router.post("/admin/login", response_model=dict)
+async def admin_login(
+    *,
+    db: Session = Depends(deps.get_db),
+    payload: dict = Body(...),
+    _: bool = Depends(deps.verify_api_key_dependency),
+) -> Any:
+    email = payload.get("email")
+    password = payload.get("password")
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password required")
+    admin = crud.admin.get_by_email(db, email=email)
+    if not admin or not security.verify_password(password, admin.hashed_password):
+        raise HTTPException(status_code=400, detail="Incorrect email or password")
+    if not admin.is_active:
+        raise HTTPException(status_code=400, detail="Inactive admin")
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    token = security.create_access_token(admin.id, expires_delta=access_token_expires, is_admin=True)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "admin": {
+            "id": admin.id,
+            "email": admin.email,
+            "full_name": admin.full_name,
+            "is_superadmin": admin.is_superadmin
+        }
+    }

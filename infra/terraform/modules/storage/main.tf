@@ -10,3 +10,71 @@ locals {
 resource "aws_s3_bucket" "uploads" {
   bucket = local.final_bucket_name
 }
+
+resource "aws_s3_bucket_policy" "allow_ec2_read_compose" {
+  bucket = aws_s3_bucket.uploads.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Sid      = "AllowEC2InstanceReadCompose",
+        Effect   = "Allow",
+        Principal = "*",
+        Condition = {
+          ArnLike = {
+            "aws:PrincipalArn" = [
+              "arn:aws:sts::474221740916:assumed-role/zivohealth-production-ec2-role/*",
+              "arn:aws:sts::474221740916:assumed-role/zivohealth-dev-ec2-role/*"
+            ]
+          }
+        },
+        Action   = [
+          "s3:GetObject"
+        ],
+        Resource = [
+          "${aws_s3_bucket.uploads.arn}/deploy/${var.environment}/*"
+        ]
+      },
+      {
+        Sid      = "AllowEC2InstanceListBucket",
+        Effect   = "Allow",
+        Principal = "*",
+        Condition = {
+          ArnLike = {
+            "aws:PrincipalArn" = [
+              "arn:aws:sts::474221740916:assumed-role/zivohealth-production-ec2-role/*",
+              "arn:aws:sts::474221740916:assumed-role/zivohealth-dev-ec2-role/*"
+            ]
+          }
+        },
+        Action   = [
+          "s3:ListBucket",
+          "s3:GetBucketLocation"
+        ],
+        Resource = [
+          "${aws_s3_bucket.uploads.arn}"
+        ]
+      },
+      {
+        Sid      = "AllowEC2InstancePutUploads",
+        Effect   = "Allow",
+        Principal = "*",
+        Condition = {
+          ArnLike = {
+            "aws:PrincipalArn" = [
+              "arn:aws:sts::474221740916:assumed-role/zivohealth-production-ec2-role/*",
+              "arn:aws:sts::474221740916:assumed-role/zivohealth-dev-ec2-role/*"
+            ]
+          }
+        },
+        Action   = [
+          "s3:PutObject"
+        ],
+        Resource = [
+          "${aws_s3_bucket.uploads.arn}/uploads/*"
+        ]
+      }
+    ]
+  })
+}

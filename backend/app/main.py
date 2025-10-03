@@ -228,6 +228,7 @@ def create_application() -> FastAPI:
     
     # API Key Authentication Middleware (add first to catch all requests)
     if settings.REQUIRE_API_KEY:
+        # Wrap middleware to skip API key on admin dashboard routes
         app.add_middleware(APIKeyMiddleware)
     
     # CORS Middleware - Environment-specific origins

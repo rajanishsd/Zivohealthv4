@@ -73,3 +73,5 @@ from .user_profile import (
     UserConsent,
     UserMeasurementPreferences,
 )
+from .feedback import FeedbackScreenshot
+from .admin import Admin

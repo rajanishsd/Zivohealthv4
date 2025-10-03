@@ -1,0 +1,58 @@
+api.zivohealth.ai {
+    encode zstd gzip
+
+    @reminders path /api/v1/reminders*
+    handle @reminders {
+        reverse_proxy reminders:8085
+    }
+
+    reverse_proxy api:8000
+}
+
+zivohealth.ai, www.zivohealth.ai {
+    encode zstd gzip
+
+    # Route dashboard requests to dashboard service
+    handle /dashboard* {
+        reverse_proxy dashboard:3000
+    }
+
+    # Route dashboard static files to dashboard service
+    handle /static/* {
+        reverse_proxy dashboard:3000
+    }
+
+    # Route dashboard assets to dashboard service
+    handle /favicon.ico {
+        reverse_proxy dashboard:3000
+    }
+
+    # Route dashboard manifest to dashboard service
+    handle /manifest.json {
+        reverse_proxy dashboard:3000
+    }
+
+    # Route password reset requests to backend API
+    handle /reset-password* {
+        reverse_proxy api:8000
+    }
+
+    # Route Reminders API to reminders service
+    handle /api/v1/reminders* {
+        reverse_proxy reminders:8085
+    }
+
+    # Route other API requests to backend
+    handle /api/* {
+        reverse_proxy api:8000
+    }
+
+    # Route health checks to backend
+    handle /health {
+        reverse_proxy api:8000
+    }
+
+    # Serve all other requests as static files
+    root * /srv/www
+    file_server
+}

@@ -1,3 +1,15 @@
+# Read REACT_APP_API_KEY from .env.production file dynamically
+data "local_file" "env_production" {
+  filename = "${path.module}/../../backend/.env.production"
+}
+
+locals {
+  # Extract REACT_APP_API_KEY value from .env.production file
+  env_lines = split("\n", data.local_file.env_production.content)
+  react_app_api_key_line = [for line in local.env_lines : line if can(regex("^REACT_APP_API_KEY=", line))][0]
+  react_app_api_key = trimspace(split("=", local.react_app_api_key_line)[1])
+}
+
 # Use existing RDS VPC instead of creating new one
 data "aws_vpc" "existing" {
   id = "vpc-04d23036cd269f2a6"
@@ -100,6 +112,7 @@ module "storage" {
   project     = var.project_name
   environment = var.environment
   bucket_name = "zivohealth-data"
+  ec2_role_arn = module.iam.ec2_role_arn
 }
 
 module "iam" {
@@ -143,6 +156,7 @@ module "ssm" {
   db_password_plain     = "zivo_890"
   reminders_fcm_credentials_json = var.reminders_fcm_credentials_json
   reminders_fcm_project_id = var.reminders_fcm_project_id
+  react_app_api_key     = local.react_app_api_key
 }
 
 module "compute" {
@@ -176,6 +190,10 @@ module "compute" {
   reminder_metrics_enabled                 = var.reminder_metrics_enabled
   reminders_fcm_credentials_json           = var.reminders_fcm_credentials_json
   reminders_fcm_project_id                 = var.reminders_fcm_project_id
+
+  # S3-sourced compose
+  compose_s3_bucket = module.storage.bucket_name
+  compose_s3_key    = "deploy/${var.environment}/docker-compose.yml"
 }
 
 module "route53" {

@@ -86,13 +86,19 @@ AWS_ACCESS_KEY_ID=$(aws --region ${AWS_REGION} ssm get-parameter --with-decrypti
 AWS_SECRET_ACCESS_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/aws/secret_access_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 
 # LiveKit configuration from SSM (fallbacks provided)
-LIVEKIT_URL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/livekit/url" --query "Parameter.Value" --output text 2>/dev/null || echo "ws://\${HOST_PUBLIC_DNS:-localhost}:7880")
+LIVEKIT_URL=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/livekit/url" --query "Parameter.Value" --output text 2>/dev/null || echo "ws://$${HOST_PUBLIC_DNS:-localhost}:7880")
 LIVEKIT_API_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/livekit/api_key" --query "Parameter.Value" --output text 2>/dev/null || echo "devkey")
 LIVEKIT_API_SECRET=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/livekit/api_secret" --query "Parameter.Value" --output text 2>/dev/null || echo "devsecret")
 
 # Get reminder-specific config from SSM
 REMINDER_FCM_CREDENTIALS_JSON=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/reminders/fcm_credentials_json" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 REMINDER_FCM_PROJECT_ID=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/reminders/fcm_project_id" --query "Parameter.Value" --output text 2>/dev/null || echo "")
+
+# Get SMTP password from SSM
+SMTP_PASSWORD=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/smtp/password" --query "Parameter.Value" --output text 2>/dev/null || echo "changeme")
+
+# Get REACT_APP_API_KEY from SSM
+REACT_APP_API_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/react_app/api_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 
 # Create keys directory for FCM credentials
 mkdir -p /opt/zivohealth/keys
@@ -102,11 +108,14 @@ if [ -n "$${REMINDER_FCM_CREDENTIALS_JSON}" ] && [ "$${REMINDER_FCM_CREDENTIALS_
     echo "$${REMINDER_FCM_CREDENTIALS_JSON}" > /opt/zivohealth/keys/fcm-credentials.json
     chmod 600 /opt/zivohealth/keys/fcm-credentials.json
     FCM_CREDENTIALS_PATH="/opt/zivohealth/keys/fcm-credentials.json"
+    echo "✅ FCM credentials written to /opt/zivohealth/keys/fcm-credentials.json"
 else
-    # Create a default empty file if no credentials available
-    echo "{}" > /opt/zivohealth/keys/fcm-credentials.json
-    chmod 600 /opt/zivohealth/keys/fcm-credentials.json
-    FCM_CREDENTIALS_PATH="/opt/zivohealth/keys/fcm-credentials.json"
+    # Don't create an empty file - this causes Firebase initialization to fail
+    echo "⚠️  WARNING: No FCM credentials found in SSM parameter /$${PROJECT}/$${ENVIRONMENT}/reminders/fcm_credentials_json"
+    echo "⚠️  FCM push notifications will be disabled until credentials are configured"
+    # Remove any existing empty file
+    rm -f /opt/zivohealth/keys/fcm-credentials.json
+    FCM_CREDENTIALS_PATH=""
 fi
 
 # Note: The keys from backend/keys/ are copied into the Docker image during build
@@ -119,6 +128,7 @@ PROJECT_NAME=ZivoHealth
 VERSION=0.1.0
 PROJECT_VERSION=0.1.0
 API_V1_STR=/api/v1
+ENVIRONMENT=${ENVIRONMENT}
 
 # Server settings
 SERVER_HOST=0.0.0.0
@@ -226,16 +236,20 @@ LIVEKIT_KEYS=$${LIVEKIT_API_KEY}:$${LIVEKIT_API_SECRET}
 UPLOADS_S3_PREFIX=uploads/chat
 
 # API Security
-VALID_API_KEYS=$${VALID_API_KEYS}
-APP_SECRET_KEY=$${APP_SECRET_KEY}
+VALID_API_KEYS="$${VALID_API_KEYS}"
+APP_SECRET_KEY="$${APP_SECRET_KEY}"
 REQUIRE_API_KEY=true
 REQUIRE_APP_SIGNATURE=true
+
+# Dashboard Configuration
+REACT_APP_API_BASE_URL=https://api.zivohealth.ai
+REACT_APP_API_KEY="$${REACT_APP_API_KEY}"
 
 # Email Configuration
 SMTP_SERVER=smtp.zoho.in
 SMTP_PORT=587
 SMTP_USERNAME=rajanish@zivohealth.ai
-SMTP_PASSWORD="${smtp_password}"
+SMTP_PASSWORD="$${SMTP_PASSWORD}"
 FROM_EMAIL=rajanish@zivohealth.ai
 FRONTEND_URL=https://zivohealth.ai
 PASSWORD_RESET_TOKEN_EXPIRY_MINUTES=30
@@ -256,19 +270,20 @@ REMINDER_SCHEDULER_SCAN_INTERVAL_SECONDS=${reminder_scheduler_scan_interval_seco
 REMINDER_SCHEDULER_BATCH_SIZE=${reminder_scheduler_batch_size}
 REMINDER_METRICS_ENABLED=${reminder_metrics_enabled}
 REMINDER_WORKER_CONCURRENCY=4
-REMINDER_FCM_CREDENTIALS_JSON=/app/keys/fcm-credentials.json
+REMINDER_FCM_CREDENTIALS_JSON=$${FCM_CREDENTIALS_PATH}
 REMINDER_FCM_PROJECT_ID=$${REMINDER_FCM_PROJECT_ID}
-GOOGLE_APPLICATION_CREDENTIALS=/app/keys/fcm-credentials.json
+GOOGLE_APPLICATION_CREDENTIALS=$${FCM_CREDENTIALS_PATH}
+
+# WebSocket Configuration
+CHAT_WS_HEARTBEAT_MAX_SECONDS=300
 ENV
 
 # Create docker-compose.yml with reminder service
 cat > /opt/zivohealth/docker-compose.yml <<COMPOSE
-version: '3.8'
-
 services:
   # Main backend API
   api:
-    image: $${ECR_REPO_URL:-zivohealth-backend}:$${IMAGE_TAG:-latest}
+    image: $${ECR_REPO_URL:-474221740916.dkr.ecr.us-east-1.amazonaws.com/zivohealth-dev-backend}:$${IMAGE_TAG:-latest}
     container_name: zivohealth-api
     ports:
       - "8000:8000"
@@ -311,7 +326,7 @@ services:
 
   # Reminder service API
   reminders:
-    image: $${ECR_REPO_URL:-zivohealth-backend}:$${IMAGE_TAG:-latest}
+    image: $${ECR_REPO_URL:-474221740916.dkr.ecr.us-east-1.amazonaws.com/zivohealth-dev-backend}:$${IMAGE_TAG:-latest}
     container_name: zivohealth-reminders
     ports:
       - "${reminder_service_port}:${reminder_service_port}"
@@ -334,7 +349,7 @@ services:
 
   # Reminder Celery worker
   reminders-worker:
-    image: $${ECR_REPO_URL:-zivohealth-backend}:$${IMAGE_TAG:-latest}
+    image: $${ECR_REPO_URL:-474221740916.dkr.ecr.us-east-1.amazonaws.com/zivohealth-dev-backend}:$${IMAGE_TAG:-latest}
     container_name: zivohealth-reminders-worker
     environment:
       - AWS_DEFAULT_REGION=${AWS_REGION}
@@ -350,7 +365,7 @@ services:
 
   # Reminder Celery beat scheduler
   reminders-beat:
-    image: $${ECR_REPO_URL:-zivohealth-backend}:$${IMAGE_TAG:-latest}
+    image: $${ECR_REPO_URL:-474221740916.dkr.ecr.us-east-1.amazonaws.com/zivohealth-dev-backend}:$${IMAGE_TAG:-latest}
     container_name: zivohealth-reminders-beat
     environment:
       - AWS_DEFAULT_REGION=${AWS_REGION}
@@ -374,17 +389,38 @@ services:
       - "6379:6379"
     restart: unless-stopped
 
-  # RabbitMQ for Celery message broker
-  rabbitmq:
-    image: rabbitmq:3-management
-    container_name: zivohealth-rabbitmq
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    restart: unless-stopped
+            # RabbitMQ for Celery message broker
+            rabbitmq:
+                image: rabbitmq:3-management
+                container_name: zivohealth-rabbitmq
+                environment:
+                  RABBITMQ_DEFAULT_USER: guest
+                  RABBITMQ_DEFAULT_PASS: guest
+                ports:
+                  - "5672:5672"
+                  - "15672:15672"
+                restart: unless-stopped
+
+            # React Dashboard (production: serve built files)
+            dashboard:
+                image: $${ECR_REPO_URL:-474221740916.dkr.ecr.us-east-1.amazonaws.com/zivohealth-dev-backend}:$${IMAGE_TAG:-latest}
+                container_name: zivohealth-dashboard
+                ports:
+                  - "3000:3000"
+                environment:
+                  - AWS_DEFAULT_REGION=us-east-1
+                env_file:
+                  - .env
+                depends_on:
+                  - api
+                restart: unless-stopped
+                healthcheck:
+                  test: ["CMD", "curl", "-f", "http://localhost:3000"]
+                  interval: 30s
+                  timeout: 10s
+                  retries: 3
+
+
 
   # Caddy reverse proxy
   caddy:
@@ -398,9 +434,10 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    depends_on:
-      - api
-      - livekit
+                depends_on:
+                  - api
+                  - livekit
+                  - dashboard
     environment:
       - REMINDER_SERVICE_PORT=${reminder_service_port}
 
@@ -426,6 +463,11 @@ api.zivohealth.ai {
 
 zivohealth.ai, www.zivohealth.ai {
     encode zstd gzip
+
+    # Route dashboard requests to dashboard service
+    handle /dashboard* {
+        reverse_proxy dashboard:3000
+    }
 
     # Route password reset requests to backend API
     handle /reset-password* {

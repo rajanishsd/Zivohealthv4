@@ -20,20 +20,42 @@ def _ensure_firebase_initialized() -> None:
     print(f"🔍 [FCM] Initializing Firebase with project_id: {settings.FCM_PROJECT_ID}")
     
     creds_json: Optional[str] = settings.FCM_CREDENTIALS_JSON or os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    
+    # Check if credentials are available
+    if not creds_json or creds_json.strip() == "":
+        print("⚠️  [FCM] No credentials provided - FCM push notifications will be disabled")
+        return
+    
     if creds_json and creds_json.strip().startswith("{"):
         print(f"🔍 [FCM] Using inline JSON credentials")
-        cred = credentials.Certificate(json.loads(creds_json))
-        initialize_app(cred, options={"projectId": settings.FCM_PROJECT_ID})
+        try:
+            cred = credentials.Certificate(json.loads(creds_json))
+            initialize_app(cred, options={"projectId": settings.FCM_PROJECT_ID})
+        except Exception as e:
+            print(f"❌ [FCM] Failed to initialize with inline credentials: {e}")
+            return
     else:
         print(f"🔍 [FCM] Using file-based credentials: {creds_json}")
         # Use file-based credentials with explicit project ID
         if creds_json and os.path.exists(creds_json):
-            cred = credentials.Certificate(creds_json)
-            initialize_app(cred, options={"projectId": settings.FCM_PROJECT_ID})
+            try:
+                cred = credentials.Certificate(creds_json)
+                initialize_app(cred, options={"projectId": settings.FCM_PROJECT_ID})
+            except Exception as e:
+                print(f"❌ [FCM] Failed to initialize with file credentials: {e}")
+                return
         elif settings.FCM_PROJECT_ID:
-            initialize_app(options={"projectId": settings.FCM_PROJECT_ID})
+            try:
+                initialize_app(options={"projectId": settings.FCM_PROJECT_ID})
+            except Exception as e:
+                print(f"❌ [FCM] Failed to initialize with project ID only: {e}")
+                return
         else:
-            initialize_app()
+            try:
+                initialize_app()
+            except Exception as e:
+                print(f"❌ [FCM] Failed to initialize Firebase: {e}")
+                return
 
 
 def send_push_via_fcm(event: Dict[str, Any]) -> None:
@@ -46,6 +68,11 @@ def send_push_via_fcm(event: Dict[str, Any]) -> None:
       - timestamp
     """
     print(f"🔍 [FCM] Dispatch event: {event}")
+    
+    # Check if Firebase is initialized
+    if not _apps:
+        print("⚠️  [FCM] Firebase not initialized - skipping push notification")
+        return
     
     
     token = event.get("payload", {}).get("fcm_token")

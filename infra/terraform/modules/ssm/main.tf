@@ -11,30 +11,35 @@ resource "aws_ssm_parameter" "image_tag" {
   name  = "/${var.project}/${var.environment}/deploy/image_tag"
   type  = "String"
   value = var.image_tag
+  overwrite = true
 }
 
 resource "aws_ssm_parameter" "db_password" {
   name  = var.db_password_ssm_key
   type  = "SecureString"
   value = local.effective_db_password
+  overwrite = true
 }
 
 resource "aws_ssm_parameter" "db_host" {
   name  = "/${var.project}/${var.environment}/db/host"
   type  = "String"
   value = var.db_endpoint
+  overwrite = true
 }
 
 resource "aws_ssm_parameter" "db_user" {
   name  = "/${var.project}/${var.environment}/db/user"
   type  = "String"
   value = var.db_username
+  overwrite = true
 }
 
 resource "aws_ssm_parameter" "s3_bucket" {
   name  = "/${var.project}/${var.environment}/s3/bucket"
   type  = "String"
   value = var.s3_bucket_name
+  overwrite = true
 }
 
 # Reminder service parameters (optional - can be set manually in AWS console)
@@ -43,6 +48,7 @@ resource "aws_ssm_parameter" "reminders_fcm_credentials_json" {
   name  = "/${var.project}/${var.environment}/reminders/fcm_credentials_json"
   type  = "SecureString"
   value = var.reminders_fcm_credentials_json
+  overwrite = true
 }
 
 resource "aws_ssm_parameter" "reminders_fcm_project_id" {
@@ -50,4 +56,12 @@ resource "aws_ssm_parameter" "reminders_fcm_project_id" {
   name  = "/${var.project}/${var.environment}/reminders/fcm_project_id"
   type  = "String"
   value = var.reminders_fcm_project_id
+  overwrite = true
+}
+
+resource "aws_ssm_parameter" "react_app_api_key" {
+  name  = "/${var.project}/${var.environment}/react_app/api_key"
+  type  = "SecureString"
+  value = var.react_app_api_key
+  overwrite = true
 }
