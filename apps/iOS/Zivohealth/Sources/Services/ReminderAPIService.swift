@@ -12,14 +12,11 @@ final class ReminderAPIService {
 
     // Configure these via AppConfig if available
     private var baseURL: String {
-        switch AppConfig.Environment.current {
-        case .local:
-            return "http://192.168.0.105:8085/api/v1/reminders"
-        case .staging:
-            return "https://staging-api.zivohealth.ai/api/v1/reminders"
-        case .production:
-            return "https://api.zivohealth.ai/api/v1/reminders"
+        var root = AppConfig.remindersBaseURL
+        if root.hasSuffix("/") {
+            root.removeLast()
         }
+        return root + "/api/v1/reminders"
     }
 
     func registerDevice(userId: String, fcmToken: String, apiKey: String, completion: ((Error?) -> Void)? = nil) {
@@ -35,8 +32,31 @@ final class ReminderAPIService {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.httpBody = try? JSONEncoder().encode(payload)
 
-        URLSession.shared.dataTask(with: request) { _, _, error in
-            completion?(error)
+        #if DEBUG
+        print("🌐 [ReminderAPI] Register device → POST \(url.absoluteString)")
+        #endif
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion?(error)
+                return
+            }
+            guard let http = response as? HTTPURLResponse else {
+                completion?(NSError(domain: "ReminderAPI", code: -2, userInfo: [NSLocalizedDescriptionKey: "No HTTP response"]))
+                return
+            }
+            if (200...299).contains(http.statusCode) {
+                completion?(nil)
+            } else {
+                var message = HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+                if let data = data, let body = String(data: data, encoding: .utf8), !body.isEmpty {
+                    let snippet = body.count > 300 ? String(body.prefix(300)) + "…" : body
+                    message = "\(message) (status=\(http.statusCode)) - \(snippet)"
+                } else {
+                    message = "\(message) (status=\(http.statusCode))"
+                }
+                completion?(NSError(domain: "ReminderAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: message]))
+            }
         }.resume()
     }
 }

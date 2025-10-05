@@ -94,6 +94,23 @@ enum AppConfig {
 		"""
 	}
 
+	// Reminders service base URL
+	// Local: derive http://<api_host>:8085 to hit the reminders microservice directly
+	// Staging/Prod: use the same base as API (reverse-proxied by Caddy)
+	static let remindersBaseURL: String = {
+		switch Environment.current {
+		case .local:
+			let root = AppConfig.defaultAPIEndpoint
+			if let comps = URLComponents(string: root), let host = comps.host {
+				return "http://\(host):8085"
+			} else {
+				return "http://localhost:8085"
+			}
+		case .staging, .production:
+			return AppConfig.defaultAPIEndpoint
+		}
+	}()
+
 	// API key for backend authentication from the iOS app
 	// Move from NetworkService to a single source of truth here
 	static let apiKey: String = "UMYpN67NeR0W13cP13O62Mn04yG3tpEx" // TODO: replace via build config if needed

@@ -9,6 +9,7 @@ from firebase_admin import messaging, credentials, initialize_app, _apps  # type
 from .config import settings
 from .repository import get_latest_token_for_user
 from .metrics import reminders_dispatch_success_total, reminders_dispatch_failed_total
+from .repository import mark_processed, mark_failed
 from app.db.session import SessionLocal
 from sqlalchemy import text
 
@@ -16,11 +17,21 @@ from sqlalchemy import text
 def _ensure_firebase_initialized() -> None:
     if _apps:
         return
-    
-    print(f"🔍 [FCM] Initializing Firebase with project_id: {settings.FCM_PROJECT_ID}")
-    
-    creds_json: Optional[str] = settings.FCM_CREDENTIALS_JSON or os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-    
+
+    proj = getattr(settings, "FCM_PROJECT_ID", None)
+    env_gac_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    env_gac = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    cfg_val = getattr(settings, "FCM_CREDENTIALS_JSON", None)
+
+    print(f"🔍 [FCM] Initializing Firebase | project_id={proj}")
+    print(
+        "🔍 [FCM] Creds sources | REMINDER_FCM_CREDENTIALS_JSON set="
+        f"{bool(cfg_val)}, GOOGLE_APPLICATION_CREDENTIALS_JSON set={bool(env_gac_json)}, "
+        f"GOOGLE_APPLICATION_CREDENTIALS set={bool(env_gac)}"
+    )
+
+    creds_json: Optional[str] = cfg_val or env_gac_json or env_gac
+
     # Check if credentials are available
     if not creds_json or creds_json.strip() == "":
         print("⚠️  [FCM] No credentials provided - FCM push notifications will be disabled")
@@ -30,9 +41,10 @@ def _ensure_firebase_initialized() -> None:
         print(f"🔍 [FCM] Using inline JSON credentials")
         try:
             cred = credentials.Certificate(json.loads(creds_json))
-            initialize_app(cred, options={"projectId": settings.FCM_PROJECT_ID})
+            initialize_app(cred, options={"projectId": proj} if proj else None)
+            print(f"✅ [FCM] Firebase app initialized (inline JSON). apps={len(_apps)}")
         except Exception as e:
-            print(f"❌ [FCM] Failed to initialize with inline credentials: {e}")
+            print(f"❌ [FCM] Failed to initialize with inline credentials: {e!r}")
             return
     else:
         print(f"🔍 [FCM] Using file-based credentials: {creds_json}")
@@ -40,21 +52,24 @@ def _ensure_firebase_initialized() -> None:
         if creds_json and os.path.exists(creds_json):
             try:
                 cred = credentials.Certificate(creds_json)
-                initialize_app(cred, options={"projectId": settings.FCM_PROJECT_ID})
+                initialize_app(cred, options={"projectId": proj} if proj else None)
+                print(f"✅ [FCM] Firebase app initialized (file). apps={len(_apps)}")
             except Exception as e:
-                print(f"❌ [FCM] Failed to initialize with file credentials: {e}")
+                print(f"❌ [FCM] Failed to initialize with file credentials: {e!r}")
                 return
-        elif settings.FCM_PROJECT_ID:
+        elif proj:
             try:
-                initialize_app(options={"projectId": settings.FCM_PROJECT_ID})
+                initialize_app(options={"projectId": proj})
+                print(f"✅ [FCM] Firebase app initialized (projectId only). apps={len(_apps)}")
             except Exception as e:
-                print(f"❌ [FCM] Failed to initialize with project ID only: {e}")
+                print(f"❌ [FCM] Failed to initialize with project ID only: {e!r}")
                 return
         else:
             try:
                 initialize_app()
+                print(f"✅ [FCM] Firebase app initialized (default). apps={len(_apps)}")
             except Exception as e:
-                print(f"❌ [FCM] Failed to initialize Firebase: {e}")
+                print(f"❌ [FCM] Failed to initialize Firebase: {e!r}")
                 return
 
 
@@ -69,11 +84,18 @@ def send_push_via_fcm(event: Dict[str, Any]) -> None:
     """
     print(f"🔍 [FCM] Dispatch event: {event}")
     
-    # Check if Firebase is initialized
+    # Ensure Firebase is initialized (attempt initialization if not already done)
+    _ensure_firebase_initialized()
+
+    # If still not initialized after attempt, skip sending
     if not _apps:
-        print("⚠️  [FCM] Firebase not initialized - skipping push notification")
+        print(
+            "⚠️  [FCM] Firebase not initialized - skipping push notification | "
+            f"project_id={getattr(settings, 'FCM_PROJECT_ID', None)}, "
+            f"REMINDER_FCM_CREDENTIALS_JSON set={bool(getattr(settings, 'FCM_CREDENTIALS_JSON', None))}, "
+            f"GOOGLE_APPLICATION_CREDENTIALS={bool(os.getenv('GOOGLE_APPLICATION_CREDENTIALS'))}"
+        )
         return
-    
     
     token = event.get("payload", {}).get("fcm_token")
     if not token:
@@ -91,8 +113,6 @@ def send_push_via_fcm(event: Dict[str, Any]) -> None:
             print("❌ [FCM] No FCM token found for user")
             reminders_dispatch_failed_total.inc()
             return
-
-    _ensure_firebase_initialized()
 
     # Default if missing or None
     notification_title = event.get("payload", {}).get("title") or "Reminder"
@@ -167,9 +187,37 @@ def send_push_via_fcm(event: Dict[str, Any]) -> None:
         current_time = datetime.now(dt_timezone.utc)
         send_push_via_fcm._last_notification_time = current_time
     except Exception as e:
-        print(f"❌ [FCM] Failed to send notification: {e}")
+        import traceback
+        print(f"❌ [FCM] Failed to send notification: {e!r}")
+        tb = ''.join(traceback.format_exc().splitlines()[-3:])
+        print(f"❌ [FCM] Traceback tail: {tb}")
         reminders_dispatch_failed_total.inc()
         # We intentionally do not raise to avoid Celery retry storms for now
+        # Mark reminder as Failed for observability
+        try:
+            from app.db.session import SessionLocal
+            db = SessionLocal()
+            try:
+                rid = str(event.get("reminder_id"))
+                if rid:
+                    mark_failed(db, rid, reason=str(e))
+            finally:
+                db.close()
+        except Exception:
+            pass
         return
+    else:
+        # Mark reminder as Processed on success
+        try:
+            from app.db.session import SessionLocal
+            db = SessionLocal()
+            try:
+                rid = str(event.get("reminder_id"))
+                if rid:
+                    mark_processed(db, rid)
+            finally:
+                db.close()
+        except Exception:
+            pass
 
 

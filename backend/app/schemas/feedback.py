@@ -27,6 +27,11 @@ class FeedbackCreate(BaseModel):
     extra: Optional[dict[str, Any]] = None
 
 
+class FeedbackUpdate(BaseModel):
+    status: Optional[str] = None
+    closed_date: Optional[datetime] = None
+
+
 class Feedback(BaseModel):
     id: str
     user_id: Optional[int]
@@ -43,6 +48,7 @@ class Feedback(BaseModel):
     device_model: Optional[str]
     app_identifier: Optional[str]
     status: str
+    closed_date: Optional[datetime] = None
     extra: Optional[dict[str, Any]]
     created_at: Optional[datetime]
     updated_at: Optional[datetime]

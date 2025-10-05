@@ -31,6 +31,9 @@ COPY run.py /app/
 # Copy keys folder for FCM credentials
 COPY keys/ /app/keys/
 
+# Copy diagnostic and utility scripts
+COPY scripts/ /app/scripts/
+
 # Copy built React app from react-builder stage
 COPY --from=react-builder /app/build/ /app/www/reset-password/
 

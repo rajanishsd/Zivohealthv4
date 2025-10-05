@@ -92,6 +92,26 @@ def mark_failed(db: Session, reminder_id: str, reason: str) -> None:
     db.commit()
 
 
+def mark_queued(db: Session, reminder_id: str) -> None:
+    """Mark a reminder as queued for sending so scans won't pick it up again."""
+    db.execute(
+        update(Reminder)
+        .where(Reminder.id == reminder_id)
+        .values(status="Queued", updated_at=datetime.utcnow())
+    )
+    db.commit()
+
+
+def mark_skipped(db: Session, reminder_id: str) -> None:
+    """Mark a reminder as skipped due to business rules (e.g., already logged)."""
+    db.execute(
+        update(Reminder)
+        .where(Reminder.id == reminder_id)
+        .values(status="Skipped", updated_at=datetime.utcnow())
+    )
+    db.commit()
+
+
 def mark_acknowledged(db: Session, reminder_id: str) -> None:
     db.execute(
         update(Reminder)

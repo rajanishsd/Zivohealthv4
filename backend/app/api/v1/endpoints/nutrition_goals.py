@@ -518,7 +518,20 @@ def activate_goal(
     from datetime import datetime
     # Deactivate all current actives for this user
     # Capture the currently active goal ids so we can pause their reminders
-    active_ids = [g.id for g in db.query(NutritionGoal.id).filter(NutritionGoal.user_id == current_user.id, NutritionGoal.status == "active").all()]
+    # Ensure we extract plain integers regardless of SQLAlchemy row structure
+    _rows_active = db.query(NutritionGoal.id).filter(
+        NutritionGoal.user_id == current_user.id, NutritionGoal.status == "active"
+    ).all()
+    active_ids = []
+    for r in _rows_active:
+        try:
+            # Row or ORM tuple
+            gid = r[0]
+        except Exception:
+            # RowMapping with attribute access
+            gid = getattr(r, "id", None)
+        if gid is not None:
+            active_ids.append(int(gid))
     db.query(NutritionGoal).filter(NutritionGoal.user_id == current_user.id, NutritionGoal.status == "active").update({"status": "inactive"}, synchronize_session=False)
     # Activate requested goal
     db.query(NutritionGoal).filter(NutritionGoal.id == goal.id, NutritionGoal.user_id == current_user.id).update({"status": "active", "effective_at": datetime.utcnow()}, synchronize_session=False)
@@ -526,35 +539,50 @@ def activate_goal(
     
     # Pause reminders linked to previously active goals: mark user_reminder_configs inactive and set reminders is_active=false
     try:
+        external_ids = []
         if active_ids:
             gid_strs = [str(x) for x in active_ids]
-            # Mark configs inactive
-            db.execute(
-                _sa_text(
-                    """
-                    UPDATE user_reminder_configs
-                    SET active = false, updated_at = now()
-                    WHERE user_id = :uid AND context = 'nutrition_goal' AND context_id = ANY(:gids)
-                    """
-                ),
-                {"uid": str(current_user.id), "gids": gid_strs},
-            )
-            # Fetch external_ids to pause
-            rows = db.execute(
-                _sa_text(
-                    """
-                    SELECT external_id
-                    FROM user_reminder_configs
-                    WHERE user_id = :uid AND context = 'nutrition_goal' AND context_id = ANY(:gids)
-                    """
-                ),
-                {"uid": str(current_user.id), "gids": gid_strs},
-            ).mappings().all()
-            external_ids = [r["external_id"] for r in rows if r.get("external_id")]
-        else:
-            external_ids = []
-        # Persist inactive flag immediately
+            # Mark configs inactive and collect external_ids per goal id to avoid array binding issues
+            for gid in gid_strs:
+                # Inactivate configs for this goal
+                db.execute(
+                    _sa_text(
+                        """
+                        UPDATE user_reminder_configs
+                        SET active = false, updated_at = now()
+                        WHERE user_id = :uid AND context = 'nutrition_goal' AND context_id = :gid
+                        """
+                    ),
+                    {"uid": str(current_user.id), "gid": gid},
+                )
+                # Fetch external ids for this goal
+                _rows = db.execute(
+                    _sa_text(
+                        """
+                        SELECT external_id
+                        FROM user_reminder_configs
+                        WHERE user_id = :uid AND context = 'nutrition_goal' AND context_id = :gid
+                        """
+                    ),
+                    {"uid": str(current_user.id), "gid": gid},
+                ).mappings().all()
+                for _r in _rows:
+                    ext = _r.get("external_id")
+                    if ext:
+                        external_ids.append(ext)
+        # Persist inactive flags immediately
         db.commit()
+
+        # Safety: Ensure only the requested goal remains active for this user
+        try:
+            db.query(NutritionGoal).filter(
+                NutritionGoal.user_id == current_user.id,
+                NutritionGoal.id != goal.id,
+                NutritionGoal.status == "active",
+            ).update({"status": "inactive"}, synchronize_session=False)
+            db.commit()
+        except Exception:
+            pass
     except Exception:
         external_ids = []
 

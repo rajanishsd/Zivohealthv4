@@ -8,12 +8,12 @@ Powered by Redis-based telemetry system.
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 import json
 import asyncio
 from app.core.redis import redis_client
 from app.core.system_metrics import system_metrics
-from app.utils.timezone import now_local, isoformat_now
+from app.utils.timezone import now_local, isoformat_now, to_utc_aware
 
 router = APIRouter(tags=["dashboard"])
 
@@ -75,7 +75,7 @@ async def get_overview_metrics(hours: int = Query(24, ge=1, le=168)) -> Dict[str
         }
     
     # Analyze spans for metrics
-    cutoff_time = now_local() - timedelta(hours=hours)
+    cutoff_time = to_utc_aware(now_local()) - timedelta(hours=hours)
     valid_spans = []
     sessions = set()
     agents = set()
@@ -89,7 +89,7 @@ async def get_overview_metrics(hours: int = Query(24, ge=1, le=168)) -> Dict[str
             continue
             
         span = json.loads(span_data)
-        span_time = datetime.fromtimestamp(span['start_time'])
+        span_time = datetime.fromtimestamp(span['start_time'], tz=dt_timezone.utc)
         
         if span_time >= cutoff_time:
             valid_spans.append(span)
@@ -140,7 +140,7 @@ async def get_request_timeline_chart(hours: int = Query(24, ge=1, le=168)) -> Di
     """Get data for request timeline chart using Redis telemetry"""
     
     recent_spans = redis_client.zrange('telemetry:recent_spans', 0, -1)
-    cutoff_time = now_local() - timedelta(hours=hours)
+    cutoff_time = to_utc_aware(now_local()) - timedelta(hours=hours)
     
     # Group by hour
     timeline_data = {}
@@ -152,7 +152,7 @@ async def get_request_timeline_chart(hours: int = Query(24, ge=1, le=168)) -> Di
             continue
             
         span = json.loads(span_data)
-        span_time = datetime.fromtimestamp(span['start_time'])
+        span_time = datetime.fromtimestamp(span['start_time'], tz=dt_timezone.utc)
         
         if span_time >= cutoff_time:
             hour = span_time.replace(minute=0, second=0, microsecond=0)
@@ -171,7 +171,7 @@ async def get_request_timeline_chart(hours: int = Query(24, ge=1, le=168)) -> Di
     for hour_key, sessions in sessions_by_hour.items():
         timeline_data[hour_key] = len(sessions)
     
-    current_time = now_local().replace(minute=0, second=0, microsecond=0)
+    current_time = to_utc_aware(now_local()).replace(minute=0, second=0, microsecond=0)
     data_points = []
     
     for i in range(hours):
@@ -198,7 +198,7 @@ async def get_agent_performance_chart(hours: int = Query(24, ge=1, le=168)) -> D
     if not recent_spans:
         return {"data": [], "total_agents": 0}
     
-    cutoff_time = now_local() - timedelta(hours=hours)
+    cutoff_time = to_utc_aware(now_local()) - timedelta(hours=hours)
     agent_stats = {}
     
     for span_id in recent_spans:
@@ -207,7 +207,7 @@ async def get_agent_performance_chart(hours: int = Query(24, ge=1, le=168)) -> D
             continue
             
         span = json.loads(span_data)
-        span_time = datetime.fromtimestamp(span['start_time'])
+        span_time = datetime.fromtimestamp(span['start_time'], tz=dt_timezone.utc)
         
         if span_time < cutoff_time:
             continue
@@ -264,7 +264,7 @@ async def get_tool_usage_chart(hours: int = Query(24, ge=1, le=168)) -> Dict[str
     """Get data for tool usage pie chart using Redis telemetry"""
     
     recent_spans = redis_client.zrange('telemetry:recent_spans', 0, -1)
-    cutoff_time = now_local() - timedelta(hours=hours)
+    cutoff_time = to_utc_aware(now_local()) - timedelta(hours=hours)
     
     tool_stats = {}
     
@@ -274,7 +274,7 @@ async def get_tool_usage_chart(hours: int = Query(24, ge=1, le=168)) -> Dict[str
             continue
             
         span = json.loads(span_data)
-        span_time = datetime.fromtimestamp(span['start_time'])
+        span_time = datetime.fromtimestamp(span['start_time'], tz=dt_timezone.utc)
         
         if span_time < cutoff_time:
             continue
@@ -337,7 +337,7 @@ async def get_error_analysis_chart(hours: int = Query(24, ge=1, le=168)) -> Dict
     """Get data for error analysis chart using Redis telemetry"""
     
     recent_spans = redis_client.zrange('telemetry:recent_spans', 0, -1)
-    cutoff_time = now_local() - timedelta(hours=hours)
+    cutoff_time = to_utc_aware(now_local()) - timedelta(hours=hours)
     
     error_stats = {}
     
@@ -347,7 +347,7 @@ async def get_error_analysis_chart(hours: int = Query(24, ge=1, le=168)) -> Dict
             continue
             
         span = json.loads(span_data)
-        span_time = datetime.fromtimestamp(span['start_time'])
+        span_time = datetime.fromtimestamp(span['start_time'], tz=dt_timezone.utc)
         
         if span_time < cutoff_time or span.get('status') != 'ERROR':
             continue
@@ -403,7 +403,7 @@ async def get_workflow_requests(
     
     # Group spans by session to create workflows
     workflows = {}
-    cutoff_time = now_local() - timedelta(hours=hours)
+    cutoff_time = to_utc_aware(now_local()) - timedelta(hours=hours)
     
     for span_id in recent_spans:
         span_data = redis_client.get(f'telemetry:span:{span_id}')
@@ -411,7 +411,7 @@ async def get_workflow_requests(
             continue
             
         span = json.loads(span_data)
-        span_time = datetime.fromtimestamp(span['start_time'])
+        span_time = datetime.fromtimestamp(span['start_time'], tz=dt_timezone.utc)
         
         if span_time < cutoff_time:
             continue
@@ -549,7 +549,7 @@ async def get_request_workflow_detail(request_id: str) -> Dict[str, Any]:
             "span_id": span.get('span_id'),
             "agent_name": span.get('agent_name'),
             "operation": span.get('operation_name', 'Unknown'),
-            "timestamp": datetime.fromtimestamp(span['start_time']).isoformat(),
+            "timestamp": datetime.fromtimestamp(span['start_time'], tz=dt_timezone.utc).isoformat(),
             "duration_ms": span.get('duration_ms', 0),
             "status": span.get('status', 'UNKNOWN'),
             "metadata": metadata,
@@ -569,8 +569,8 @@ async def get_request_workflow_detail(request_id: str) -> Dict[str, Any]:
             "tools_used": list(tools_used),
             "total_duration_ms": total_duration,
             "status": "error" if has_errors else "success",
-            "start_time": datetime.fromtimestamp(workflow_spans[0]['start_time']).isoformat(),
-            "end_time": datetime.fromtimestamp(workflow_spans[-1]['start_time']).isoformat()
+            "start_time": datetime.fromtimestamp(workflow_spans[0]['start_time'], tz=dt_timezone.utc).isoformat(),
+            "end_time": datetime.fromtimestamp(workflow_spans[-1]['start_time'], tz=dt_timezone.utc).isoformat()
         }
     }
 
@@ -643,7 +643,7 @@ def _build_hierarchical_lineage(spans: List[Dict]) -> List[Dict]:
             "span_id": span['span_id'],
             "agent_name": span.get('agent_name'),
             "operation": span.get('operation_name', 'Unknown'),
-            "timestamp": datetime.fromtimestamp(span['start_time']).isoformat(),
+            "timestamp": datetime.fromtimestamp(span['start_time'], tz=dt_timezone.utc).isoformat(),
             "duration_ms": span.get('duration_ms', 0),
             "status": span.get('status', 'UNKNOWN'),
             "metadata": metadata,
@@ -711,7 +711,7 @@ async def get_request_inter_agent_messages(request_id: str) -> Dict[str, Any]:
             # Extract messages from metadata
             if 'input_message' in metadata:
                 messages.append({
-                    "timestamp": datetime.fromtimestamp(span['start_time']).isoformat(),
+                    "timestamp": datetime.fromtimestamp(span['start_time'], tz=dt_timezone.utc).isoformat(),
                     "from_agent": "User",
                     "to_agent": span.get('agent_name'),
                     "message_type": "input",
@@ -721,7 +721,7 @@ async def get_request_inter_agent_messages(request_id: str) -> Dict[str, Any]:
             
             if 'output_message' in metadata:
                 messages.append({
-                    "timestamp": datetime.fromtimestamp(span['start_time']).isoformat(),
+                    "timestamp": datetime.fromtimestamp(span['start_time'], tz=dt_timezone.utc).isoformat(),
                     "from_agent": span.get('agent_name'),
                     "to_agent": "User",
                     "message_type": "output",
@@ -731,7 +731,7 @@ async def get_request_inter_agent_messages(request_id: str) -> Dict[str, Any]:
             
             if 'inter_agent_message' in metadata:
                 messages.append({
-                    "timestamp": datetime.fromtimestamp(span['start_time']).isoformat(),
+                    "timestamp": datetime.fromtimestamp(span['start_time'], tz=dt_timezone.utc).isoformat(),
                     "from_agent": span.get('agent_name'),
                     "to_agent": metadata.get('target_agent', 'Unknown'),
                     "message_type": "inter_agent",
@@ -760,7 +760,7 @@ async def get_system_health() -> Dict[str, Any]:
 
 def get_real_time_metrics() -> Dict[str, Any]:
     """Get real-time metrics for WebSocket updates"""
-    last_10_minutes = now_local() - timedelta(minutes=10)
+    last_10_minutes = to_utc_aware(now_local()) - timedelta(minutes=10)
     recent_spans = redis_client.zrange('telemetry:recent_spans', -50, -1)  # Last 50 spans
     
     active_sessions = set()
@@ -773,7 +773,7 @@ def get_real_time_metrics() -> Dict[str, Any]:
             continue
             
         span = json.loads(span_data)
-        span_time = datetime.fromtimestamp(span['start_time'])
+        span_time = datetime.fromtimestamp(span['start_time'], tz=dt_timezone.utc)
         
         if span_time >= last_10_minutes:
             user_id = span.get('user_id')
@@ -808,7 +808,7 @@ def get_recent_activity(limit: int = 10) -> List[Dict[str, Any]]:
             
         span = json.loads(span_data)
         activities.append({
-            "timestamp": datetime.fromtimestamp(span['start_time']).isoformat(),
+            "timestamp": datetime.fromtimestamp(span['start_time'], tz=dt_timezone.utc).isoformat(),
             "agent_name": span.get('agent_name'),
             "operation": span.get('operation_name', 'Unknown'),
             "status": span.get('status', 'UNKNOWN'),

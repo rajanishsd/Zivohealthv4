@@ -294,6 +294,7 @@ class UnifiedReminderService:
             parent_reminder_id=recurring_reminder.id,
             occurrence_number=recurring_reminder.occurrence_count + 1,
             is_generated=True,
+            timezone=recurring_reminder.timezone,
         )
         
         self.db.add(occurrence)

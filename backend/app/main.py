@@ -236,7 +236,7 @@ def create_application() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.allowed_cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
     logger.info(f"CORS configured for {settings.ENVIRONMENT} environment with origins: {settings.allowed_cors_origins}")

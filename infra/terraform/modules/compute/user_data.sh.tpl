@@ -258,6 +258,7 @@ PASSWORD_RESET_TOKEN_EXPIRY_MINUTES=30
 PASSWORD_RESET_APP_DIR=www/reset-password
 
 # Reminder Service Configuration
+REMINDER_SERVICE_URL=http://reminders:${reminder_service_port}
 REMINDER_SERVICE_HOST=${reminder_service_host}
 REMINDER_SERVICE_PORT=${reminder_service_port}
 REMINDER_RABBITMQ_URL=${reminder_rabbitmq_url}

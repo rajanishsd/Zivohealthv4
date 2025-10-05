@@ -3,7 +3,7 @@ from celery import shared_task
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.db.session import SessionLocal
-from .repository import create_reminder, get_due_reminders, mark_processed, mark_failed
+from .repository import create_reminder, get_due_reminders, mark_processed, mark_failed, mark_queued, mark_skipped
 from .unified_schemas import ReminderCreate
 from .celery_app import celery_app
 from .config import settings
@@ -11,6 +11,7 @@ from .dispatcher import send_push_via_fcm
 from .metrics import scheduler_scans_total, scheduler_dispatched_total
 from app.models.nutrition_data import NutritionRawData
 from app.utils.timezone import get_zoneinfo
+from sqlalchemy import text as _sa_text
 try:
     from zoneinfo import ZoneInfo  # Python 3.9+
 except Exception:  # pragma: no cover
@@ -46,8 +47,9 @@ def scan_and_dispatch_task() -> int:
             try:
                 # Conditional skip: if nutrition log already recorded for the same day and meal
                 if _should_skip_nutrition_log(db, r):
-                    # Mark as processed to avoid re-sending this occurrence
-                    mark_processed(db, r.id)
+                    # Mark as skipped for observability (not processed)
+                    print(f"🔍 [Reminders] Skipping nutrition log for user {r.user_id} and meal {r.payload.get('meal')}")
+                    mark_skipped(db, r.id)
                     continue
                 # Only include title/message if they are not None to avoid overriding
                 # pre-populated payload values with nulls
@@ -70,7 +72,8 @@ def scan_and_dispatch_task() -> int:
                     queue=settings.RABBITMQ_OUTPUT_QUEUE,
                     routing_key=settings.RABBITMQ_OUTPUT_ROUTING_KEY,
                 )
-                mark_processed(db, r.id)
+                # Mark as queued; dispatch task will mark Processed/Failed
+                mark_queued(db, r.id)
                 dispatched += 1
                 scheduler_dispatched_total.inc()
             except Exception:
@@ -108,7 +111,7 @@ def _should_skip_nutrition_log(db: Session, reminder) -> bool:
             return False
 
         # Determine local date for comparison using reminder timezone if present,
-        # otherwise fallback to DEFAULT_TIMEZONE
+        # otherwise fallback to user's profile timezone, then DEFAULT_TIMEZONE
         tz = None
         tz_name = getattr(reminder, "timezone", None)
         if tz_name and ZoneInfo is not None:
@@ -117,7 +120,21 @@ def _should_skip_nutrition_log(db: Session, reminder) -> bool:
             except Exception:
                 tz = None
         if tz is None:
-            tz = get_zoneinfo()
+            # Try user profile timezone from DB
+            try:
+                row = db.execute(
+                    _sa_text("SELECT timezone FROM user_profiles WHERE user_id = :uid"),
+                    {"uid": int(str(reminder.user_id))},
+                ).first()
+                if row and row[0] and ZoneInfo is not None:
+                    try:
+                        tz = ZoneInfo(str(row[0]))
+                    except Exception:
+                        tz = None
+            except Exception:
+                tz = None
+            if tz is None:
+                tz = get_zoneinfo()
 
         rt = reminder.reminder_time
         try:
@@ -139,7 +156,17 @@ def _should_skip_nutrition_log(db: Session, reminder) -> bool:
             )
             .scalar()
         )
-        return bool(count_ and count_ >= 1)
+        should_skip = bool(count_ and count_ >= 1)
+        # Debug trace to help diagnose timezone-related skipping
+        try:
+            print(
+                f"🔎 [Reminders] Skip check | user={reminder.user_id} meal={meal_key} tz={(tz.key if hasattr(tz,'key') else str(tz))} "
+                f"rt_utc={(rt if rt.tzinfo else rt.replace(tzinfo=dt_timezone.utc)).astimezone(dt_timezone.utc).isoformat()} "
+                f"local_date={local_date} count={count_} skip={should_skip}"
+            )
+        except Exception:
+            pass
+        return should_skip
     except Exception:
         # Fail-safe: never block sending due to unexpected errors
         return False

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>HMAC Test</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+</head>
+<body>
+    <h1>HMAC Test</h1>
+    <div id="output"></div>
+    
+    <script>
+        // Test HMAC generation
+        const appSecret = 'zivoheal...h900'; // Replace with your actual secret key
+        console.log('Secret key length:', appSecret.length);
+        
+        function generateSignature(payload, timestamp) {
+            const message = `${payload}.${timestamp}`;
+            return CryptoJS.HmacSHA256(message, appSecret).toString();
+        }
+        
+        function generateHeaders(payload) {
+            const timestamp = Math.floor(Date.now() / 1000).toString();
+            const signature = generateSignature(payload, timestamp);
+            
+            return {
+                'X-Timestamp': timestamp,
+                'X-App-Signature': signature
+            };
+        }
+        
+        // Test with empty payload (GET request)
+        const headers = generateHeaders('');
+        console.log('Generated headers:', headers);
+        
+        document.getElementById('output').innerHTML = `
+            <p>Secret key length: ${appSecret.length}</p>
+            <p>Timestamp: ${headers['X-Timestamp']}</p>
+            <p>Signature: ${headers['X-App-Signature']}</p>
+        `;
+    </script>
+</body>
+</html>

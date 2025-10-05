@@ -10,7 +10,7 @@ from app.api import deps
 from app.core.config import settings
 from app.schemas.feedback import (
     FeedbackUploadURLRequest, FeedbackUploadURLResponse,
-    FeedbackCreate, Feedback
+    FeedbackCreate, Feedback, FeedbackUpdate
 )
 from app.crud.feedback import feedback as feedback_crud
 
@@ -251,5 +251,57 @@ def get_view_url(
         return {"viewUrl": url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate view URL: {e}")
+
+
+@router.patch("/{feedback_id}", response_model=Feedback)
+def update_feedback(
+    feedback_id: str,
+    feedback_update: FeedbackUpdate,
+    db: Session = Depends(deps.get_db),
+    current_admin: models.Admin = Depends(deps.get_current_active_admin)
+) -> Any:
+    """Update feedback status and closed date"""
+    print(f"🔧 [Feedback Update] Received PATCH request for feedback_id: {feedback_id}")
+    print(f"🔧 [Feedback Update] Update data: {feedback_update}")
+    print(f"🔧 [Feedback Update] Admin user: {current_admin.email if current_admin else 'None'}")
+    
+    obj = feedback_crud.get(db=db, id=feedback_id)
+    if not obj:
+        print(f"❌ [Feedback Update] Feedback not found: {feedback_id}")
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    
+    print(f"✅ [Feedback Update] Found feedback: {obj.id}, current status: {obj.status}")
+    print(f"🔧 [Feedback Update] Update data received: status={feedback_update.status}, closed_date={feedback_update.closed_date}")
+    print(f"🔧 [Feedback Update] closed_date type: {type(feedback_update.closed_date)}")
+    if feedback_update.closed_date:
+        print(f"🔧 [Feedback Update] closed_date ISO: {feedback_update.closed_date.isoformat()}")
+    
+    # Update the feedback
+    updated_obj = feedback_crud.update(db=db, db_obj=obj, obj_in=feedback_update)
+    print(f"🔧 [Feedback Update] After update - status: {updated_obj.status}, closed_date: {updated_obj.closed_date}")
+    
+    # Enrich with submitter details for dashboard clients
+    role = getattr(updated_obj, 'submitter_type', None)
+    if role not in ("doctor", "user"):
+        role = "unknown"
+
+    # Resolve submitter name strictly from the corresponding table
+    name = "Anonymous"
+    if updated_obj.user_id and role == "doctor":
+        doc = db.query(models.Doctor).filter(models.Doctor.id == updated_obj.user_id).first()
+        if doc:
+            name = doc.full_name or doc.email or name
+    elif updated_obj.user_id and role == "user":
+        usr = db.query(models.User).filter(models.User.id == updated_obj.user_id).first()
+        if usr:
+            name = usr.full_name or usr.email or name
+
+    payload = updated_obj.__dict__.copy()
+    payload["submitter_role"] = role
+    payload["submitter_name"] = name
+    result = Feedback(**payload)
+    print(f"✅ [Feedback Update] Successfully updated feedback {feedback_id} to status: {result.status}, closed_date: {result.closed_date}")
+    print(f"🔧 [Feedback Update] Final response payload: {payload}")
+    return result
 
 

@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '044_add_submitter_type_to_feedback'
-down_revision = '043_add_missing_app_identifier_column'
+down_revision = '043_add_app_identifier'
 branch_labels = None
 depends_on = None
 

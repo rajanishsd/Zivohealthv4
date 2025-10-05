@@ -69,6 +69,7 @@ interface FeedbackItem {
   device_model?: string | null;
   app_identifier?: string | null;
   status: string;
+  closed_date?: string | null;
   extra?: Record<string, any> | null;
   created_at?: string;
   updated_at?: string;
@@ -99,6 +100,9 @@ function App() {
   // Feedback state
   const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(false);
+  const [editingFeedback, setEditingFeedback] = useState<string | null>(null);
+  const [tempStatus, setTempStatus] = useState<string>('');
+  const [updatingFeedback, setUpdatingFeedback] = useState<string | null>(null);
   const [feedbackFilters, setFeedbackFilters] = useState({
     role: 'all' as 'all' | 'user' | 'doctor',
     status: 'all' as 'all' | 'open' | 'in_progress' | 'resolved',
@@ -248,7 +252,12 @@ function App() {
       headers['Content-Type'] = 'application/json';
     }
     
-    // Add HMAC headers for API calls
+    // Add HMAC headers for ALL API calls (both GET and POST)
+    console.log('🔐 [Dashboard] Generating HMAC headers...');
+    console.log('🔐 [Dashboard] Payload:', payload);
+    console.log('🔐 [Dashboard] API_KEY set:', !!API_KEY);
+    console.log('🔐 [Dashboard] Auth token set:', !!auth.token);
+    
     if (payload) {
       // For POST requests with payload
       const hmacHeaders = hmacGenerator.generateJSONHeaders(payload);
@@ -259,6 +268,7 @@ function App() {
       Object.assign(headers, hmacHeaders);
     }
     
+    console.log('🔐 [Dashboard] Final headers:', headers);
     return headers;
   };
 
@@ -298,6 +308,47 @@ function App() {
       if (url) window.open(url, '_blank');
     } catch (e) {
       console.error('Failed to get view URL:', e);
+    }
+  };
+
+  const updateFeedbackStatus = async (feedbackId: string, status: string, closedDate?: string) => {
+    console.log('Updating feedback status:', { feedbackId, status, closedDate });
+    setUpdatingFeedback(feedbackId);
+    try {
+      const payload: { status: string; closed_date?: string } = { status };
+      if (closedDate) {
+        payload.closed_date = closedDate;
+      }
+      
+      console.log('Sending payload:', payload);
+      console.log('API URL:', apiUrl(`/api/v1/feedback/${feedbackId}`));
+      
+      const response = await fetch(apiUrl(`/api/v1/feedback/${feedbackId}`), {
+        method: 'PATCH',
+        headers: getAuthHeaders(payload),
+        body: JSON.stringify(payload)
+      });
+      
+      console.log('Response status:', response.status);
+      console.log('Response ok:', response.ok);
+      
+      if (response.ok) {
+        const updatedFeedback = await response.json();
+        console.log('Updated feedback received:', updatedFeedback);
+        setFeedback(prev => prev.map(fb => fb.id === feedbackId ? updatedFeedback : fb));
+        setEditingFeedback(null);
+        setTempStatus('');
+        console.log('Feedback updated successfully');
+      } else {
+        const errorText = await response.text();
+        console.error('Failed to update feedback status:', response.status, errorText);
+        alert('Failed to update feedback status. Please try again.');
+      }
+    } catch (e) {
+      console.error('Error updating feedback status:', e);
+      alert('Error updating feedback status. Please try again.');
+    } finally {
+      setUpdatingFeedback(null);
     }
   };
 
@@ -602,6 +653,7 @@ function App() {
             <div>Category</div>
             <div>Description</div>
             <div>Status</div>
+            <div>Closed Date</div>
             <div>App</div>
             <div>Actions</div>
           </div>
@@ -619,11 +671,94 @@ function App() {
                 {(fb.description || '').length > 60 ? `${(fb.description || '').slice(0, 60)}...` : (fb.description || '')}
               </div>
               <div>
-                <span className={`status-badge ${fb.status || 'open'}`}>{fb.status || 'open'}</span>
+                {editingFeedback === fb.id ? (
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <select 
+                      value={tempStatus || fb.status || 'open'} 
+                      onChange={(e) => setTempStatus(e.target.value)}
+                      style={{ padding: '4px', borderRadius: '4px', border: '1px solid #ccc', minWidth: '120px' }}
+                    >
+                      <option value="open">Open</option>
+                      <option value="in_progress">In Progress</option>
+                      <option value="resolved">Resolved</option>
+                    </select>
+                    <button 
+                      className="view-workflow-btn" 
+                      onClick={() => {
+                        console.log('Update button clicked for feedback:', fb.id);
+                        console.log('Current tempStatus:', tempStatus);
+                        console.log('Current fb.status:', fb.status);
+                        const newStatus = tempStatus || fb.status || 'open';
+                        console.log('New status to update:', newStatus);
+                        const closedDate = newStatus === 'resolved' ? new Date().toISOString() : undefined;
+                        console.log('Closed date:', closedDate);
+                        updateFeedbackStatus(fb.id, newStatus, closedDate);
+                      }}
+                      disabled={updatingFeedback === fb.id}
+                      style={{ 
+                        background: updatingFeedback === fb.id ? '#6c757d' : '#28a745', 
+                        minWidth: '60px', 
+                        fontSize: '12px',
+                        opacity: updatingFeedback === fb.id ? 0.6 : 1
+                      }}
+                    >
+                      {updatingFeedback === fb.id ? 'Updating...' : 'Update'}
+                    </button>
+                  </div>
+                ) : (
+                  <span className={`status-badge ${(fb.status || 'open').toLowerCase()}`}>
+                    {(fb.status || 'open').charAt(0).toUpperCase() + (fb.status || 'open').slice(1).toLowerCase()}
+                  </span>
+                )}
+              </div>
+              <div>
+                {(() => {
+                  console.log('Rendering closed_date for feedback:', fb.id, 'closed_date:', fb.closed_date);
+                  if (fb.closed_date) {
+                    try {
+                      const date = new Date(fb.closed_date);
+                      // Use toLocaleDateString with timezone options for better display
+                      return date.toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        timeZone: 'UTC'
+                      });
+                    } catch (e) {
+                      console.error('Error parsing closed_date:', fb.closed_date, e);
+                      return fb.closed_date;
+                    }
+                  }
+                  return '-';
+                })()}
               </div>
               <div>{fb.app_identifier || '-'}</div>
-              <div>
-                <button className="view-workflow-btn" onClick={() => viewScreenshot(fb.id)}>View Screenshot</button>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button className="view-workflow-btn" onClick={() => viewScreenshot(fb.id)}>Screenshot</button>
+                {editingFeedback === fb.id ? (
+                  <button 
+                    className="view-workflow-btn" 
+                    onClick={() => {
+                      setEditingFeedback(null);
+                      setTempStatus('');
+                    }}
+                    style={{ background: '#dc3545', minWidth: '60px' }}
+                  >
+                    Cancel
+                  </button>
+                ) : (
+                  <button 
+                    className="view-workflow-btn" 
+                    onClick={() => {
+                      console.log('Setting editing feedback to:', fb.id);
+                      setTempStatus(fb.status || 'open');
+                      setEditingFeedback(fb.id);
+                    }}
+                    style={{ background: '#28a745', minWidth: '80px' }}
+                  >
+                    Edit
+                  </button>
+                )}
               </div>
             </div>
           ))}

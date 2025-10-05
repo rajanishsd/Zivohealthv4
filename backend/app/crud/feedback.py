@@ -2,10 +2,10 @@ from typing import Optional, Any
 from sqlalchemy.orm import Session
 from app.crud.base import CRUDBase
 from app.models.feedback import FeedbackScreenshot
-from app.schemas.feedback import FeedbackCreate
+from app.schemas.feedback import FeedbackCreate, FeedbackUpdate
 
 
-class CRUDFeedback(CRUDBase[FeedbackScreenshot, FeedbackCreate, dict]):
+class CRUDFeedback(CRUDBase[FeedbackScreenshot, FeedbackCreate, FeedbackUpdate]):
     def create_with_user(self, db: Session, *, obj_in: FeedbackCreate, user_id: Optional[int]) -> FeedbackScreenshot:
         data = obj_in.model_dump()
         data["user_id"] = user_id

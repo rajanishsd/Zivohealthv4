@@ -147,6 +147,14 @@ def get_current_active_doctor(
     return current_doctor
 
 
+def get_current_active_admin(
+    current_user: Union[models.User, models.Admin] = Depends(get_current_user_or_doctor),
+) -> models.Admin:
+    # Only allow admin users
+    if not isinstance(current_user, models.Admin):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
 def get_current_active_superuser(
     current_user: Union[models.User, models.Admin] = Depends(get_current_user_or_doctor),
 ) -> Union[models.User, models.Admin]:
