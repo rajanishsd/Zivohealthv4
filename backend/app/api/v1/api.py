@@ -15,8 +15,13 @@ from app.api.v1.endpoints import files
 from app.api.v1.endpoints import feedback
 from app.api.v1.endpoints import video
 from app.api.v1.endpoints import dashboard as dashboard_v1
+from app.api.v1.endpoints import admin_users
 from app.api.v1.endpoints import password_reset
 from app.api.v1.endpoints import onboarding
+from app.api.v1.endpoints import profile
+from app.api.v1.endpoints import account
+from app.api.v1.endpoints import devices
+from app.api.v1.endpoints import notifications
 # Reminders are handled by a separate microservice - no need to import here
 from app.routes import audit
 from app.routes import dashboard
@@ -43,7 +48,13 @@ api_router.include_router(files.router, prefix="/files", tags=["files"])
 api_router.include_router(feedback.router, prefix="/feedback", tags=["feedback"])
 api_router.include_router(video.router, prefix="/video", tags=["video"])
 api_router.include_router(onboarding.router, prefix="/onboarding", tags=["onboarding"])
+api_router.include_router(profile.router, prefix="/profile", tags=["profile"])
+api_router.include_router(account.router, prefix="/account", tags=["account"])
+api_router.include_router(devices.router, prefix="/devices", tags=["devices"])
+api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(dashboard_v1.router, prefix="/dashboard", tags=["dashboard-v1"])
+# Admin users management
+api_router.include_router(admin_users.router, prefix="/admin", tags=["admin-users"])
 # Reminders are handled by a separate microservice at http://localhost:8085 
 
 # api_router.include_router(telemetry_dashboard.router, prefix="/telemetry-audit", tags=["telemetry-dashboard"])

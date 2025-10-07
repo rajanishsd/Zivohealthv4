@@ -1,8 +1,7 @@
 import Foundation
 import UIKit
 
-@MainActor
-final class FeedbackReporter {
+final class FeedbackReporter: @unchecked Sendable {
     static let shared = FeedbackReporter()
 
     struct UploadURLResponse: Decodable {

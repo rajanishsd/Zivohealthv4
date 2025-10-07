@@ -274,7 +274,8 @@ struct VitalDataCount: Codable {
 }
 
 // MARK: - API Service
-class VitalsAPIService: ObservableObject {
+
+final class VitalsAPIService: ObservableObject, @unchecked Sendable {
     static let shared = VitalsAPIService()
     
     @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint

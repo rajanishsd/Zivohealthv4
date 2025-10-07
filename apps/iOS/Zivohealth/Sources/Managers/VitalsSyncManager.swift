@@ -256,6 +256,10 @@ class VitalsSyncManager: ObservableObject {
     // MARK: - Helper Methods
     
     private func canStartSync() -> Bool {
+        if vitalsManager?.healthKitFeatureEnabled == false {
+            print("⚠️ [VitalsSyncManager] Cannot start sync: HealthKit feature disabled by config")
+            return false
+        }
         guard vitalsManager?.isAuthorized == true else {
             print("❌ [VitalsSyncManager] Cannot start sync: HealthKit not authorized")
             return false

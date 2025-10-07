@@ -2,7 +2,8 @@ import Foundation
 import Combine
 import SwiftUI
 
-class LabReportsAPIService: ObservableObject {
+
+final class LabReportsAPIService: ObservableObject, @unchecked Sendable {
     static let shared = LabReportsAPIService()
     
     @AppStorage("apiEndpoint") private var apiEndpoint = AppConfig.defaultAPIEndpoint

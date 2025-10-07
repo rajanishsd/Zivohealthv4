@@ -77,9 +77,9 @@ struct ContentView: View {
                         }
                         .tag(3)
 
-                        SettingsView()
+                        ProfileView()
                         .tabItem {
-                            Label("Settings", systemImage: "gear")
+                            Label("Profile", systemImage: "person.crop.circle")
                         }
                         .tag(4)
                     }
@@ -196,9 +196,9 @@ struct ContentView: View {
                     }
                     .tag(3)
 
-                    SettingsView()
+                    ProfileView()
                     .tabItem {
-                        Label("Settings", systemImage: "gear")
+                        Label("Profile", systemImage: "person.crop.circle")
                     }
                     .tag(4)
                 }

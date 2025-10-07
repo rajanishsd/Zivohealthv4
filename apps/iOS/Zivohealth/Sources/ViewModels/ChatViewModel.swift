@@ -13,8 +13,7 @@ struct MessageTrackingInfo {
     var isComplete: Bool = false
 }
 
-@MainActor
-class ChatViewModel: ObservableObject {
+final class ChatViewModel: ObservableObject, @unchecked Sendable {
     static let shared = ChatViewModel()
 
     @Published var messages: [ChatMessage] = []

@@ -75,3 +75,4 @@ from .user_profile import (
 )
 from .feedback import FeedbackScreenshot
 from .admin import Admin
+from .user_device import UserDevice

@@ -40,6 +40,7 @@ class OnboardingViewModel: ObservableObject {
     @Published var consentRecommendations: Bool = false
     @Published var consentTermsPrivacy: Bool = false
 
+    @MainActor
     func prefillFromGoogle() {
         if let gUser = GoogleSignInService.shared.currentUser?.profile {
             if email.isEmpty { email = gUser.email }

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-class ChatHistoryManager: ObservableObject {
+final class ChatHistoryManager: ObservableObject, @unchecked Sendable {
     static let shared = ChatHistoryManager()
     
     @Published var chatSessions: [ChatSessionResponse] = []
@@ -18,15 +18,16 @@ class ChatHistoryManager: ObservableObject {
     
     // MARK: - Session Management
     
-    @MainActor
     func createNewSession(title: String? = nil) async -> Int? {
         do {
             let sessionTitle = title ?? generateSessionTitle()
             let newSession = try await networkService.createChatSession(title: sessionTitle)
             
-            // Add to beginning for recent-first order
-            chatSessions.insert(newSession, at: 0)
-            currentSessionId = newSession.id
+            await MainActor.run {
+                // Add to beginning for recent-first order
+                chatSessions.insert(newSession, at: 0)
+                currentSessionId = newSession.id
+            }
             
             print("📝 [ChatHistoryManager] Created new session: \(newSession.title ?? "Untitled")")
             return newSession.id
@@ -36,29 +37,31 @@ class ChatHistoryManager: ObservableObject {
         }
     }
     
-    @MainActor
     func switchToSession(_ sessionId: Int) {
         guard chatSessions.contains(where: { $0.id == sessionId }) else {
             print("❌ [ChatHistoryManager] Session not found: \(sessionId)")
             return
         }
         
-        currentSessionId = sessionId
-        print("🔄 [ChatHistoryManager] Switched to session: \(sessionId)")
+        Task { @MainActor in
+            currentSessionId = sessionId
+            print("🔄 [ChatHistoryManager] Switched to session: \(sessionId)")
+        }
     }
     
-    @MainActor
     func refreshSession(_ sessionId: Int) async {
         do {
             let updatedSession = try await networkService.getChatSession(sessionId)
             
-            if let index = chatSessions.firstIndex(where: { $0.id == sessionId }) {
-                chatSessions[index] = updatedSession
-                
-                // Move to top if it's the current session and has activity
-                if sessionId == currentSessionId && index > 0 {
-                    chatSessions.remove(at: index)
-                    chatSessions.insert(updatedSession, at: 0)
+            await MainActor.run {
+                if let index = chatSessions.firstIndex(where: { $0.id == sessionId }) {
+                    chatSessions[index] = updatedSession
+                    
+                    // Move to top if it's the current session and has activity
+                    if sessionId == currentSessionId && index > 0 {
+                        chatSessions.remove(at: index)
+                        chatSessions.insert(updatedSession, at: 0)
+                    }
                 }
             }
             
@@ -68,18 +71,21 @@ class ChatHistoryManager: ObservableObject {
         }
     }
     
-    @MainActor
     func deleteSession(_ sessionId: Int) async {
         do {
             // Call backend to delete the session
             try await networkService.deleteChatSession(sessionId: sessionId)
             
-            // Remove from local array only after successful backend deletion
-            chatSessions.removeAll { $0.id == sessionId }
-            
-            // If this was the current session, create a new one
-            if currentSessionId == sessionId {
-                currentSessionId = await createNewSession()
+            await MainActor.run {
+                // Remove from local array only after successful backend deletion
+                chatSessions.removeAll { $0.id == sessionId }
+                
+                // If this was the current session, create a new one
+                if currentSessionId == sessionId {
+                    Task { [weak self] in
+                        self?.currentSessionId = await self?.createNewSession()
+                    }
+                }
             }
             
             print("✅ [ChatHistoryManager] Successfully deleted session: \(sessionId)")
@@ -94,7 +100,6 @@ class ChatHistoryManager: ObservableObject {
         return chatSessions.first { $0.id == sessionId }
     }
     
-    @MainActor
     func ensureCurrentSession() async -> Int? {
         if let sessionId = currentSessionId,
            chatSessions.contains(where: { $0.id == sessionId }) {
@@ -106,19 +111,22 @@ class ChatHistoryManager: ObservableObject {
     
     // MARK: - Backend Integration
     
-    @MainActor
     func loadChatSessionsFromBackend() async {
         do {
             let sessions = try await networkService.getChatSessions()
-            chatSessions = sessions.sorted { 
-                ($0.lastMessageAt ?? $0.createdAt) > ($1.lastMessageAt ?? $1.createdAt) 
-            }
-            
-            // Set current session to the most recent one with messages, or create new
-            if let mostRecentSession = chatSessions.first(where: { ($0.messageCount ?? 0) > 0 }) {
-                currentSessionId = mostRecentSession.id
-            } else if currentSessionId == nil {
-                currentSessionId = await createNewSession()
+            await MainActor.run {
+                chatSessions = sessions.sorted { 
+                    ($0.lastMessageAt ?? $0.createdAt) > ($1.lastMessageAt ?? $1.createdAt) 
+                }
+                
+                // Set current session to the most recent one with messages, or create new
+                if let mostRecentSession = chatSessions.first(where: { ($0.messageCount ?? 0) > 0 }) {
+                    currentSessionId = mostRecentSession.id
+                } else if currentSessionId == nil {
+                    Task { [weak self] in
+                        self?.currentSessionId = await self?.createNewSession()
+                    }
+                }
             }
             
             print("📱 [ChatHistoryManager] Loaded \(sessions.count) chat sessions from backend")
@@ -131,10 +139,11 @@ class ChatHistoryManager: ObservableObject {
         }
     }
     
-    @MainActor
     func clearAllChatSessions() async {
-        // Note: Backend doesn't have bulk delete, so we'll just clear local array
-        chatSessions.removeAll()
+        await MainActor.run {
+            // Note: Backend doesn't have bulk delete, so we'll just clear local array
+            chatSessions.removeAll()
+        }
         
         // Create a new initial session
         currentSessionId = await createNewSession()

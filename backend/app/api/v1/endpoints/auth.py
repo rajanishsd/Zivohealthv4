@@ -42,12 +42,24 @@ async def login(
     OAuth2 compatible token login, get an access token for future requests.
     Supports both users and doctors.
     """
-    # Try to authenticate as a user first
+    # Try to authenticate as a user first (password check)
     user = crud.user.authenticate(
         db, email=form_data.username, password=form_data.password
     )
-    
-    if user and user.is_active:
+
+    if user:
+        # If user was scheduled for deletion, reactivate on successful password auth
+        was_reactivated = False
+        if user.is_tobe_deleted:
+            user.is_tobe_deleted = False
+            user.delete_date = None
+            user.is_active = True
+            db.commit()
+            db.refresh(user)
+            was_reactivated = True
+        # If still inactive (and not just scheduled for deletion), block login
+        if not user.is_active:
+            raise HTTPException(status_code=400, detail="Inactive user")
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         refresh_token_expires = timedelta(minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES)
         return {
@@ -59,14 +71,15 @@ async def login(
             ),
             "token_type": "bearer",
             "user_type": "user",
-            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60  # Convert minutes to seconds
+            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "reactivated": was_reactivated,
         }
-    
+
     # Try to authenticate as a doctor
     doctor = crud.doctor.authenticate(
         db, email=form_data.username, password=form_data.password
     )
-    
+
     if doctor and doctor.is_active:
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         refresh_token_expires = timedelta(minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES)
@@ -79,9 +92,9 @@ async def login(
             ),
             "token_type": "bearer",
             "user_type": "doctor",
-            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60  # Convert minutes to seconds
+            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         }
-    
+
     # Neither user nor doctor authentication succeeded
     raise HTTPException(status_code=400, detail="Incorrect email or password")
 
@@ -123,7 +136,6 @@ def read_users_me(
     Get current user.
     """
     return current_user 
-
 
 # Admin login issuing admin JWT (is_admin=true)
 @router.post("/admin/login", response_model=dict)

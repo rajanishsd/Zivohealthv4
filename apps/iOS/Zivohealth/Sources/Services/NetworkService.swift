@@ -4,6 +4,11 @@ import UIKit
 import Combine
 import CryptoKit
 
+// MARK: - Notification Names
+extension Notification.Name {
+    static let deletionCancelled = Notification.Name("deletionCancelled")
+}
+
 // MARK: - HMAC Extension
 extension Data {
     func hmacSHA256(key: Data) -> String {
@@ -13,10 +18,10 @@ extension Data {
 }
 
 // MARK: - Upload Progress Delegate
-class UploadProgressDelegate: NSObject, URLSessionTaskDelegate {
-    let progressHandler: (Double) -> Void
+final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate {
+    let progressHandler: @Sendable (Double) -> Void
     
-    init(progressHandler: @escaping (Double) -> Void) {
+    init(progressHandler: @escaping @Sendable (Double) -> Void) {
         self.progressHandler = progressHandler
     }
     
@@ -678,6 +683,88 @@ public class NetworkService: ObservableObject {
         print("✅ [NetworkService] Re-authentication completed successfully")
     }
 
+    // MARK: - Account Management
+    public func scheduleAccountDeletion() async throws {
+        _ = try await post("/account/schedule-delete", body: [:], requiresAuth: true)
+    }
+
+    // MARK: - Devices / HealthKit
+    public struct DevicesConfig: Codable, Sendable { let healthkit_enabled: Bool }
+    public struct DeviceStatus: Codable, Sendable {
+        let id: Int
+        let provider: String
+        let device_name: String
+        let is_connected: Bool
+        let connected_at: String?
+        let disconnected_at: String?
+    }
+
+    public func fetchDevicesConfig() async throws -> DevicesConfig {
+        let data = try await get("/devices/config", requiresAuth: true)
+        return try decoder.decode(DevicesConfig.self, from: data)
+    }
+
+    public func getDeviceStatus(provider: String) async throws -> DeviceStatus {
+        let data = try await get("/devices/\(provider)/status", requiresAuth: true)
+        return try decoder.decode(DeviceStatus.self, from: data)
+    }
+
+    public func setDeviceStatus(provider: String, isConnected: Bool) async throws -> DeviceStatus {
+        let body: [String: Any] = ["is_connected": isConnected]
+        let data = try await put("/devices/\(provider)/status", body: body, requiresAuth: true)
+        return try decoder.decode(DeviceStatus.self, from: data)
+    }
+
+    // MARK: - Notifications
+    public struct NotificationSettingsDTO: Codable, Sendable { public let notifications_enabled: Bool }
+
+    public func fetchNotificationSettings() async throws -> NotificationSettingsDTO {
+        let data = try await get("/notifications/settings", requiresAuth: true)
+        return try decoder.decode(NotificationSettingsDTO.self, from: data)
+    }
+
+    public func updateNotificationSettings(enabled: Bool) async throws -> NotificationSettingsDTO {
+        let body: [String: Any] = ["notifications_enabled": enabled]
+        let data = try await put("/notifications/settings", body: body, requiresAuth: true)
+        return try decoder.decode(NotificationSettingsDTO.self, from: data)
+    }
+    
+    /// Check deletion status
+    func checkDeletionStatus() async throws -> DeletionStatusResponse {
+        print("🔍 [NetworkService] Checking deletion status")
+        
+        do {
+            let data = try await get("/account/deletion-status", requiresAuth: true)
+            let response = try decoder.decode(DeletionStatusResponse.self, from: data)
+            print("✅ [NetworkService] Deletion status retrieved: \(response)")
+            return response
+        } catch {
+            print("❌ [NetworkService] Failed to check deletion status: \(error)")
+            throw error
+        }
+    }
+    
+    /// Check if user's deletion was cancelled and show notification
+    func checkAndNotifyDeletionCancellation() async {
+        do {
+            let deletionStatus = try await checkDeletionStatus()
+            
+            // If user was previously scheduled for deletion but now it's cancelled
+            if !deletionStatus.isScheduledForDeletion && deletionStatus.wasScheduledForDeletion {
+                await MainActor.run {
+                    // Show notification that deletion was cancelled
+                    NotificationCenter.default.post(
+                        name: .deletionCancelled,
+                        object: nil,
+                        userInfo: ["message": "Your account deletion has been cancelled. Welcome back!"]
+                    )
+                }
+            }
+        } catch {
+            print("❌ [NetworkService] Failed to check deletion cancellation status: \(error)")
+        }
+    }
+
     public func handleRoleChange() {
         print("🔄 [NetworkService] User role changed to \(userMode)")
         
@@ -1104,11 +1191,12 @@ public class NetworkService: ObservableObject {
                     var shouldStop = false
                     continuation.onTermination = { _ in
                         shouldStop = true
-                        // Cancel and remove any existing socket for this session
-                        if let socket = self.statusSockets[sessionId] {
-                            socket.cancel(with: .goingAway, reason: nil)
+                        Task { @MainActor in
+                            if let socket = self.statusSockets[sessionId] {
+                                socket.cancel(with: .goingAway, reason: nil)
+                            }
+                            self.statusSockets[sessionId] = nil
                         }
-                        self.statusSockets[sessionId] = nil
                     }
 
                     while !shouldStop {
@@ -1116,15 +1204,19 @@ public class NetworkService: ObservableObject {
                         // Note: If you add WS auth headers later, set here
 
                         // Ensure single active socket per session
-                        if let existing = self.statusSockets[sessionId] {
-                            existing.cancel(with: .goingAway, reason: nil)
+                        await MainActor.run {
+                            if let existing = self.statusSockets[sessionId] {
+                                existing.cancel(with: .goingAway, reason: nil)
+                            }
                         }
                         let webSocketTask = URLSession.shared.webSocketTask(with: request)
-                        self.statusSockets[sessionId] = webSocketTask
+                        await MainActor.run {
+                            self.statusSockets[sessionId] = webSocketTask
+                        }
                         webSocketTask.resume()
 
                         print("🔌 [NetworkService] WebSocket connected for status updates")
-                        self.statusReconnectAttempts[sessionId] = 0
+                        await MainActor.run { self.statusReconnectAttempts[sessionId] = 0 }
 
                         do {
                             while !shouldStop {
@@ -1152,22 +1244,24 @@ public class NetworkService: ObservableObject {
 
                         // Cleanup socket before reconnect
                         webSocketTask.cancel(with: .goingAway, reason: nil)
-                        self.statusSockets[sessionId] = nil
+                        await MainActor.run { self.statusSockets[sessionId] = nil }
 
                         if shouldStop { break }
 
                         // Backoff before reconnecting
-                        let attempts = (self.statusReconnectAttempts[sessionId] ?? 0) + 1
-                        self.statusReconnectAttempts[sessionId] = attempts
+                        let attempts: Int = await MainActor.run { (self.statusReconnectAttempts[sessionId] ?? 0) + 1 }
+                        await MainActor.run { self.statusReconnectAttempts[sessionId] = attempts }
                         let delay = min(30.0, pow(2.0, Double(min(attempts, 5))))
                         print("🔁 [NetworkService] Reconnecting WebSocket in \(delay)s (attempt \(attempts))…")
                         try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     }
 
                     // Final cleanup
-                    if let socket = self.statusSockets[sessionId] {
-                        socket.cancel(with: .goingAway, reason: nil)
-                        self.statusSockets[sessionId] = nil
+                    await MainActor.run {
+                        if let socket = self.statusSockets[sessionId] {
+                            socket.cancel(with: .goingAway, reason: nil)
+                            self.statusSockets[sessionId] = nil
+                        }
                     }
                     continuation.finish()
                 } catch {
@@ -1401,6 +1495,58 @@ public class NetworkService: ObservableObject {
         print("👤 [NetworkService] Setting current user info - Email: \(email), Name: \(fullName)")
         currentUserEmail = email
         currentUserFullName = fullName
+    }
+
+    // MARK: - Profile Edit
+    public func submitProfileEdit(payload: [String: Any]) async throws {
+        // Reuse onboarding submit path but exclude consent on client side
+        // Backend will upsert profile, lifestyle, notifications, and conditions/allergies
+        _ = try await post("/onboarding/submit", body: payload, requiresAuth: true)
+    }
+
+    struct CombinedProfileResponse: Decodable {
+        struct Basic: Decodable {
+            let full_name: String?
+            let date_of_birth: String?
+            let gender: String
+            let height_cm: Int?
+            let weight_kg: Int?
+            let body_type: String?
+            let activity_level: String?
+            let timezone: String
+            let email: String
+            let phone_number: String
+        }
+        struct Conditions: Decodable {
+            let condition_names: [String]
+            let other_condition_text: String?
+            let allergies: [String]
+            let other_allergy_text: String?
+        }
+        struct Lifestyle: Decodable {
+            let smokes: Bool
+            let drinks_alcohol: Bool
+            let exercises_regularly: Bool
+            let exercise_type: String?
+            let exercise_frequency_per_week: Int?
+        }
+        struct Notifications: Decodable {
+            let timezone: String
+            let window_start_local: String
+            let window_end_local: String
+            let email_enabled: Bool
+            let sms_enabled: Bool
+            let push_enabled: Bool
+        }
+        let basic: Basic
+        let conditions: Conditions
+        let lifestyle: Lifestyle
+        let notifications: Notifications
+    }
+
+    func fetchCombinedProfile() async throws -> CombinedProfileResponse {
+        let data = try await get("/profile/me", requiresAuth: true)
+        return try decoder.decode(CombinedProfileResponse.self, from: data)
     }
     
     // MARK: - Manual Reset Functions
@@ -2233,6 +2379,7 @@ struct TokenResponse: Codable {
     let userType: String
     let expiresIn: Int
     let refreshToken: String?
+    let reactivated: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
@@ -2240,6 +2387,7 @@ struct TokenResponse: Codable {
         case userType = "user_type"
         case expiresIn = "expires_in"
         case refreshToken = "refresh_token"
+        case reactivated
     }
 }
 
@@ -2372,6 +2520,12 @@ struct PasswordResetSuccessResponse: Codable {
     let message: String
 }
 
+struct DeletionStatusResponse: Codable {
+    let isScheduledForDeletion: Bool
+    let wasScheduledForDeletion: Bool
+    let deleteDate: String?
+}
+
 // MARK: - Dual Auth Extension
 extension NetworkService {
     
@@ -2396,54 +2550,61 @@ extension NetworkService {
     
     /// Login with email and password using dual auth
     func loginWithPassword(email: String, password: String) async throws -> String {
-        print("🔐 [NetworkService] Attempting dual auth login with password: \(email)")
-        
-        let body: [String: Any] = [
-            "email": email,
-            "password": password
-        ]
-        
+        print("🔐 [NetworkService] Attempting login with password: \(email)")
+
+        // OAuth2 form-encoded payload: username + password
+        let loginData = "username=\(email)&password=\(password)"
+        let body = loginData.data(using: .utf8)!
+
         do {
-            let data = try await post("/auth/email/password", body: body, requiresAuth: false)
-            let response = try decoder.decode(AuthResponse.self, from: data)
-            
-            // Store tokens in Keychain
-            authToken = response.tokens.accessToken
-            _ = keychain.storeRefreshToken(response.tokens.refreshToken, for: userMode)
-            // Store user id for Reminders device registration
-            _ = KeychainService.shared.store(key: "zivo_user_id", value: String(response.user.id))
-            
-            // Save token info
-            let tokenResponse = TokenResponse(
-                accessToken: response.tokens.accessToken,
-                tokenType: response.tokens.tokenType,
-                userType: response.tokens.userType,
-                expiresIn: response.tokens.expiresIn,
-                refreshToken: response.tokens.refreshToken
-            )
-            
-            // Ensure all updates happen on main thread
+            // Use the OAuth2 compatible login endpoint
+            let data = try await post("/auth/login", body: body, contentType: "application/x-www-form-urlencoded", requiresAuth: false)
+            let tokenResponse = try decoder.decode(TokenResponse.self, from: data)
+
+            // Store access token and refresh token
+            authToken = tokenResponse.accessToken
+            if let refresh = tokenResponse.refreshToken { _ = keychain.storeRefreshToken(refresh, for: userMode) }
+
+            // Save token info on main actor and show reactivation message if applicable
             await MainActor.run {
                 saveTokenInfo(tokenResponse)
-                setCurrentUserInfo(email: response.user.email, fullName: response.user.fullName ?? "")
-                
-                // Force UserDefaults synchronization
-                UserDefaults.standard.synchronize()
-                
-                updateAuthenticationState()
-                
-                // Register pending FCM token if available
-                AppDelegate.registerPendingFCMTokenIfNeeded()
+                if tokenResponse.reactivated == true {
+                    NotificationCenter.default.post(
+                        name: .deletionCancelled,
+                        object: nil,
+                        userInfo: ["message": "Your account has been reactivated. Welcome back!"]
+                    )
+                }
             }
-            
+
+            // Fetch current user to populate profile info and store user_id
+            do {
+                let meData = try await get("/auth/me", requiresAuth: true)
+                let userResponse = try decoder.decode(UserResponse.self, from: meData)
+                await MainActor.run {
+                    setCurrentUserInfo(email: userResponse.email, fullName: userResponse.fullName)
+                    _ = KeychainService.shared.store(key: "zivo_user_id", value: String(userResponse.id))
+                    
+                    // Force UserDefaults synchronization
+                    UserDefaults.standard.synchronize()
+                    
+                    updateAuthenticationState()
+                    
+                    // Register pending FCM token if available
+                    AppDelegate.registerPendingFCMTokenIfNeeded()
+                }
+            } catch {
+                print("⚠️ [NetworkService] Failed to fetch /auth/me after login: \(error)")
+            }
+
             // After successful login, check onboarding status from backend
             print("🔍 [NetworkService] Checking backend onboarding status after password login...")
             _ = await checkOnboardingStatusFromBackend()
-            
-            print("✅ [NetworkService] Dual auth login successful")
-            return response.tokens.accessToken
+
+            print("✅ [NetworkService] Login successful for user: \(email)")
+            return tokenResponse.accessToken
         } catch {
-            print("❌ [NetworkService] Dual auth login failed: \(error)")
+            print("❌ [NetworkService] Login failed for user \(email): \(error)")
             throw error
         }
     }
@@ -2507,6 +2668,9 @@ extension NetworkService {
             // After OTP verify, check onboarding status from backend
             print("🔍 [NetworkService] Checking backend onboarding status after OTP verification...")
             _ = await checkOnboardingStatusFromBackend()
+            
+            // Check if user's deletion was cancelled
+            await checkAndNotifyDeletionCancellation()
             
             print("✅ [NetworkService] OTP verification successful")
             return response.tokens.accessToken
@@ -2625,6 +2789,9 @@ extension NetworkService {
             // After Google login, check onboarding status from backend
             print("🔍 [NetworkService] Checking backend onboarding status after Google login...")
             _ = await checkOnboardingStatusFromBackend()
+            
+            // Check if user's deletion was cancelled
+            await checkAndNotifyDeletionCancellation()
             
             print("✅ [NetworkService] Google token verification successful")
             return response.tokens.accessToken

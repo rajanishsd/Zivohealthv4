@@ -113,9 +113,9 @@ struct FoodImageViewer: View {
 				presignTs = String(Int(Date().timeIntervalSince1970))
 			}
 			// Resolve the final signed URL once to avoid redirect hop
-			Task { @MainActor in
+			Task {
 				if resolvedURL == nil, let u = await resolveSignedURL(from: imageUrl) {
-					resolvedURL = u
+					await MainActor.run { resolvedURL = u }
 				}
 			}
 		}

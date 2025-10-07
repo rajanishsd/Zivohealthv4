@@ -3,7 +3,7 @@ import GoogleSignIn
 import SwiftUI
 
 @MainActor
-class GoogleSignInService: ObservableObject {
+final class GoogleSignInService: ObservableObject {
     static let shared = GoogleSignInService()
     
     @Published var isSignedIn = false

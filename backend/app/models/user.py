@@ -12,10 +12,13 @@ class User(Base):
     full_name = Column(String)
     is_active = Column(Boolean, default=True)
     is_superuser = Column(Boolean, default=False)
+    is_tobe_deleted = Column(Boolean, default=False)
+    delete_date = Column(DateTime, nullable=True)
     email_verified_at = Column(DateTime, nullable=True)
     last_login_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    notifications_enabled = Column(Boolean, nullable=False, default=True)
 
     # Relationships
     chat_sessions = relationship("ChatSession", back_populates="user")

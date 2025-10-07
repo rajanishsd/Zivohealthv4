@@ -1,5 +1,6 @@
 import Foundation
 
+
 class DatabaseManager {
     static let shared = DatabaseManager()
     private var patients: [Patient] = []

@@ -1,7 +1,6 @@
 import Foundation
 import UIKit
 
-@MainActor
 final class FeedbackReporter {
     static let shared = FeedbackReporter()
 

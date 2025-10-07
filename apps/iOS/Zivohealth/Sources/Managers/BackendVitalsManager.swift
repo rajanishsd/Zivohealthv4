@@ -4,7 +4,8 @@ import Combine
 import UIKit
 
 // BackendVitalsManager: Manages HealthKit integration and backend synchronization
-class BackendVitalsManager: ObservableObject {
+
+final class BackendVitalsManager: ObservableObject, @unchecked Sendable {
     static let shared = BackendVitalsManager()
     
     private let healthStore = HKHealthStore()
@@ -23,6 +24,7 @@ class BackendVitalsManager: ObservableObject {
     
     // Sync settings
     @Published var autoSyncEnabled = true
+    @Published var healthKitFeatureEnabled = true
     private var syncTimer: Timer?
     
     // Sync state properties (mirrored from VitalsSyncManager for UI observation)
@@ -43,6 +45,7 @@ class BackendVitalsManager: ObservableObject {
         print("🏥 [BackendVitalsManager] Initializing...")
         syncManager = VitalsSyncManager(vitalsManager: self)
         setupSyncObservation()
+        refreshDevicesConfig()
         checkAuthorizationStatus()
         setupAutoSync()
         setupPeriodicSync()
@@ -208,76 +211,48 @@ class BackendVitalsManager: ObservableObject {
     }
     
     func requestAuthorization() {
-        guard HKHealthStore.isHealthDataAvailable() else {
-            DispatchQueue.main.async {
-                self.errorMessage = "HealthKit is not available on this device"
-            }
-            return
-        }
-        
-        print("🔍 [BackendVitalsManager] Requesting HealthKit authorization...")
-        
-        let typesToRead: Set<HKObjectType> = [
-            HKObjectType.quantityType(forIdentifier: .heartRate)!,
-            HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic)!,
-            HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic)!,
-            HKObjectType.quantityType(forIdentifier: .bloodGlucose)!,
-            HKObjectType.quantityType(forIdentifier: .bodyTemperature)!,
-            HKObjectType.quantityType(forIdentifier: .bodyMass)!,
-            HKObjectType.quantityType(forIdentifier: .stepCount)!,
-            HKObjectType.quantityType(forIdentifier: .appleStandTime)!,
-            HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
-            HKObjectType.quantityType(forIdentifier: .flightsClimbed)!,
-            HKObjectType.workoutType(),
-            HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!
-        ]
-        
-        healthStore.requestAuthorization(toShare: nil, read: typesToRead) { [weak self] success, error in
-            DispatchQueue.main.async {
-                if success {
-                    print("✅ [BackendVitalsManager] HealthKit authorization granted")
-                    self?.isAuthorized = true
-                    self?.errorMessage = nil
-                    self?.enableBackendSync()
-                    
-                    // Immediately refresh dashboard to show any existing backend data
-                    self?.refreshDashboard()
-                    
-                    // Also trigger sync to get fresh HealthKit data
-                    self?.checkForNewDataAndSync()
-                } else {
-                    let errorMsg = error?.localizedDescription ?? "Authorization failed"
-                    print("❌ [BackendVitalsManager] HealthKit authorization failed: \(errorMsg)")
-                    self?.errorMessage = errorMsg
-                    self?.isAuthorized = false
-                }
-            }
-        }
+        // No-op: Authorization UX is handled in ConnectedDevicesView via HealthKitUI
+        print("ℹ️ [BackendVitalsManager] Skipping requestAuthorization - handled by UI flow")
+        checkAuthorizationStatus()
     }
     
     private func checkAuthorizationStatus() {
-        guard HKHealthStore.isHealthDataAvailable() else {
-            print("❌ [BackendVitalsManager] HealthKit not available on this device")
+        guard healthKitFeatureEnabled else {
+            print("⚠️ [BackendVitalsManager] Skipping authorization status check: feature disabled")
+            isAuthorized = false
             return
         }
         
-        let heartRateType = HKObjectType.quantityType(forIdentifier: .heartRate)!
-        let status = healthStore.authorizationStatus(for: heartRateType)
-        
-        print("🔍 [BackendVitalsManager] Current HealthKit authorization status: \(status.rawValue)")
-        print("🔍 [BackendVitalsManager] Current isAuthorized state: \(isAuthorized)")
-        print("🔍 [BackendVitalsManager] Current dashboardData state: \(dashboardData != nil ? "exists" : "nil")")
-        
-        switch status {
-        case .sharingAuthorized:
-            print("✅ [BackendVitalsManager] HealthKit already authorized - updating state")
-            isAuthorized = true
+        Task {
+            // Read-only status check; no prompts here
+            HealthKitAuthorizationService.shared.checkAuthorizationStatus()
+            var hkAuthorized = HealthKitAuthorizationService.shared.isAuthorized
+            await MainActor.run { self.errorMessage = nil }
+
+            // Also respect the backend device connection toggle as the source of truth for UX
+            do {
+                let device = try await NetworkService.shared.getDeviceStatus(provider: "healthkit")
+                if device.is_connected {
+                    hkAuthorized = true
+                }
+            } catch {
+                // Ignore backend read errors here; fall back to HK status only
+            }
+            await MainActor.run { self.isAuthorized = hkAuthorized }
             
-            // Enable backend sync and refresh dashboard for existing users
-            enableBackendSync()
+            print("🔍 [BackendVitalsManager] Current HealthKit authorization status: \(HealthKitAuthorizationService.shared.getCurrentAuthorizationStatus().rawValue)")
+            let currentAuthorized = await MainActor.run { self.isAuthorized }
+            let hasDashboard = await MainActor.run { self.dashboardData != nil }
+            print("🔍 [BackendVitalsManager] Current isAuthorized state: \(currentAuthorized)")
+            print("🔍 [BackendVitalsManager] Current dashboardData state: \(hasDashboard ? "exists" : "nil")")
             
-            // Force dashboard refresh on startup when already authorized
-            DispatchQueue.main.async {
+            if currentAuthorized {
+                print("✅ [BackendVitalsManager] HealthKit already authorized - updating state")
+                
+                // Enable backend sync and refresh dashboard for existing users
+                enableBackendSync()
+                
+                // Force dashboard refresh on startup when already authorized
                 print("🔄 [BackendVitalsManager] App startup - forcing dashboard refresh for authorized user")
                 self.refreshDashboard()
                 
@@ -286,20 +261,13 @@ class BackendVitalsManager: ObservableObject {
                     print("🔄 [BackendVitalsManager] App startup - triggering data sync")
                     self.checkForNewDataAndSync()
                 }
+            } else {
+                print("❌ [BackendVitalsManager] HealthKit not authorized - awaiting user action in ConnectedDevicesView")
             }
             
-        case .sharingDenied:
-            isAuthorized = false
-            print("❌ [BackendVitalsManager] HealthKit access denied")
-        case .notDetermined:
-            isAuthorized = false
-            print("⚠️ [BackendVitalsManager] HealthKit authorization not determined")
-        @unknown default:
-            isAuthorized = false
-            print("⚠️ [BackendVitalsManager] Unknown HealthKit authorization status")
+            let finalAuth = await MainActor.run { self.isAuthorized }
+            print("🔍 [BackendVitalsManager] Final isAuthorized state: \(finalAuth)")
         }
-        
-        print("🔍 [BackendVitalsManager] Final isAuthorized state: \(isAuthorized)")
     }
     
     // MARK: - Backend Sync Management
@@ -348,6 +316,23 @@ class BackendVitalsManager: ObservableObject {
             object: nil
         )
     }
+
+    // MARK: - Devices Config
+    private func refreshDevicesConfig() {
+        Task {
+            do {
+                let cfg = try await NetworkService.shared.fetchDevicesConfig()
+                await MainActor.run {
+                    self.healthKitFeatureEnabled = cfg.healthkit_enabled
+                }
+            } catch {
+                // Assume enabled on error to avoid blocking user unexpectedly
+                await MainActor.run {
+                    self.healthKitFeatureEnabled = true
+                }
+            }
+        }
+    }
     
     @objc private func handleAppDidEnterBackground() {
         print("🔄 [BackendVitalsManager] App entered background")
@@ -355,6 +340,7 @@ class BackendVitalsManager: ObservableObject {
     
     @objc private func handleAppWillEnterForeground() {
         print("🔄 [BackendVitalsManager] App entering foreground - checking for sync needs")
+        refreshDevicesConfig()
         
         // Re-check authorization status as it might have changed
         checkAuthorizationStatus()
@@ -439,7 +425,7 @@ class BackendVitalsManager: ObservableObject {
     }
     
     // MARK: - Async Dashboard Management
-    @MainActor
+    
     func refreshDashboardAsync() async throws {
         guard !isLoading else {
             print("⚠️ [BackendVitalsManager] Dashboard refresh already in progress")

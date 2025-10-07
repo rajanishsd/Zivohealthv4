@@ -264,9 +264,15 @@ struct MealDetailView: View {
             if presignTs == nil {
                 presignTs = String(Int(Date().timeIntervalSince1970))
             }
-            Task { @MainActor in
-                if resolvedURL == nil, let urlStr = meal.imageUrl, urlStr.hasPrefix("s3://"), let u = await resolveSignedURL(from: urlStr) {
-                    resolvedURL = u
+            Task {
+                await MainActor.run {
+                    if resolvedURL == nil, let urlStr = meal.imageUrl, urlStr.hasPrefix("s3://") {
+                        Task { [meal, presignTs] in
+                            if let u = await resolveSignedURL(from: urlStr) {
+                                await MainActor.run { resolvedURL = u }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -542,9 +548,15 @@ struct MealDetailView: View {
             if presignTs == nil {
                 presignTs = String(Int(Date().timeIntervalSince1970))
             }
-            Task { @MainActor in
-                if resolvedURL == nil, let urlStr = meal.imageUrl, let u = await resolveSignedURL(from: urlStr) {
-                    resolvedURL = u
+            Task {
+                await MainActor.run {
+                    if resolvedURL == nil, let urlStr = meal.imageUrl {
+                        Task { [meal, presignTs] in
+                            if let u = await resolveSignedURL(from: urlStr) {
+                                await MainActor.run { resolvedURL = u }
+                            }
+                        }
+                    }
                 }
             }
         }

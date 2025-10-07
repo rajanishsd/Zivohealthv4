@@ -168,11 +168,13 @@ class VideoCallViewModel: ObservableObject {
 
     func endCall() {
         print("📞 [VideoCall] Ending call")
-        Task { @MainActor in
+        Task {
             await room.disconnect()
-            connectionStatus = .disconnected
-            callTimer?.invalidate()
-            callTimer = nil
+            await MainActor.run {
+                connectionStatus = .disconnected
+                callTimer?.invalidate()
+                callTimer = nil
+            }
         }
     }
 
@@ -189,8 +191,10 @@ class VideoCallViewModel: ObservableObject {
     private func startCallTimer() {
         callStartTime = Date()
         callTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            Task { @MainActor in
-                self.updateCallDuration()
+            Task {
+                await MainActor.run {
+                    self.updateCallDuration()
+                }
             }
         }
     }

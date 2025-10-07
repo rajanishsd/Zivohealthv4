@@ -57,6 +57,12 @@ class AuthService:
             )
             raise ValueError("Invalid email or password")
 
+        # Check if user was scheduled for deletion and reset it
+        if user.is_tobe_deleted:
+            user.is_tobe_deleted = False
+            user.delete_date = None
+            user.is_active = True  # Ensure user is active
+
         # Update last login
         user.last_login_at = datetime.utcnow()
         self.db.commit()
@@ -128,6 +134,12 @@ class AuthService:
             # Create new user for OTP verification
             user = self._create_user_from_email(email)
         
+        # Check if user was scheduled for deletion and reset it
+        if user.is_tobe_deleted:
+            user.is_tobe_deleted = False
+            user.delete_date = None
+            user.is_active = True  # Ensure user is active
+        
         # Update email verification and last login
         user.email_verified_at = datetime.utcnow()
         user.last_login_at = datetime.utcnow()
@@ -187,6 +199,12 @@ class AuthService:
 
         # Find or create user
         user = self._find_or_create_google_user(email, google_sub, name, email_verified)
+        
+        # Check if user was scheduled for deletion and reset it
+        if user.is_tobe_deleted:
+            user.is_tobe_deleted = False
+            user.delete_date = None
+            user.is_active = True  # Ensure user is active
         
         # Update last login
         user.last_login_at = datetime.utcnow()

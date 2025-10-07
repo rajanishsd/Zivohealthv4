@@ -77,6 +77,11 @@ interface FeedbackItem {
 
 function App() {
   const [activeTab, setActiveTab] = useState('system');
+  // Users management state
+  const [users, setUsers] = useState<Array<any>>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<number>>(new Set());
+  const [selectAllUsers, setSelectAllUsers] = useState(false);
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [performanceOverview, setPerformanceOverview] = useState<PerformanceOverview | null>(null);
   const [auth, setAuth] = useState<AuthState>({
@@ -374,6 +379,71 @@ function App() {
     }
   };
 
+  const fetchUsers = async () => {
+    if (!auth.isAuthenticated) return;
+    setUsersLoading(true);
+    try {
+      const resp = await fetch(apiUrl('/api/v1/admin/users?limit=500'), { headers: getAuthHeaders() });
+      if (resp.status === 401 || resp.status === 403) {
+        logout();
+        return;
+      }
+      const data = await resp.json();
+      setUsers(Array.isArray(data) ? data : []);
+      // Reset selection when reloading
+      setSelectedUserIds(new Set());
+      setSelectAllUsers(false);
+    } catch (e) {
+      console.error('Failed to load users', e);
+      setUsers([]);
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  const toggleSelectAllUsers = () => {
+    if (selectAllUsers) {
+      setSelectedUserIds(new Set());
+      setSelectAllUsers(false);
+    } else {
+      const all = new Set<number>(users.map((u: any) => u.id));
+      setSelectedUserIds(all);
+      setSelectAllUsers(true);
+    }
+  };
+
+  const toggleSelectUser = (id: number) => {
+    setSelectedUserIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const deleteSelectedUsers = async () => {
+    const ids = Array.from(selectedUserIds.values());
+    if (ids.length === 0) return;
+    if (!window.confirm(`Mark ${ids.length} user(s) for deletion?`)) return;
+    try {
+      const payload = { user_ids: ids };
+      const resp = await fetch(apiUrl('/api/v1/admin/users/delete'), {
+        method: 'POST',
+        headers: getAuthHeaders(payload),
+        body: JSON.stringify(payload)
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        alert(`Failed to delete users: ${resp.status} ${text}`);
+        return;
+      }
+      await fetchUsers();
+      alert('Users marked for deletion');
+    } catch (e) {
+      console.error('Delete users failed', e);
+      alert('Delete users failed');
+    }
+  };
+
   const fetchPerformanceOverview = async () => {
     setIsRefreshing(prev => ({ ...prev, app: true }));
     try {
@@ -407,12 +477,12 @@ function App() {
   };
 
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (auth.isAuthenticated) {
       fetchSystemHealth();
       fetchPerformanceOverview();
       fetchFeedback();
+      fetchUsers();
       
       // Set up polling for real-time updates
       const interval = setInterval(() => {
@@ -770,6 +840,63 @@ function App() {
     );
   };
 
+  const renderUsers = () => {
+    return (
+      <div className="monitoring-section users-table">
+        <div className="section-header">
+          <div className="section-title">Users</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button 
+              className={`refresh-button ${usersLoading ? 'refreshing' : ''}`} 
+              onClick={fetchUsers} 
+              disabled={usersLoading}
+              title="Refresh Users"
+            >
+              {usersLoading ? '⏳' : '🔄'}
+            </button>
+            <button className="view-workflow-btn" style={{ background: '#dc3545' }} onClick={deleteSelectedUsers} disabled={selectedUserIds.size === 0}>
+              Delete Selected
+            </button>
+          </div>
+        </div>
+
+        <div className="workflow-table">
+          <div className="table-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input type="checkbox" checked={selectAllUsers} onChange={toggleSelectAllUsers} />
+              <span>Select All</span>
+            </div>
+            <div>ID</div>
+            <div>Email</div>
+            <div>Name</div>
+            <div>Status</div>
+            <div>Delete Date</div>
+            <div>Created</div>
+          </div>
+          {users.map((u: any) => (
+            <div key={u.id} className="table-row">
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <input type="checkbox" checked={selectedUserIds.has(u.id)} onChange={() => toggleSelectUser(u.id)} />
+              </div>
+              <div>{u.id}</div>
+              <div>{u.email}</div>
+              <div>{u.full_name || '-'}</div>
+              <div>
+                <span className={`status-badge ${u.is_active ? 'success' : 'pending'}`}>{u.is_active ? 'active' : 'inactive'}</span>
+                {u.is_tobe_deleted && <span className="status-badge error" style={{ marginLeft: 6 }}>to be deleted</span>}
+              </div>
+              <div>{u.delete_date ? new Date(u.delete_date).toLocaleString() : '-'}</div>
+              <div>{u.created_at ? new Date(u.created_at).toLocaleString() : '-'}</div>
+            </div>
+          ))}
+          {users.length === 0 && (
+            <div className="table-row"><div>No users found.</div></div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
 
 
 
@@ -910,6 +1037,13 @@ function App() {
               <span className="nav-icon">🖼️</span>
               <span className="nav-label">Feedback</span>
             </button>
+            <button 
+              className={`nav-item ${activeTab === 'users' ? 'active' : ''}`}
+              onClick={() => setActiveTab('users')}
+            >
+              <span className="nav-icon">👥</span>
+              <span className="nav-label">Users</span>
+            </button>
           </div>
         </nav>
 
@@ -917,6 +1051,7 @@ function App() {
           {activeTab === 'system' && renderSystemMonitoring()}
           {activeTab === 'app' && renderAppMonitoring()}
           {activeTab === 'feedback' && renderFeedback()}
+          {activeTab === 'users' && renderUsers()}
         </main>
       </div>
     </div>

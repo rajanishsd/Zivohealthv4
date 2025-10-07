@@ -2,7 +2,8 @@ import Foundation
 import Combine
 import SwiftUI
 
-class NutritionAPIService: ObservableObject {
+
+final class NutritionAPIService: ObservableObject, @unchecked Sendable {
     static let shared = NutritionAPIService()
     
     @Published var isLoading = false

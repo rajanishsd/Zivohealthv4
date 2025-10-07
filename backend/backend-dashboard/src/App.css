@@ -1364,6 +1364,13 @@ body {
   max-width: none;
 }
 
+/* Users table: enforce fixed column layout matching header and rows */
+.users-table .table-header,
+.users-table .table-row {
+  /* Columns: [select] [id] [email] [name] [status] [delete date] [created] */
+  grid-template-columns: 100px 80px 1.6fr 1.2fr 1fr 1.2fr 1.2fr;
+}
+
 .workflow-table .table-header {
   background: #f8f9fa;
   display: grid;

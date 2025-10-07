@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import SwiftUI
 
+
 class NutritionGoalsManager: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?

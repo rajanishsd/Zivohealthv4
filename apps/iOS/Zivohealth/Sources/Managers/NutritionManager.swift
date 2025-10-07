@@ -18,6 +18,7 @@ struct DailyNutritionSummary {
     let meals: Int
 }
 
+
 class NutritionManager: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?

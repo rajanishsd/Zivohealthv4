@@ -17,6 +17,9 @@ struct DualLoginView: View {
     @State private var otpSent: Bool = false
     @FocusState private var focusedField: Field?
     @State private var showOnboarding: Bool = false
+    @State private var showReactivationAlert: Bool = false
+    @State private var reactivationMessage: String = ""
+    @State private var deferredNavigation: (() -> Void)? = nil
 
     var onSuccess: () -> Void
 
@@ -108,6 +111,23 @@ struct DualLoginView: View {
                 prefilledFullName: GoogleSignInService.shared.currentUser?.profile?.name
             )
             .environmentObject(NetworkService.shared)
+        }
+        .alert("Account Restored", isPresented: $showReactivationAlert) {
+            Button("OK") {
+                // Perform any deferred navigation after acknowledging the alert
+                deferredNavigation?()
+                deferredNavigation = nil
+            }
+        } message: {
+            Text(reactivationMessage.isEmpty ? "Your account has been reactivated. Welcome back!" : reactivationMessage)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .deletionCancelled)) { notification in
+            if let message = notification.userInfo?["message"] as? String {
+                reactivationMessage = message
+            } else {
+                reactivationMessage = "Your account has been reactivated. Welcome back!"
+            }
+            showReactivationAlert = true
         }
     }
     
@@ -422,10 +442,16 @@ struct DualLoginView: View {
                 _ = try await NetworkService.shared.loginWithPassword(email: email, password: password)
                 await MainActor.run {
                     isLoading = false
+                    // Build the next navigation action
                     if !NetworkService.shared.isOnboardingCompleted() {
-                        showOnboarding = true
+                        deferredNavigation = { showOnboarding = true }
                     } else {
-                        onSuccess()
+                        deferredNavigation = { onSuccess() }
+                    }
+                    // If no reactivation alert is showing, proceed immediately; else wait for alert OK
+                    if !showReactivationAlert {
+                        deferredNavigation?()
+                        deferredNavigation = nil
                     }
                 }
             } catch {

@@ -6,7 +6,7 @@ struct ReminderDeviceRegistration: Codable {
     let fcm_token: String
 }
 
-final class ReminderAPIService {
+final class ReminderAPIService: @unchecked Sendable {
     static let shared = ReminderAPIService()
     private init() {}
 

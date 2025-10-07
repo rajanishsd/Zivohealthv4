@@ -219,6 +219,9 @@ class Settings(BaseSettings):
     LIVEKIT_API_KEY: Optional[str] = None
     LIVEKIT_API_SECRET: Optional[str] = None
 
+    # Devices / Integrations Feature Flags
+    HEALTHKIT_ENABLED: bool = True
+
     # YouTube Configuration for user profile authentication
     YOUTUBE_USER_PROFILE_PATH: Optional[str] = None
     YOUTUBE_BROWSER_TYPE: str = "chrome"  # chrome or firefox
