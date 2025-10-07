@@ -2823,7 +2823,7 @@ extension NetworkService {
     // MARK: - Timezone Methods
     public func fetchTimezones() async throws -> [Timezone] {
         print("🌍 [NetworkService] Fetching timezones...")
-        let data = try await get("/timezones", requiresAuth: false)
+        let data = try await get("/timezones/", requiresAuth: false)
         let response: [Timezone] = try decoder.decode([Timezone].self, from: data)
         print("✅ [NetworkService] Fetched \(response.count) timezones")
         return response
@@ -2832,7 +2832,7 @@ extension NetworkService {
     // MARK: - Country Codes Methods
     public func fetchCountryCodes() async throws -> [CountryCode] {
         print("🌐 [NetworkService] Fetching country codes...")
-        let data = try await get("/country-codes", requiresAuth: false)
+        let data = try await get("/country-codes/", requiresAuth: false)
         let response: [CountryCode] = try decoder.decode([CountryCode].self, from: data)
         print("✅ [NetworkService] Fetched \(response.count) country codes")
         return response

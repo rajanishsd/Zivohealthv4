@@ -138,6 +138,15 @@ struct OnboardingFlowView: View {
             }
             .navigationTitle(steps[currentStep])
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        // Clear tokens and dismiss back to login/register
+                        network.forceResetAuthentication()
+                        dismiss()
+                    }
+                }
+            }
             .onAppear {
                 print("🔎 [OnboardingFlow] onAppear prefilled: email=\(prefilledEmail ?? "<nil>") full=\(prefilledFullName ?? "<nil>") first=\(prefilledFirstName ?? "<nil>") last=\(prefilledLastName ?? "<nil>")")
                 let hasFirst = (prefilledFirstName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)

@@ -104,7 +104,9 @@ struct DualLoginView: View {
         .modifier(HideNavBarCompat())
         .background(Color.white)
         .sheet(isPresented: $showOnboarding, onDismiss: {
-            onSuccess()
+            if NetworkService.shared.isOnboardingCompleted() {
+                onSuccess()
+            }
         }) {
             OnboardingFlowView(
                 prefilledEmail: email,
