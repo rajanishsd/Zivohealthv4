@@ -9,7 +9,9 @@ class Doctor(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    full_name = Column(String, nullable=False)
+    first_name = Column(String, nullable=True)
+    middle_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
     date_of_birth = Column(Date, nullable=True)
     contact_number = Column(String, nullable=True)
     license_number = Column(String, unique=True, nullable=False)
@@ -22,9 +24,11 @@ class Doctor(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    timezone_id = Column(Integer, ForeignKey("timezone_dictionary.id"), nullable=True)
 
     # Relationships
     password_reset_tokens = relationship("PasswordResetToken", back_populates="doctor")
+    timezone = relationship("TimezoneDictionary", back_populates="doctors")
 
 class ConsultationRequest(Base):
     __tablename__ = "consultation_requests"

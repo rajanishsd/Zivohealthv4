@@ -11,17 +11,23 @@ struct OnboardingFlowView: View {
     // Pre-filled data from registration
     let prefilledEmail: String?
     let prefilledFullName: String?
+    let prefilledFirstName: String?
+    let prefilledMiddleName: String?
+    let prefilledLastName: String?
     
-    init(prefilledEmail: String? = nil, prefilledFullName: String? = nil) {
+    init(prefilledEmail: String? = nil, prefilledFullName: String? = nil, prefilledFirstName: String? = nil, prefilledMiddleName: String? = nil, prefilledLastName: String? = nil) {
         self.prefilledEmail = prefilledEmail
         self.prefilledFullName = prefilledFullName
+        self.prefilledFirstName = prefilledFirstName
+        self.prefilledMiddleName = prefilledMiddleName
+        self.prefilledLastName = prefilledLastName
     }
     
     private let steps = [
         "Basic Details",
         "Health Conditions", 
         "Lifestyle",
-        "Notifications",
+        "Settings",
         "Consents"
     ]
     
@@ -60,7 +66,7 @@ struct OnboardingFlowView: View {
                     case 2:
                         LifestyleView(vm: vm)
                     case 3:
-                        NotificationsView(vm: vm)
+                        OnboardingSettingsView(vm: vm)
                     case 4:
                         ConsentsView(vm: vm)
                     default:
@@ -93,6 +99,11 @@ struct OnboardingFlowView: View {
                             if currentStep == steps.count - 1 {
                                 submit()
                             } else {
+                                // Prevent advancing from Basic Details unless valid
+                                if currentStep == 0 && !vm.isValidBasics() {
+                                    errorMessage = "Please complete all required fields with valid email and phone number."
+                                    return
+                                }
                                 withAnimation(.easeInOut(duration: 0.3)) {
                                     currentStep += 1
                                 }
@@ -128,11 +139,16 @@ struct OnboardingFlowView: View {
             .navigationTitle(steps[currentStep])
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                // Pre-fill data from registration if available
-                if let email = prefilledEmail, let fullName = prefilledFullName {
-                    vm.prefillFromRegistration(email: email, fullName: fullName)
+                print("🔎 [OnboardingFlow] onAppear prefilled: email=\(prefilledEmail ?? "<nil>") full=\(prefilledFullName ?? "<nil>") first=\(prefilledFirstName ?? "<nil>") last=\(prefilledLastName ?? "<nil>")")
+                let hasFirst = (prefilledFirstName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                let hasLast = (prefilledLastName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                let hasFull = (prefilledFullName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                if let email = prefilledEmail, (hasFirst || hasLast || hasFull) {
+                    print("🔎 [OnboardingFlow] Using prefillFromRegistration (names/full provided)")
+                    vm.prefillFromRegistration(email: email, fullName: prefilledFullName ?? "", firstName: prefilledFirstName, middleName: prefilledMiddleName, lastName: prefilledLastName)
                 } else {
                     // Fallback to Google data if available
+                    print("🔎 [OnboardingFlow] Falling back to prefillFromGoogle (no usable names/full)")
                     vm.prefillFromGoogle()
                 }
             }
@@ -143,7 +159,7 @@ struct OnboardingFlowView: View {
         switch currentStep {
         case 0: // Basic Details
             return vm.isValidBasics()
-        case 1, 2, 3: // Health, Lifestyle, Notifications
+        case 1, 2, 3: // Health, Lifestyle, Onboarding Settings
             return true // These steps are optional
         case 4: // Consents
             return vm.consentDataStorage && vm.consentRecommendations && vm.consentTermsPrivacy

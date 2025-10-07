@@ -167,11 +167,13 @@ def get_doctor_consultation_requests(
     - status_filter: Filter by request status (pending, accepted, rejected, etc.)
     """
     
-    print(f"🏥 [Doctor Dashboard] Fetching requests for doctor: {current_doctor.full_name} (ID: {current_doctor.id})")
+    name_parts = [p for p in [getattr(current_doctor, 'first_name', None), getattr(current_doctor, 'middle_name', None), getattr(current_doctor, 'last_name', None)] if p]
+    composed_name = " ".join(name_parts) if name_parts else None
+    print(f"🏥 [Doctor Dashboard] Fetching requests for doctor: {composed_name or ''} (ID: {current_doctor.id})")
     requests = crud.consultation_request.get_doctor_requests(
         db, current_doctor.id, status_filter
     )
-    print(f"📋 [Doctor Dashboard] Found {len(requests)} requests for {current_doctor.full_name}")
+    print(f"📋 [Doctor Dashboard] Found {len(requests)} requests for {composed_name or ''}")
     
     return requests
 
@@ -358,7 +360,7 @@ def save_prescriptions_for_consultation(
                     frequency=prescription_data.get("frequency", ""),
                     instructions=prescription_data.get("instructions", ""),
                     duration=prescription_data.get("duration", ""),
-                    prescribed_by=prescription_data.get("prescribed_by", current_doctor.full_name or ""),
+                    prescribed_by=prescription_data.get("prescribed_by", (" ".join([p for p in [getattr(current_doctor, 'first_name', None), getattr(current_doctor, 'middle_name', None), getattr(current_doctor, 'last_name', None)] if p]) or "")),
                     consultation_request_id=request_id,
                     user_id=consultation_request.user_id
                 )
@@ -402,7 +404,7 @@ def save_prescriptions_for_consultation(
                 frequency=prescription_data.get("frequency", ""),
                 instructions=prescription_data.get("instructions", ""),
                 duration=prescription_data.get("duration", ""),
-                prescribed_by=prescription_data.get("prescribed_by", current_doctor.full_name or ""),
+                prescribed_by=prescription_data.get("prescribed_by", (" ".join([p for p in [getattr(current_doctor, 'first_name', None), getattr(current_doctor, 'middle_name', None), getattr(current_doctor, 'last_name', None)] if p]) or "")),
                 consultation_request_id=request_id,
                 user_id=consultation_request.user_id
             )
@@ -453,7 +455,9 @@ def get_consultation_clinical_report(
             detail="Clinical report not found"
         )
     
-    print(f"📋 [Doctor Dashboard] Doctor {current_doctor.full_name} viewing clinical report {clinical_report.id}")
+    name_parts = [p for p in [getattr(current_doctor, 'first_name', None), getattr(current_doctor, 'middle_name', None), getattr(current_doctor, 'last_name', None)] if p]
+    composed_name = " ".join(name_parts) if name_parts else None
+    print(f"📋 [Doctor Dashboard] Doctor {composed_name or ''} viewing clinical report {clinical_report.id}")
     return clinical_report
 
 @router.get("/consultation-requests/{request_id}/with-clinical-report", response_model=ConsultationRequestWithClinicalReport)
@@ -493,5 +497,7 @@ def get_consultation_with_clinical_report(
     response_data["doctor"] = doctor
     response_data["clinical_report"] = clinical_report
     
-    print(f"📋 [Doctor Dashboard] Doctor {current_doctor.full_name} viewing consultation {request_id} with clinical report")
+    name_parts = [p for p in [getattr(current_doctor, 'first_name', None), getattr(current_doctor, 'middle_name', None), getattr(current_doctor, 'last_name', None)] if p]
+    composed_name = " ".join(name_parts) if name_parts else None
+    print(f"📋 [Doctor Dashboard] Doctor {composed_name or ''} viewing consultation {request_id} with clinical report")
     return response_data 

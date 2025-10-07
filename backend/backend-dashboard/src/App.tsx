@@ -880,7 +880,7 @@ function App() {
               </div>
               <div>{u.id}</div>
               <div>{u.email}</div>
-              <div>{u.full_name || '-'}</div>
+              <div>{u.full_name || [u.first_name, u.middle_name, u.last_name].filter(Boolean).join(' ') || '-'}</div>
               <div>
                 <span className={`status-badge ${u.is_active ? 'success' : 'pending'}`}>{u.is_active ? 'active' : 'inactive'}</span>
                 {u.is_tobe_deleted && <span className="status-badge error" style={{ marginLeft: 6 }}>to be deleted</span>}

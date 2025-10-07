@@ -320,10 +320,13 @@ class AuthService:
 
     def _create_user_info(self, user: User) -> UserInfo:
         """Create user info response"""
+        # Compose full_name from split fields for backward compatibility
+        parts = [p for p in [getattr(user, 'first_name', None), getattr(user, 'middle_name', None), getattr(user, 'last_name', None)] if p]
+        composed_full_name = " ".join(parts) if parts else None
         return UserInfo(
             id=user.id,
             email=user.email,
-            full_name=user.full_name,
+            full_name=composed_full_name,
             email_verified=user.email_verified_at is not None,
             last_login_at=user.last_login_at
         )
@@ -356,9 +359,24 @@ class AuthService:
             self._ensure_google_identity(user, google_sub, email, email_verified)
             return user
         
-        # Create new user
+        # Try to split Google's name into parts where possible
+        first_name = None
+        middle_name = None
+        last_name = None
+        if name:
+            parts = name.strip().split()
+            if parts:
+                first_name = parts[0]
+                if len(parts) > 1:
+                    last_name = parts[-1]
+                if len(parts) > 2:
+                    middle_name = " ".join(parts[1:-1])
+
         user_data = UserCreateGoogle(
             email=email,
+            first_name=first_name,
+            middle_name=middle_name,
+            last_name=last_name,
             full_name=name,
             password=None  # Google users don't have passwords
         )

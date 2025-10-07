@@ -27,6 +27,7 @@
 		1F8C369E0E5A0490E8A25874 /* DocumentPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57D73EAE8B9CC0028F38A931 /* DocumentPicker.swift */; };
 		21DA7D1D85C914B0302F5B67 /* FeedbackReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92EF0F36B0559F5E087EE029 /* FeedbackReporter.swift */; };
 		22ED174EAF03D714B4A9458F /* ZivoHealthApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 294935B6E923D37F4F09B90D /* ZivoHealthApp.swift */; };
+		2AB0F502C738CB8E18A2276C /* CountryCode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F09E9EBA8BE2C9AA49A4F34 /* CountryCode.swift */; };
 		2DABB889043362A8BF44C216 /* VitalsSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00669A95E8E6AAB6F40BD1F /* VitalsSyncManager.swift */; };
 		2E82CD86EBADB6AD0CA6CFDF /* LabReportsAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADF32113FC5D3A58C965EE19 /* LabReportsAPIService.swift */; };
 		2EFD6709AE043E2D5DB04600 /* NutritionGoalDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DAEAE7C7022DA797B93CEB1 /* NutritionGoalDetailView.swift */; };
@@ -80,6 +81,7 @@
 		9161F5739BC09FD3A1C932E5 /* ConsentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE72F8389371C1F762E0B433 /* ConsentsView.swift */; };
 		931DA65AC88ACDD76A70B3B8 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 5F7BF9D9D0BC6702985460E5 /* GoogleSignIn */; };
 		94970F7D8D3334F79D9A546F /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 108AFDAA276EE20647ECA343 /* FirebaseCore */; };
+		94E4E6EF8E0685DE26D27673 /* Timezone.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF77354BACF5A907C8C5B643 /* Timezone.swift */; };
 		9EBFEBD122BD644093F66568 /* LabCategory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F69005885C367AAE44B0548E /* LabCategory.swift */; };
 		9FDE5C15C62814F90EA1937F /* Health360OverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A741D030D5D86130CE273DF /* Health360OverviewView.swift */; };
 		A31C506FFE7BD69F5BA9AD41 /* GoogleSignInService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AEA3FF72DF1CA1272B9C3B2 /* GoogleSignInService.swift */; };
@@ -140,6 +142,7 @@
 		3AEA3FF72DF1CA1272B9C3B2 /* GoogleSignInService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignInService.swift; sourceTree = "<group>"; };
 		3BA8111F228B9DA9D1CB848E /* CardiacMarkersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardiacMarkersView.swift; sourceTree = "<group>"; };
 		3D3FA8C38F16BCE2057FBE90 /* OnboardingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewModel.swift; sourceTree = "<group>"; };
+		3F09E9EBA8BE2C9AA49A4F34 /* CountryCode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountryCode.swift; sourceTree = "<group>"; };
 		3F3BED9E1FF5897534DAB5C4 /* AboutZivoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutZivoView.swift; sourceTree = "<group>"; };
 		3FE0145D6CF83CE76EBFDA8A /* EditProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditProfileView.swift; sourceTree = "<group>"; };
 		430DEE78B83DA8E378F15D54 /* ImagePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePickerView.swift; sourceTree = "<group>"; };
@@ -218,6 +221,7 @@
 		DC204CE3C3085B925ED8D319 /* NutritionGoalSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionGoalSetupView.swift; sourceTree = "<group>"; };
 		DD33A8D5E8AD0CB3474E947E /* NetworkService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkService.swift; sourceTree = "<group>"; };
 		DE72F8389371C1F762E0B433 /* ConsentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConsentsView.swift; sourceTree = "<group>"; };
+		DF77354BACF5A907C8C5B643 /* Timezone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Timezone.swift; sourceTree = "<group>"; };
 		E142484A568DBA428DC70B97 /* NotificationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsView.swift; sourceTree = "<group>"; };
 		E460ECB66718D2A8F1AB90CE /* ConsultationDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConsultationDetailView.swift; sourceTree = "<group>"; };
 		E565F071878A3762262A4A6A /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
@@ -420,6 +424,7 @@
 			children = (
 				A9BF258FDF3A0B1531FB862B /* Appointment.swift */,
 				553667075FDD2EB67A50B488 /* ChatMessage.swift */,
+				3F09E9EBA8BE2C9AA49A4F34 /* CountryCode.swift */,
 				FF65D8E0A97DD697D1F40AC6 /* HealthMetric.swift */,
 				F69005885C367AAE44B0548E /* LabCategory.swift */,
 				5365BE77EEB094978BC4D94C /* LabReport.swift */,
@@ -427,6 +432,7 @@
 				54B41DF0AF99B74BBC899E79 /* NutritionGoalsModels.swift */,
 				F55B28DE5C339FD1CC2B622C /* Patient.swift */,
 				B2A00001B9F3FBC7D4772889 /* SharedTypes.swift */,
+				DF77354BACF5A907C8C5B643 /* Timezone.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -602,6 +608,7 @@
 				3E55D217516CCED7A1D43795 /* ConsultationDetailView.swift in Sources */,
 				5D9A252AF0C3C64FE918AAEA /* ConsultationOptionsView.swift in Sources */,
 				03E08922FD982B4DB04A1CBA /* ContentView.swift in Sources */,
+				2AB0F502C738CB8E18A2276C /* CountryCode.swift in Sources */,
 				4EE108F8C91A4063CF00FD27 /* CreateAppointmentView.swift in Sources */,
 				F9296D9BDA2C9266EAFC98F9 /* DatabaseManager.swift in Sources */,
 				D7CC426B61D0669AC12F8279 /* DeletionCancellationView.swift in Sources */,
@@ -665,6 +672,7 @@
 				140A3F4C4DD4B8FC2314620A /* SyncProgressView.swift in Sources */,
 				CB913D80E945280D43D5705D /* TestTrendsView.swift in Sources */,
 				7614882B4EFB7DBE55394C32 /* ThyroidProfileView.swift in Sources */,
+				94E4E6EF8E0685DE26D27673 /* Timezone.swift in Sources */,
 				C5EE03796777DC59380B19FA /* UrineRoutineView.swift in Sources */,
 				3F5520868360E2783B11C6FA /* VideoCallView.swift in Sources */,
 				60C4FA222EA7A6CB624F8942 /* VideoConsultationView.swift in Sources */,

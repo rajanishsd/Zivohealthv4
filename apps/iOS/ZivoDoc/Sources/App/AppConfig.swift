@@ -9,9 +9,9 @@ enum AppConfig {
         
         static var current: Environment {
          
-            //return .local
+            return .local
 			// return .staging
-			return .production
+			//return .production
             #if DEBUG
             return .local
             #else

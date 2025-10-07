@@ -1506,14 +1506,18 @@ public class NetworkService: ObservableObject {
 
     struct CombinedProfileResponse: Decodable {
         struct Basic: Decodable {
-            let full_name: String?
-            let date_of_birth: String?
+            let first_name: String
+            let middle_name: String?
+            let last_name: String?
+            let full_name: String
+            let date_of_birth: String
             let gender: String
             let height_cm: Int?
             let weight_kg: Int?
             let body_type: String?
             let activity_level: String?
-            let timezone: String
+            let timezone: String?
+            let timezone_id: Int?
             let email: String
             let phone_number: String
         }
@@ -1661,9 +1665,17 @@ public extension NetworkService {
     func register(email: String, password: String, fullName: String) async throws -> String {
         print("📝 [NetworkService] Attempting registration for user: \(email)")
 
+        // Send split names as well; keep full_name for compatibility
+        let nameParts = fullName.split(separator: " ").map(String.init)
+        let first = nameParts.first ?? ""
+        let last = nameParts.count > 1 ? (nameParts.last ?? "") : ""
+        let middle = nameParts.count > 2 ? nameParts[1..<(nameParts.count-1)].joined(separator: " ") : ""
         let body: [String: Any] = [
             "email": email,
             "password": password,
+            "first_name": first.isEmpty ? nil : first,
+            "middle_name": middle.isEmpty ? nil : middle,
+            "last_name": last.isEmpty ? nil : last,
             "full_name": fullName,
             "is_active": true,
         ]
@@ -2684,9 +2696,16 @@ extension NetworkService {
     func registerWithOTP(email: String, code: String, fullName: String) async throws -> String {
         print("🔐 [NetworkService] Registering with OTP: \(email)")
         
+        let nameParts = fullName.split(separator: " ").map(String.init)
+        let first = nameParts.first ?? ""
+        let last = nameParts.count > 1 ? (nameParts.last ?? "") : ""
+        let middle = nameParts.count > 2 ? nameParts[1..<(nameParts.count-1)].joined(separator: " ") : ""
         let body: [String: Any] = [
             "email": email,
             "code": code,
+            "first_name": first.isEmpty ? nil : first,
+            "middle_name": middle.isEmpty ? nil : middle,
+            "last_name": last.isEmpty ? nil : last,
             "full_name": fullName
         ]
         
@@ -2799,5 +2818,23 @@ extension NetworkService {
             print("❌ [NetworkService] Google token verification failed: \(error)")
             throw error
         }
+    }
+    
+    // MARK: - Timezone Methods
+    public func fetchTimezones() async throws -> [Timezone] {
+        print("🌍 [NetworkService] Fetching timezones...")
+        let data = try await get("/timezones", requiresAuth: false)
+        let response: [Timezone] = try decoder.decode([Timezone].self, from: data)
+        print("✅ [NetworkService] Fetched \(response.count) timezones")
+        return response
+    }
+
+    // MARK: - Country Codes Methods
+    public func fetchCountryCodes() async throws -> [CountryCode] {
+        print("🌐 [NetworkService] Fetching country codes...")
+        let data = try await get("/country-codes", requiresAuth: false)
+        let response: [CountryCode] = try decoder.decode([CountryCode].self, from: data)
+        print("✅ [NetworkService] Fetched \(response.count) country codes")
+        return response
     }
 }

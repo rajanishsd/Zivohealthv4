@@ -1002,9 +1002,16 @@ public extension NetworkService {
     private func register(email: String, password: String, fullName: String) async throws -> String {
         print("📝 [NetworkService] Attempting registration for user: \(email)")
 
+        let parts = fullName.split(separator: " ").map(String.init)
+        let first = parts.first ?? ""
+        let last = parts.count > 1 ? (parts.last ?? "") : ""
+        let middle = parts.count > 2 ? parts[1..<(parts.count-1)].joined(separator: " ") : ""
         let body: [String: Any] = [
             "email": email,
             "password": password,
+            "first_name": first.isEmpty ? nil : first,
+            "middle_name": middle.isEmpty ? nil : middle,
+            "last_name": last.isEmpty ? nil : last,
             "full_name": fullName,
             "is_active": true,
         ]
@@ -1058,6 +1065,13 @@ extension NetworkService {
             "years_experience": input.yearsExperience,
             "is_available": input.isAvailable
         ]
+        let parts = input.fullName.split(separator: " ").map(String.init)
+        let first = parts.first ?? ""
+        let last = parts.count > 1 ? (parts.last ?? "") : ""
+        let middle = parts.count > 2 ? parts[1..<(parts.count-1)].joined(separator: " ") : ""
+        body["first_name"] = first.isEmpty ? nil : first
+        body["middle_name"] = middle.isEmpty ? nil : middle
+        body["last_name"] = last.isEmpty ? nil : last
         if let dob = isoDate { body["date_of_birth"] = dob }
         if let contact = input.contactNumber { body["contact_number"] = contact }
         if let bio = input.bio { body["bio"] = bio }

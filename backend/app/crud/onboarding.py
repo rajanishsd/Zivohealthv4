@@ -34,11 +34,21 @@ def submit_onboarding(db: Session, user: User, payload: OnboardingPayload, *, ip
     if not payload.basic.email or not payload.basic.phone_number:
         raise ValueError("Email and phone number are required together")
 
-    # Update user email/full_name if provided
+    # Update user email if provided
     if user.email != payload.basic.email:
         user.email = payload.basic.email
-    if payload.basic.full_name:
-        user.full_name = payload.basic.full_name
+    # Extract name fields for profile
+    fn = getattr(payload.basic, 'first_name', None)
+    mn = getattr(payload.basic, 'middle_name', None)
+    ln = getattr(payload.basic, 'last_name', None)
+    if (not fn and not ln) and getattr(payload.basic, 'full_name', None):
+        parts = payload.basic.full_name.strip().split()
+        if parts:
+            fn = parts[0]
+            if len(parts) > 1:
+                ln = parts[-1]
+            if len(parts) > 2:
+                mn = " ".join(parts[1:-1])
 
     # UserProfile upsert
     profile = db.query(UserProfile).filter(UserProfile.user_id == user.id).first()
@@ -46,7 +56,9 @@ def submit_onboarding(db: Session, user: User, payload: OnboardingPayload, *, ip
         profile = UserProfile(user_id=user.id)
         db.add(profile)
 
-    profile.full_name = payload.basic.full_name or user.full_name
+    profile.first_name = fn
+    profile.middle_name = mn
+    profile.last_name = ln
     profile.date_of_birth = payload.basic.date_of_birth
     profile.gender = payload.basic.gender
     profile.height_cm = payload.basic.height_cm
@@ -54,7 +66,9 @@ def submit_onboarding(db: Session, user: User, payload: OnboardingPayload, *, ip
     profile.body_type = payload.basic.body_type
     profile.activity_level = payload.basic.activity_level
     profile.phone_number = payload.basic.phone_number
+    profile.country_code_id = getattr(payload.basic, 'country_code_id', None)
     profile.timezone = payload.basic.timezone
+    profile.timezone_id = getattr(payload.basic, 'timezone_id', None)
     # Mark onboarding as completed when full payload is submitted
     profile.onboarding_status = 'completed'
 

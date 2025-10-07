@@ -108,7 +108,10 @@ struct DualLoginView: View {
         }) {
             OnboardingFlowView(
                 prefilledEmail: email,
-                prefilledFullName: GoogleSignInService.shared.currentUser?.profile?.name
+                prefilledFullName: GoogleSignInService.shared.currentUser?.profile?.name,
+                prefilledFirstName: GoogleSignInService.shared.currentUser?.profile?.givenName,
+                prefilledMiddleName: nil,
+                prefilledLastName: GoogleSignInService.shared.currentUser?.profile?.familyName
             )
             .environmentObject(NetworkService.shared)
         }
@@ -549,7 +552,10 @@ struct DualLoginView: View {
 // MARK: - Registration View (Updated)
 struct DualRegistrationView: View {
     @AppStorage("userMode") private var userMode: UserMode = .patient
-    @State private var fullName: String = ""
+    @State private var firstName: String = ""
+    @State private var middleName: String = ""
+    @State private var lastName: String = ""
+    @State private var fullName: String = "" // Keep for backward compatibility
     @State private var email: String = ""
     @State private var password: String = ""
     @State private var confirmPassword: String = ""
@@ -565,7 +571,7 @@ struct DualRegistrationView: View {
 
     var onSuccess: () -> Void
 
-    private enum Field { case fullName, email, password, confirmPassword, otp }
+    private enum Field { case firstName, middleName, lastName, email, password, confirmPassword, otp }
     
     private enum RegistrationStep {
         case methodSelection
@@ -633,11 +639,8 @@ struct DualRegistrationView: View {
         .sheet(isPresented: $showOnboarding, onDismiss: {
             onSuccess()
         }) {
-            OnboardingFlowView(
-                prefilledEmail: email,
-                prefilledFullName: fullName
-            )
-            .environmentObject(NetworkService.shared)
+            OnboardingFlowView()
+                .environmentObject(NetworkService.shared)
         }
     }
     
@@ -700,13 +703,33 @@ struct DualRegistrationView: View {
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: .leading)
             
-            TextField("Full name", text: $fullName)
-                .textContentType(.name)
+            TextField("First name", text: $firstName)
+                .textContentType(.givenName)
                 .padding(14)
                 .background(Color.white)
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.systemGray4), lineWidth: 1))
                 .cornerRadius(12)
-                .focused($focusedField, equals: .fullName)
+                .focused($focusedField, equals: .firstName)
+                .submitLabel(.next)
+                .onSubmit { focusedField = .middleName }
+            
+            TextField("Middle name (optional)", text: $middleName)
+                .textContentType(.middleName)
+                .padding(14)
+                .background(Color.white)
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.systemGray4), lineWidth: 1))
+                .cornerRadius(12)
+                .focused($focusedField, equals: .middleName)
+                .submitLabel(.next)
+                .onSubmit { focusedField = .lastName }
+            
+            TextField("Last name", text: $lastName)
+                .textContentType(.familyName)
+                .padding(14)
+                .background(Color.white)
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.systemGray4), lineWidth: 1))
+                .cornerRadius(12)
+                .focused($focusedField, equals: .lastName)
                 .submitLabel(.next)
                 .onSubmit { focusedField = .email }
             
@@ -919,7 +942,7 @@ struct DualRegistrationView: View {
     }
     
     private var isValidBasicInfo: Bool {
-        !fullName.isEmpty && !email.isEmpty && isValidEmail
+        !firstName.isEmpty && !lastName.isEmpty && !email.isEmpty && isValidEmail
     }
     
     private var isValidPassword: Bool {
@@ -934,13 +957,17 @@ struct DualRegistrationView: View {
         error = nil
         isLoading = true
         
+        // Compose fullName from split fields
+        let nameParts = [firstName, middleName, lastName].filter { !$0.isEmpty }
+        let composedFullName = nameParts.joined(separator: " ")
+        
         Task {
             do {
                 userMode = .patient
                 NetworkService.shared.handleRoleChange()
                 // Reset onboarding status for new user
                 NetworkService.shared.resetOnboardingStatus()
-                _ = try await NetworkService.shared.register(email: email, password: password, fullName: fullName)
+                _ = try await NetworkService.shared.register(email: email, password: password, fullName: composedFullName)
                 await MainActor.run {
                     let onboardingCompleted = NetworkService.shared.isOnboardingCompleted()
                     print("🔍 [DualAuthViews] Registration successful - onboardingCompleted: \(onboardingCompleted)")
@@ -985,13 +1012,17 @@ struct DualRegistrationView: View {
         error = nil
         isLoading = true
         
+        // Compose fullName from split fields
+        let nameParts = [firstName, middleName, lastName].filter { !$0.isEmpty }
+        let composedFullName = nameParts.joined(separator: " ")
+        
         Task {
             do {
                 userMode = .patient
                 NetworkService.shared.handleRoleChange()
                 // Reset onboarding status for new user
                 NetworkService.shared.resetOnboardingStatus()
-                _ = try await NetworkService.shared.registerWithOTP(email: email, code: otpCode, fullName: fullName)
+                _ = try await NetworkService.shared.registerWithOTP(email: email, code: otpCode, fullName: composedFullName)
                 await MainActor.run {
                     let onboardingCompleted = NetworkService.shared.isOnboardingCompleted()
                     print("🔍 [DualAuthViews] OTP Registration successful - onboardingCompleted: \(onboardingCompleted)")

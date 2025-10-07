@@ -46,6 +46,7 @@ class AuthTokensResponse(BaseModel):
 class UserInfo(BaseModel):
     id: int
     email: str
+    # Kept for compatibility; composed from split fields server-side
     full_name: Optional[str] = None
     email_verified: bool
     last_login_at: Optional[datetime] = None

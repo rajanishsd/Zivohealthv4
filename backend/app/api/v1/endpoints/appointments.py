@@ -83,11 +83,16 @@ def read_appointments(
     tz_name = get_user_timezone(user_id)
     tz = ZoneInfo(tz_name) if tz_name and ZoneInfo is not None else None
     for appointment in appointments:
+        # Compose names from split fields when available
+        patient_parts = [p for p in [getattr(appointment.patient, 'first_name', None), getattr(appointment.patient, 'middle_name', None), getattr(appointment.patient, 'last_name', None)] if p]
+        patient_name = (" ".join(patient_parts) if patient_parts else getattr(appointment.patient, 'full_name', None))
+        doctor_parts = [p for p in [getattr(appointment.doctor, 'first_name', None), getattr(appointment.doctor, 'middle_name', None), getattr(appointment.doctor, 'last_name', None)] if p]
+        doctor_name = (" ".join(doctor_parts) if doctor_parts else getattr(appointment.doctor, 'full_name', None))
         appointment_dict = {
             **appointment.__dict__,
-            "patient_name": appointment.patient.full_name,
+            "patient_name": patient_name,
             "patient_email": appointment.patient.email,
-            "doctor_name": appointment.doctor.full_name,
+            "doctor_name": doctor_name,
             "doctor_email": appointment.doctor.email,
         }
         # Ensure appointment_date is timezone-aware in user's timezone for the response
@@ -126,11 +131,15 @@ def read_appointment(
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
     
+    patient_parts = [p for p in [getattr(appointment.patient, 'first_name', None), getattr(appointment.patient, 'middle_name', None), getattr(appointment.patient, 'last_name', None)] if p]
+    patient_name = (" ".join(patient_parts) if patient_parts else getattr(appointment.patient, 'full_name', None))
+    doctor_parts = [p for p in [getattr(appointment.doctor, 'first_name', None), getattr(appointment.doctor, 'middle_name', None), getattr(appointment.doctor, 'last_name', None)] if p]
+    doctor_name = (" ".join(doctor_parts) if doctor_parts else getattr(appointment.doctor, 'full_name', None))
     appointment_dict = {
         **appointment.__dict__,
-        "patient_name": appointment.patient.full_name,
+        "patient_name": patient_name,
         "patient_email": appointment.patient.email,
-        "doctor_name": appointment.doctor.full_name,
+        "doctor_name": doctor_name,
         "doctor_email": appointment.doctor.email,
     }
     # Adjust appointment_date to user's timezone for the response

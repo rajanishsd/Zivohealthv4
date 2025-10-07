@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from app.db.base import Base
 
@@ -9,7 +9,6 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=True)  # Made nullable for Google-only users
-    full_name = Column(String)
     is_active = Column(Boolean, default=True)
     is_superuser = Column(Boolean, default=False)
     is_tobe_deleted = Column(Boolean, default=False)
@@ -25,4 +24,5 @@ class User(Base):
     patient_appointments = relationship("Appointment", foreign_keys="Appointment.patient_id", back_populates="patient")
     password_reset_tokens = relationship("PasswordResetToken", back_populates="user")
     identities = relationship("UserIdentity", back_populates="user")
-    login_events = relationship("LoginEvent", back_populates="user") 
+    login_events = relationship("LoginEvent", back_populates="user")
+    # Removed timezone relationship; timezone is managed via UserProfile

@@ -23,10 +23,14 @@ def list_users(
     users = db.query(User).offset(skip).limit(limit).all()
     result: List[Dict[str, Any]] = []
     for u in users:
+        parts = [p for p in [u.first_name, u.middle_name, u.last_name] if p]
         result.append({
             "id": u.id,
             "email": u.email,
-            "full_name": u.full_name,
+            "first_name": u.first_name,
+            "middle_name": u.middle_name,
+            "last_name": u.last_name,
+            "full_name": " ".join(parts) if parts else None,
             "is_active": u.is_active,
             "is_tobe_deleted": u.is_tobe_deleted,
             "delete_date": u.delete_date.isoformat() if u.delete_date else None,

@@ -36,7 +36,9 @@ def create_admin_user():
                 print("❌ Email is required")
                 return
                 
-            full_name = input("Full Name (optional): ").strip()
+            first_name = input("First Name (optional): ").strip()
+            middle_name = input("Middle Name (optional): ").strip()
+            last_name = input("Last Name (optional): ").strip()
             password = getpass.getpass("Password: ")
             if not password:
                 print("❌ Password is required")
@@ -57,7 +59,9 @@ def create_admin_user():
             hashed_password = get_password_hash(password)
             admin = Admin(
                 email=email,
-                full_name=full_name or None,
+                first_name=first_name or None,
+                middle_name=middle_name or None,
+                last_name=last_name or None,
                 hashed_password=hashed_password,
                 is_superadmin=True,  # Make it a super admin
                 is_active=True,
@@ -72,7 +76,9 @@ def create_admin_user():
             print(f"✅ Admin user created successfully!")
             print(f"   ID: {admin.id}")
             print(f"   Email: {admin.email}")
-            print(f"   Full Name: {admin.full_name}")
+            name_parts = [p for p in [admin.first_name, admin.middle_name, admin.last_name] if p]
+            composed_full_name = " ".join(name_parts)
+            print(f"   Full Name: {composed_full_name}")
             print(f"   Super Admin: {admin.is_superadmin}")
             print(f"   Active: {admin.is_active}")
             
@@ -108,7 +114,9 @@ def list_admin_users():
             for admin in admins:
                 print(f"  ID: {admin.id}")
                 print(f"  Email: {admin.email}")
-                print(f"  Full Name: {admin.full_name}")
+                name_parts = [p for p in [admin.first_name, admin.middle_name, admin.last_name] if p]
+                composed_full_name = " ".join(name_parts)
+                print(f"  Full Name: {composed_full_name}")
                 print(f"  Super Admin: {admin.is_superadmin}")
                 print(f"  Active: {admin.is_active}")
                 print(f"  Created: {admin.created_at}")

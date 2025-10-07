@@ -30,7 +30,13 @@ def register(
             detail="A user with this email already exists.",
         )
     user = crud.user.create(db, obj_in=user_in)
-    return user
+    return {
+        "id": user.id,
+        "email": user.email,
+        "is_active": user.is_active,
+        "created_at": user.created_at,
+        "updated_at": user.updated_at,
+    }
 
 @router.post("/login", response_model=dict)
 async def login(
@@ -130,12 +136,31 @@ async def refresh_token(
 
 @router.get("/me", response_model=UserSchema)
 def read_users_me(
+    *,
+    db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ) -> Any:
     """
     Get current user.
     """
-    return current_user 
+    # Get user profile to construct full_name
+    from app.models.user_profile import UserProfile
+    profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+    
+    # Compose full_name from profile if available
+    full_name = None
+    if profile:
+        name_parts = [p for p in [profile.first_name, profile.middle_name, profile.last_name] if p]
+        full_name = " ".join(name_parts) if name_parts else None
+    
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "full_name": full_name,
+        "is_active": current_user.is_active,
+        "created_at": current_user.created_at,
+        "updated_at": current_user.updated_at,
+    }
 
 # Admin login issuing admin JWT (is_admin=true)
 @router.post("/admin/login", response_model=dict)
@@ -156,13 +181,16 @@ async def admin_login(
         raise HTTPException(status_code=400, detail="Inactive admin")
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     token = security.create_access_token(admin.id, expires_delta=access_token_expires, is_admin=True)
+    # Compose admin full name for backward compatibility
+    admin_parts = [p for p in [getattr(admin, 'first_name', None), getattr(admin, 'middle_name', None), getattr(admin, 'last_name', None)] if p]
+    admin_full_name = " ".join(admin_parts) if admin_parts else None
     return {
-        "access_token": token,
-        "token_type": "bearer",
-        "admin": {
-            "id": admin.id,
-            "email": admin.email,
-            "full_name": admin.full_name,
-            "is_superadmin": admin.is_superadmin
+            "access_token": token,
+            "token_type": "bearer",
+            "admin": {
+                "id": admin.id,
+                "email": admin.email,
+            "full_name": admin_full_name,
+                "is_superadmin": admin.is_superadmin
+            }
         }
-    }

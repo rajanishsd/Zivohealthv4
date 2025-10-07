@@ -10,6 +10,11 @@ ExerciseTypeEnum = Literal["gym", "running", "yoga", "other"]
 
 
 class BasicDetails(BaseModel):
+    # New split fields; middle/last can be empty
+    first_name: Optional[str]
+    middle_name: Optional[str]
+    last_name: Optional[str]
+    # Deprecated single field for backward-compat requests
     full_name: Optional[str]
     date_of_birth: date
     gender: GenderEnum
@@ -17,9 +22,11 @@ class BasicDetails(BaseModel):
     weight_kg: Optional[int] = Field(ge=10, le=400)
     body_type: Optional[BodyTypeEnum]
     activity_level: Optional[ActivityLevelEnum]
-    timezone: str
+    timezone: str  # Keep for backward compatibility
+    timezone_id: Optional[int] = None  # New timezone reference
     email: EmailStr
     phone_number: str = Field(..., min_length=6, max_length=32)
+    country_code_id: Optional[int] = None
 
 
 class HealthConditions(BaseModel):

@@ -1,10 +1,13 @@
 from typing import Optional
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
+from app.schemas.timezone import Timezone
 
 class UserBase(BaseModel):
     email: EmailStr
+    # Deprecated: kept for backward-compat request bodies; not used for storage
     full_name: Optional[str] = None
+    # timezone now lives on user profile
 
 class UserCreate(UserBase):
     password: str
@@ -20,6 +23,7 @@ class UserInDBBase(UserBase):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    # timezone relation removed from User
 
     class Config:
         from_attributes = True

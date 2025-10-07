@@ -194,7 +194,17 @@ struct ProfileView: View {
         do {
             let profile = try await NetworkService.shared.fetchCombinedProfile()
             await MainActor.run {
-                headerName = profile.basic.full_name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let first = profile.basic.first_name.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !first.isEmpty {
+                    headerName = first
+                } else {
+                    let full = profile.basic.full_name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !full.isEmpty {
+                        headerName = full.split(separator: " ").map(String.init).first ?? ""
+                    } else {
+                        headerName = ""
+                    }
+                }
                 headerPhone = profile.basic.phone_number
                 headerEmail = profile.basic.email
             }
@@ -202,7 +212,10 @@ struct ProfileView: View {
             // Fallback to any cached values we have
             await MainActor.run {
                 if headerEmail.isEmpty { headerEmail = NetworkService.shared.currentUserEmail ?? "" }
-                if headerName.isEmpty { headerName = NetworkService.shared.currentUserFullName ?? "" }
+                if headerName.isEmpty {
+                    let full = NetworkService.shared.currentUserFullName ?? ""
+                    headerName = full.split(separator: " ").map(String.init).first ?? ""
+                }
             }
         }
     }

@@ -37,8 +37,14 @@ def get_my_profile(
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
+    # Compose full_name for backward compatibility and expose split fields
+    name_parts = [p for p in [profile.first_name, profile.middle_name, profile.last_name] if p]
+    composed_full_name = " ".join(name_parts) if name_parts else None
     basic: Dict[str, Any] = {
-        "full_name": profile.full_name,
+        "first_name": profile.first_name,
+        "middle_name": profile.middle_name,
+        "last_name": profile.last_name,
+        "full_name": composed_full_name,
         "date_of_birth": profile.date_of_birth.isoformat() if profile.date_of_birth else None,
         "gender": profile.gender,
         "height_cm": profile.height_cm,
@@ -46,8 +52,10 @@ def get_my_profile(
         "body_type": profile.body_type,
         "activity_level": profile.activity_level,
         "timezone": profile.timezone,
+        "timezone_id": profile.timezone_id,
         "email": current_user.email,
         "phone_number": profile.phone_number,
+        "country_code_id": profile.country_code_id,
     }
 
     # Conditions

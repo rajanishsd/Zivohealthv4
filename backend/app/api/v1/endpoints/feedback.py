@@ -104,13 +104,21 @@ def create_feedback(
             if submitter_role == "doctor":
                 doc = db.query(models.Doctor).filter(models.Doctor.id == obj.user_id).first()
                 if doc:
-                    submitter_name = doc.full_name or doc.email
+                    parts = [p for p in [getattr(doc, 'first_name', None), getattr(doc, 'middle_name', None), getattr(doc, 'last_name', None)] if p]
+                    composed = " ".join(parts) if parts else None
+                    submitter_name = composed or doc.email
             else:
                 usr = db.query(models.User).filter(models.User.id == obj.user_id).first()
                 if usr:
-                    submitter_name = usr.full_name or usr.email
+                    parts = [p for p in [getattr(usr, 'first_name', None), getattr(usr, 'middle_name', None), getattr(usr, 'last_name', None)] if p]
+                    composed = " ".join(parts) if parts else None
+                    submitter_name = composed or usr.email
         except Exception:
-            submitter_name = getattr(current_user_or_doctor, "full_name", None) or getattr(current_user_or_doctor, "email", None)
+            if hasattr(current_user_or_doctor, 'first_name') or hasattr(current_user_or_doctor, 'last_name'):
+                parts = [p for p in [getattr(current_user_or_doctor, 'first_name', None), getattr(current_user_or_doctor, 'middle_name', None), getattr(current_user_or_doctor, 'last_name', None)] if p]
+                submitter_name = (" ".join(parts) if parts else None) or getattr(current_user_or_doctor, "email", None)
+            else:
+                submitter_name = getattr(current_user_or_doctor, "full_name", None) or getattr(current_user_or_doctor, "email", None)
         resp = obj.__dict__.copy()
         resp["submitter_role"] = submitter_role
         resp["submitter_name"] = submitter_name
@@ -150,13 +158,21 @@ def create_feedback_no_slash(
             if submitter_role == "doctor":
                 doc = db.query(models.Doctor).filter(models.Doctor.id == obj.user_id).first()
                 if doc:
-                    submitter_name = doc.full_name or doc.email
+                    parts = [p for p in [getattr(doc, 'first_name', None), getattr(doc, 'middle_name', None), getattr(doc, 'last_name', None)] if p]
+                    composed = " ".join(parts) if parts else None
+                    submitter_name = composed or doc.email
             else:
                 usr = db.query(models.User).filter(models.User.id == obj.user_id).first()
                 if usr:
-                    submitter_name = usr.full_name or usr.email
+                    parts = [p for p in [getattr(usr, 'first_name', None), getattr(usr, 'middle_name', None), getattr(usr, 'last_name', None)] if p]
+                    composed = " ".join(parts) if parts else None
+                    submitter_name = composed or usr.email
         except Exception:
-            submitter_name = getattr(current_user_or_doctor, "full_name", None) or getattr(current_user_or_doctor, "email", None)
+            if hasattr(current_user_or_doctor, 'first_name') or hasattr(current_user_or_doctor, 'last_name'):
+                parts = [p for p in [getattr(current_user_or_doctor, 'first_name', None), getattr(current_user_or_doctor, 'middle_name', None), getattr(current_user_or_doctor, 'last_name', None)] if p]
+                submitter_name = (" ".join(parts) if parts else None) or getattr(current_user_or_doctor, "email", None)
+            else:
+                submitter_name = getattr(current_user_or_doctor, "full_name", None) or getattr(current_user_or_doctor, "email", None)
         resp = obj.__dict__.copy()
         resp["submitter_role"] = submitter_role
         resp["submitter_name"] = submitter_name
@@ -187,11 +203,15 @@ def list_feedback(
         if it.user_id and role == "doctor":
             doc = db.query(models.Doctor).filter(models.Doctor.id == it.user_id).first()
             if doc:
-                name = doc.full_name or doc.email or name
+                parts = [p for p in [getattr(doc, 'first_name', None), getattr(doc, 'middle_name', None), getattr(doc, 'last_name', None)] if p]
+                composed = " ".join(parts) if parts else None
+                name = composed or doc.email or name
         elif it.user_id and role == "user":
             usr = db.query(models.User).filter(models.User.id == it.user_id).first()
             if usr:
-                name = usr.full_name or usr.email or name
+                parts = [p for p in [getattr(usr, 'first_name', None), getattr(usr, 'middle_name', None), getattr(usr, 'last_name', None)] if p]
+                composed = " ".join(parts) if parts else None
+                name = composed or usr.email or name
 
         payload = it.__dict__.copy()
         payload["submitter_role"] = role
@@ -222,11 +242,15 @@ def list_feedback_no_slash(
         if it.user_id and role == "doctor":
             doc = db.query(models.Doctor).filter(models.Doctor.id == it.user_id).first()
             if doc:
-                name = doc.full_name or doc.email or name
+                parts = [p for p in [getattr(doc, 'first_name', None), getattr(doc, 'middle_name', None), getattr(doc, 'last_name', None)] if p]
+                composed = " ".join(parts) if parts else None
+                name = composed or doc.email or name
         elif it.user_id and role == "user":
             usr = db.query(models.User).filter(models.User.id == it.user_id).first()
             if usr:
-                name = usr.full_name or usr.email or name
+                parts = [p for p in [getattr(usr, 'first_name', None), getattr(usr, 'middle_name', None), getattr(usr, 'last_name', None)] if p]
+                composed = " ".join(parts) if parts else None
+                name = composed or usr.email or name
 
         payload = it.__dict__.copy()
         payload["submitter_role"] = role
@@ -290,11 +314,15 @@ def update_feedback(
     if updated_obj.user_id and role == "doctor":
         doc = db.query(models.Doctor).filter(models.Doctor.id == updated_obj.user_id).first()
         if doc:
-            name = doc.full_name or doc.email or name
+            parts = [p for p in [getattr(doc, 'first_name', None), getattr(doc, 'middle_name', None), getattr(doc, 'last_name', None)] if p]
+            composed = " ".join(parts) if parts else None
+            name = composed or doc.email or name
     elif updated_obj.user_id and role == "user":
         usr = db.query(models.User).filter(models.User.id == updated_obj.user_id).first()
         if usr:
-            name = usr.full_name or usr.email or name
+            parts = [p for p in [getattr(usr, 'first_name', None), getattr(usr, 'middle_name', None), getattr(usr, 'last_name', None)] if p]
+            composed = " ".join(parts) if parts else None
+            name = composed or usr.email or name
 
     payload = updated_obj.__dict__.copy()
     payload["submitter_role"] = role

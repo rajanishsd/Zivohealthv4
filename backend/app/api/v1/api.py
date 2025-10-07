@@ -22,6 +22,8 @@ from app.api.v1.endpoints import profile
 from app.api.v1.endpoints import account
 from app.api.v1.endpoints import devices
 from app.api.v1.endpoints import notifications
+from app.api.v1.endpoints import timezones
+from app.api.v1.endpoints import country_codes
 # Reminders are handled by a separate microservice - no need to import here
 from app.routes import audit
 from app.routes import dashboard
@@ -52,6 +54,8 @@ api_router.include_router(profile.router, prefix="/profile", tags=["profile"])
 api_router.include_router(account.router, prefix="/account", tags=["account"])
 api_router.include_router(devices.router, prefix="/devices", tags=["devices"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
+api_router.include_router(timezones.router, prefix="/timezones", tags=["timezones"])
+api_router.include_router(country_codes.router, prefix="/country-codes", tags=["country_codes"])
 api_router.include_router(dashboard_v1.router, prefix="/dashboard", tags=["dashboard-v1"])
 # Admin users management
 api_router.include_router(admin_users.router, prefix="/admin", tags=["admin-users"])

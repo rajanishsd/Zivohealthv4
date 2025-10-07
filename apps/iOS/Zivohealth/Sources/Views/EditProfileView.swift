@@ -2,6 +2,9 @@ import SwiftUI
 
 struct EditProfileView: View {
     // Basic
+    @State private var firstName: String = ""
+    @State private var middleName: String = ""
+    @State private var lastName: String = ""
     @State private var fullName: String = ""
     @State private var email: String = ""
     @State private var phoneNumber: String = ""
@@ -12,6 +15,12 @@ struct EditProfileView: View {
     @State private var bodyType: String = ""
     @State private var activityLevel: String = ""
     @State private var timezone: String = TimeZone.current.identifier
+    @State private var timezoneId: Int? = nil
+    @State private var availableTimezones: [Timezone] = []
+    @State private var countryCodeId: Int? = nil
+    @State private var availableCountryCodes: [CountryCode] = []
+    @State private var phoneMinDigits: Int = 10
+    @State private var phoneMaxDigits: Int = 15
 
     // Health
     @State private var conditionNames: Set<String> = []
@@ -43,8 +52,18 @@ struct EditProfileView: View {
         Form {
             Section(header: Text("Basic")) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Full name").font(.subheadline).foregroundColor(.secondary)
-                    TextField("Full name", text: $fullName)
+                    Text("First name").font(.subheadline).foregroundColor(.secondary)
+                    TextField("First name", text: $firstName)
+                        .textInputAutocapitalization(.words)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Middle name").font(.subheadline).foregroundColor(.secondary)
+                    TextField("Middle name", text: $middleName)
+                        .textInputAutocapitalization(.words)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Last name").font(.subheadline).foregroundColor(.secondary)
+                    TextField("Last name", text: $lastName)
                         .textInputAutocapitalization(.words)
                 }
                 VStack(alignment: .leading, spacing: 4) {
@@ -56,8 +75,24 @@ struct EditProfileView: View {
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Phone number").font(.subheadline).foregroundColor(.secondary)
-                    TextField("Phone number", text: $phoneNumber)
-                        .keyboardType(.phonePad)
+                    HStack {
+                        Picker("", selection: $countryCodeId) {
+                            Text("Code").tag(nil as Int?)
+                            ForEach(availableCountryCodes, id: \.id) { cc in
+                                Text("\(cc.dialCode) \(cc.countryName)").tag(cc.id as Int?)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .onChange(of: countryCodeId) { newId in
+                            if let id = newId, let selected = availableCountryCodes.first(where: { $0.id == id }) {
+                                phoneMinDigits = selected.minDigits
+                                phoneMaxDigits = selected.maxDigits
+                            }
+                        }
+                        TextField("Phone number", text: $phoneNumber)
+                            .keyboardType(.phonePad)
+                    }
                 }
                 DatePicker("Date of birth", selection: $dateOfBirth, displayedComponents: .date)
                 Picker("Gender", selection: $gender) {
@@ -94,8 +129,17 @@ struct EditProfileView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Timezone").font(.subheadline).foregroundColor(.secondary)
-                    TextField("Timezone", text: $timezone)
-                        .textInputAutocapitalization(.never)
+                    Picker("Timezone", selection: $timezoneId) {
+                        Text("Select timezone").tag(nil as Int?)
+                        ForEach(availableTimezones, id: \.id) { timezone in
+                            Text("\(timezone.displayName)").tag(timezone.id as Int?)
+                        }
+                    }
+                    .onChange(of: timezoneId) { newId in
+                        if let id = newId, let selectedTimezone = availableTimezones.first(where: { $0.id == id }) {
+                            timezone = selectedTimezone.identifier
+                        }
+                    }
                 }
             }
 
@@ -144,7 +188,11 @@ struct EditProfileView: View {
         } message: {
             Text("Your profile was updated successfully.")
         }
-        .task { await loadProfile() }
+        .task { 
+            await loadCountryCodes()
+            await loadTimezones()
+            await loadProfile() 
+        }
     }
 
     private func isValid() -> Bool {
@@ -155,22 +203,46 @@ struct EditProfileView: View {
         if let e = NetworkService.shared.currentUserEmail, !e.isEmpty { email = e }
         if let n = NetworkService.shared.currentUserFullName, !n.isEmpty { fullName = n }
     }
+    
+    private func loadTimezones() async {
+        do {
+            availableTimezones = try await NetworkService.shared.fetchTimezones()
+        } catch {
+            print("❌ [EditProfileView] Failed to load timezones: \(error)")
+        }
+    }
+
+    private func loadCountryCodes() async {
+        do {
+            availableCountryCodes = try await NetworkService.shared.fetchCountryCodes()
+            if countryCodeId == nil, let india = availableCountryCodes.first(where: { $0.iso2 == "IN" }) {
+                countryCodeId = india.id
+                phoneMinDigits = india.minDigits
+                phoneMaxDigits = india.maxDigits
+            }
+        } catch {
+            print("❌ [EditProfileView] Failed to load country codes: \(error)")
+        }
+    }
 
     private func loadProfile() async {
         do {
             let resp = try await NetworkService.shared.fetchCombinedProfile()
-            let fullNameValue = resp.basic.full_name ?? ""
+            let fullNameValue = resp.basic.full_name
+            let firstNameValue = resp.basic.first_name
+            let middleNameValue = resp.basic.middle_name ?? ""
+            let lastNameValue = resp.basic.last_name ?? ""
             let emailValue = resp.basic.email
             let phoneValue = resp.basic.phone_number
             let tzValue = resp.basic.timezone
+            let tzIdValue = resp.basic.timezone_id
             let genderValue = resp.basic.gender
             let heightValue = resp.basic.height_cm
             let weightValue = resp.basic.weight_kg
             let bodyTypeValue = resp.basic.body_type ?? ""
             let activityValue = resp.basic.activity_level ?? ""
             let dobValue: Date? = {
-                if let s = resp.basic.date_of_birth { return ISO8601DateFormatter.dateFormatterYYYYMMDD.date(from: s) }
-                return nil
+                return ISO8601DateFormatter.dateFormatterYYYYMMDD.date(from: resp.basic.date_of_birth)
             }()
             let conditionsSet = Set(resp.conditions.condition_names)
             let otherCond = resp.conditions.other_condition_text ?? ""
@@ -184,9 +256,13 @@ struct EditProfileView: View {
 
             await MainActor.run {
                 fullName = fullNameValue
+                firstName = firstNameValue
+                middleName = middleNameValue
+                lastName = lastNameValue
                 email = emailValue
                 phoneNumber = phoneValue
-                timezone = tzValue
+                timezone = tzValue ?? TimeZone.current.identifier
+                timezoneId = tzIdValue
                 gender = genderValue
                 if let h = heightValue { heightCm = String(h) }
                 if let w = weightValue { weightKg = String(w) }
@@ -218,6 +294,9 @@ struct EditProfileView: View {
             let dobStr = ISO8601DateFormatter.dateFormatterYYYYMMDD.string(from: dateOfBirth)
             let payload: [String: Any] = [
                 "basic": [
+                    "first_name": firstName.isEmpty ? nil : firstName,
+                    "middle_name": middleName.isEmpty ? nil : middleName,
+                    "last_name": lastName.isEmpty ? nil : lastName,
                     "full_name": fullName.isEmpty ? nil : fullName,
                     "date_of_birth": dobStr,
                     "gender": gender,
@@ -226,6 +305,7 @@ struct EditProfileView: View {
                     "body_type": bodyType.isEmpty ? nil : bodyType,
                     "activity_level": activityLevel.isEmpty ? nil : activityLevel,
                     "timezone": timezone,
+                    "timezone_id": timezoneId,
                     "email": email,
                     "phone_number": phoneNumber,
                 ],
