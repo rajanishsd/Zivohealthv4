@@ -68,7 +68,10 @@ struct ConsultationOptionsView: View {
         .sheet(isPresented: $showingVideoConsultation) {
             VideoConsultationView()
         }
-        .sheet(isPresented: $showingScheduleConsultation) {
+        .sheet(isPresented: $showingScheduleConsultation, onDismiss: {
+            // Close the consultation options when schedule consultation is dismissed
+            presentationMode.wrappedValue.dismiss()
+        }) {
             ScheduleConsultationView()
         }
     }

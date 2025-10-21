@@ -16,49 +16,74 @@ struct BiomarkersView: View {
 struct BiomarkersViewModern: View {
     @State private var categories: [SimpleBiomarkerCategory] = []
     @State private var isLoading = true
+    @State private var navigateToUploadLabReport = false
     
     var body: some View {
-            biomarkersContent
-    }
-    
-    private var biomarkersContent: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                // Health Progress Card with real data
-                HealthProgressCard(categories: categories)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Scrollable header
+                    BiomarkersHeaderView(topInset: geometry.safeAreaInsets.top)
                 
-                // Key Insights Card
-                KeyInsightsCard()
-                
-                // Health Reports Categories Card - Dynamic Version with Real Data
-                SimpleDynamicBiomarkersCard(
-                    categories: $categories,
-                    isLoading: $isLoading
-                )
-                
-                Spacer(minLength: 100)
+                VStack(spacing: 20) {
+                    // Health Progress Card with real data
+                    HealthProgressCard(categories: categories)
+                    
+                    // Upload Lab Report button (prominent)
+                    uploadLabReportCard
+                    
+                    // Key Insights Card
+                    KeyInsightsCard()
+                    
+                    // Health Reports Categories Card - Dynamic Version with Real Data
+                    SimpleDynamicBiomarkersCard(
+                        categories: $categories,
+                        isLoading: $isLoading
+                    )
+                    
+                    Spacer(minLength: 100)
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
             }
-            .padding(.horizontal)
-            .padding(.top, 8)
         }
         .background(Color(.systemGray6))
-        .navigationTitle("Biomarkers")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    // Add biomarker action
-                }) {
-                    Image(systemName: "plus")
-                }
-            }
-        }
+        .ignoresSafeArea(.container, edges: .top)
         .onAppear {
             print("🔬 [BiomarkersViewModern] onAppear - Biomarkers view appeared")
         }
         .onDisappear {
             print("🔬 [BiomarkersViewModern] onDisappear - Biomarkers view disappeared")
         }
+        .background(
+            NavigationLink(
+                destination: UploadLabReportView(),
+                isActive: $navigateToUploadLabReport,
+                label: { EmptyView() }
+            )
+            .hidden()
+        )
+    }
+    .navigationBarHidden(true)
+    }
+    
+    private var uploadLabReportCard: some View {
+        Button(action: { navigateToUploadLabReport = true }) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.badge.plus")
+                    .font(.title3)
+                Text("Upload Lab Report")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.blue)
+            .cornerRadius(12)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
     }
 }
 
@@ -66,49 +91,74 @@ struct BiomarkersViewModern: View {
 struct BiomarkersViewLegacy: View {
     @State private var categories: [SimpleBiomarkerCategory] = []
     @State private var isLoading = true
+    @State private var navigateToUploadLabReport = false
     
     var body: some View {
-        biomarkersContent
-    }
-    
-    private var biomarkersContent: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                // Health Progress Card with real data
-                HealthProgressCard(categories: categories)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Scrollable header
+                    BiomarkersHeaderView(topInset: geometry.safeAreaInsets.top)
                 
-                // Key Insights Card
-                KeyInsightsCard()
-                
-                // Health Reports Categories Card - Dynamic Version with Real Data
-                SimpleDynamicBiomarkersCard(
-                    categories: $categories,
-                    isLoading: $isLoading
-                )
-                
-                Spacer(minLength: 100)
+                VStack(spacing: 20) {
+                    // Health Progress Card with real data
+                    HealthProgressCard(categories: categories)
+                    
+                    // Upload Lab Report button (prominent)
+                    uploadLabReportCard
+                    
+                    // Key Insights Card
+                    KeyInsightsCard()
+                    
+                    // Health Reports Categories Card - Dynamic Version with Real Data
+                    SimpleDynamicBiomarkersCard(
+                        categories: $categories,
+                        isLoading: $isLoading
+                    )
+                    
+                    Spacer(minLength: 100)
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
             }
-            .padding(.horizontal)
-            .padding(.top, 8)
         }
         .background(Color(.systemGray6))
-        .navigationTitle("Biomarkers")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    // Add biomarker action
-                }) {
-                    Image(systemName: "plus")
-                }
-            }
-        }
+        .ignoresSafeArea(.container, edges: .top)
         .onAppear {
             print("🔬 [BiomarkersViewLegacy] onAppear - Biomarkers view appeared")
         }
         .onDisappear {
             print("🔬 [BiomarkersViewLegacy] onDisappear - Biomarkers view disappeared")
         }
+        .background(
+            NavigationLink(
+                destination: UploadLabReportView(),
+                isActive: $navigateToUploadLabReport,
+                label: { EmptyView() }
+            )
+            .hidden()
+        )
+    }
+    .navigationBarHidden(true)
+    }
+    
+    private var uploadLabReportCard: some View {
+        Button(action: { navigateToUploadLabReport = true }) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.badge.plus")
+                    .font(.title3)
+                Text("Upload Lab Report")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.blue)
+            .cornerRadius(12)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
     }
 }
 
@@ -636,6 +686,84 @@ struct CategoryRowViewLegacy: View {
         .background(Color(.systemBackground))
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+    }
+}
+
+// MARK: - Biomarkers Header
+struct BiomarkersHeaderView: View {
+    let topInset: CGFloat
+    @Environment(\.dismiss) private var dismiss
+    
+    private var brandRedGradient: Gradient {
+        Gradient(colors: [
+            Color.zivoRed,                 // darker (left)
+            Color.zivoRed.opacity(0.7)     // lighter (right)
+        ])
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Top spacer for status bar
+            Color.clear
+                .frame(height: topInset)
+            
+            // Card content with back button
+            ZStack(alignment: .topLeading) {
+                LinearGradient(
+                    gradient: brandRedGradient,
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                
+                ZStack {
+                    // Centered title and subtitle with offset to move down
+                    VStack(spacing: 4) {
+                        Text("Biomarkers")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Text("View and track your biomarkers")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                    .offset(y: 15)
+                    
+                    // Back button on the left, vertically centered
+                    HStack {
+                        Button(action: {
+                            dismiss()
+                        }) {
+                            Image(systemName: "arrow.backward")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.leading, 20)
+                        
+                        Spacer()
+                    }
+                    .offset(y: 10)
+                    
+                    // Document icon on the right, vertically centered
+                    HStack {
+                        Spacer()
+                        
+                        Image(systemName: "doc.text.fill")
+                            .font(.system(size: 40))
+                            .foregroundColor(.white.opacity(0.9))
+                            .padding(.trailing, 20)
+                    }
+                }
+                .padding(.vertical, 20)
+            }
+            .frame(height: 110)
+            .cornerRadius(20)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+        }
+        .frame(height: 110 + topInset + 8)
+        .ignoresSafeArea(.container, edges: .top)
     }
 }
 

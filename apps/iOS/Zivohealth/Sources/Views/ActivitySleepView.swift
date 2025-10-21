@@ -21,13 +21,14 @@ struct ActivitySleepViewModern: View {
     @State private var isFirstLoad = true
     
     var body: some View {
-        activitySleepContent
-    }
-    
-    private var activitySleepContent: some View {
-        ZStack {
-            ScrollView {
-                LazyVStack(spacing: 20) {
+        GeometryReader { geometry in
+            ZStack {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        // Scrollable header
+                        ActivitySleepHeaderView(topInset: geometry.safeAreaInsets.top)
+                    
+                    LazyVStack(spacing: 20) {
                     // Simple Overview Card
                     ActivitySleepOverviewCard(healthKitManager: healthKitManager)
                     
@@ -109,13 +110,23 @@ struct ActivitySleepViewModern: View {
                     }
                     
                     Spacer(minLength: 100)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
                 }
-                .padding(.horizontal)
-                .padding(.top, 8)
+                }
             }
             .background(Color(UIColor.secondarySystemBackground))
+            .ignoresSafeArea(.container, edges: .top)
             .refreshable {
                 await refreshData()
+            }
+            .onAppear {
+                if isFirstLoad {
+                    print("🏃 [ActivitySleepView] First load - checking for health data")
+                    healthKitManager.checkForNewDataAndSync()
+                    isFirstLoad = false
+                }
             }
             
             // Sync Progress Overlay
@@ -130,15 +141,7 @@ struct ActivitySleepViewModern: View {
                     .animation(.easeInOut, value: healthKitManager.isSyncing)
             }
         }
-        .navigationTitle("Activity & Sleep")
-        .navigationBarTitleDisplayMode(.large)
-        .onAppear {
-            if isFirstLoad {
-                print("🏃 [ActivitySleepView] First load - checking for health data")
-                healthKitManager.checkForNewDataAndSync()
-                isFirstLoad = false
-            }
-        }
+        .navigationBarHidden(true)
     }
     
     private func refreshData() async {
@@ -155,13 +158,14 @@ struct ActivitySleepViewLegacy: View {
     @State private var isFirstLoad = true
     
     var body: some View {
-        activitySleepContent
-    }
-    
-    private var activitySleepContent: some View {
-        ZStack {
-            ScrollView {
-                LazyVStack(spacing: 20) {
+        GeometryReader { geometry in
+            ZStack {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        // Scrollable header
+                        ActivitySleepHeaderView(topInset: geometry.safeAreaInsets.top)
+                    
+                    LazyVStack(spacing: 20) {
                     // Simple Overview Card
                     ActivitySleepOverviewCard(healthKitManager: healthKitManager)
                     
@@ -243,11 +247,21 @@ struct ActivitySleepViewLegacy: View {
                     }
                     
                     Spacer(minLength: 100)
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
                 }
-                .padding(.horizontal)
-                .padding(.top, 8)
+                }
             }
             .background(Color(UIColor.secondarySystemBackground))
+            .ignoresSafeArea(.container, edges: .top)
+            .onAppear {
+                if isFirstLoad {
+                    print("🏃 [ActivitySleepView] First load - checking for health data")
+                    healthKitManager.checkForNewDataAndSync()
+                    isFirstLoad = false
+                }
+            }
             
             // Sync Progress Overlay
             if healthKitManager.isSyncing {
@@ -261,15 +275,7 @@ struct ActivitySleepViewLegacy: View {
                     .animation(.easeInOut, value: healthKitManager.isSyncing)
             }
         }
-        .navigationTitle("Activity & Sleep")
-        .navigationBarTitleDisplayMode(.large)
-        .onAppear {
-            if isFirstLoad {
-                print("🏃 [ActivitySleepView] First load - checking for health data")
-                healthKitManager.checkForNewDataAndSync()
-                isFirstLoad = false
-            }
-        }
+        .navigationBarHidden(true)
     }
 }
 
@@ -306,10 +312,18 @@ struct ActivitySleepOverviewCard: View {
                             .fontWeight(.medium)
                     }
                     
-                    Text(getLatestSteps())
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .foregroundColor(.primary)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(getLatestSteps())
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                        
+                        if getLatestSteps() != "No data", let stepsDate = getStepsDataDate() {
+                            Text(stepsDate)
+                                .font(.caption2)
+                                .foregroundColor(isStepsDataStale() ? .orange : .secondary)
+                        }
+                    }
                     
                     Text("Goal: 10,000")
                         .font(.caption)
@@ -347,10 +361,18 @@ struct ActivitySleepOverviewCard: View {
                             .fontWeight(.medium)
                     }
                     
-                    Text(getLatestSleep())
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .foregroundColor(.primary)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(getLatestSleep())
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                        
+                        if getLatestSleep() != "No data", let sleepDate = getSleepDataDate() {
+                            Text(sleepDate)
+                                .font(.caption2)
+                                .foregroundColor(isSleepDataStale() ? .orange : .secondary)
+                        }
+                    }
                     
                     Text("Goal: 8h")
                         .font(.caption)
@@ -381,39 +403,37 @@ struct ActivitySleepOverviewCard: View {
         .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
     
-    // Helper functions - pulling data directly from backend
+    // Helper functions - using shared VitalsDisplayHelper
     private func getLatestSteps() -> String {
-        if let dashboardData = healthKitManager.dashboardData,
-           let stepsMetric = dashboardData.metrics.first(where: { $0.metricType == .stepCount }),
-           let latestPoint = stepsMetric.dataPoints.last {
-            return "\(Int(latestPoint.averageValue ?? 0))"
-        }
-        return "6,000"
+        return VitalsDisplayHelper.getLatestSteps(from: healthKitManager.dashboardData)
     }
     
     private func getLatestSleep() -> String {
-        if let dashboardData = healthKitManager.dashboardData,
-           let sleepMetric = dashboardData.metrics.first(where: { $0.metricType == .sleep }),
-           let latestPoint = sleepMetric.dataPoints.last {
-            let hours = Int(latestPoint.averageValue ?? 0)
-            let minutes = Int(((latestPoint.averageValue ?? 0) - Double(hours)) * 60)
-            return "\(hours)h \(minutes)m"
-        }
-        return "7h 30m"
+        return VitalsDisplayHelper.getLatestSleep(from: healthKitManager.dashboardData)
     }
     
     private func getStepsProgress() -> Double {
-        let steps = Double(getLatestSteps().replacingOccurrences(of: ",", with: "")) ?? 6000
-        return min(steps / 10000.0, 1.0)
+        return VitalsDisplayHelper.getStepsProgress(from: healthKitManager.dashboardData)
     }
     
     private func getSleepProgress() -> Double {
-        if let dashboardData = healthKitManager.dashboardData,
-           let sleepMetric = dashboardData.metrics.first(where: { $0.metricType == .sleep }),
-           let latestPoint = sleepMetric.dataPoints.last {
-            return min((latestPoint.averageValue ?? 0) / 8.0, 1.0) // Goal is 8 hours
-        }
-        return 0.9375 // 7.5/8
+        return VitalsDisplayHelper.getSleepProgress(from: healthKitManager.dashboardData)
+    }
+    
+    private func getSleepDataDate() -> String? {
+        return VitalsDisplayHelper.getSleepDataDate(from: healthKitManager.dashboardData)
+    }
+    
+    private func isSleepDataStale() -> Bool {
+        return VitalsDisplayHelper.isSleepDataStale(from: healthKitManager.dashboardData)
+    }
+    
+    private func getStepsDataDate() -> String? {
+        return VitalsDisplayHelper.getStepsDataDate(from: healthKitManager.dashboardData)
+    }
+    
+    private func isStepsDataStale() -> Bool {
+        return VitalsDisplayHelper.isStepsDataStale(from: healthKitManager.dashboardData)
     }
     
     private func getLatestDataDate() -> String {
@@ -457,6 +477,84 @@ struct ActivitySleepOverviewCard: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.date(from: dateString) ?? Date()
+    }
+}
+
+// MARK: - Activity & Sleep Header
+struct ActivitySleepHeaderView: View {
+    let topInset: CGFloat
+    @Environment(\.dismiss) private var dismiss
+    
+    private var brandRedGradient: Gradient {
+        Gradient(colors: [
+            Color.zivoRed,                 // darker (left)
+            Color.zivoRed.opacity(0.7)     // lighter (right)
+        ])
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Top spacer for status bar
+            Color.clear
+                .frame(height: topInset)
+            
+            // Card content with back button
+            ZStack(alignment: .topLeading) {
+                LinearGradient(
+                    gradient: brandRedGradient,
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                
+                ZStack {
+                    // Centered title and subtitle with offset to move down
+                    VStack(spacing: 4) {
+                        Text("Activity & Sleep")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Text("Track your steps and sleep patterns")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                    .offset(y: 15)
+                    
+                    // Back button on the left, vertically centered
+                    HStack {
+                        Button(action: {
+                            dismiss()
+                        }) {
+                            Image(systemName: "arrow.backward")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.leading, 20)
+                        
+                        Spacer()
+                    }
+                    .offset(y: 10)
+                    
+                    // Activity icon on the right, vertically centered
+                    HStack {
+                        Spacer()
+                        
+                        Image(systemName: "figure.walk")
+                            .font(.system(size: 40))
+                            .foregroundColor(.white.opacity(0.9))
+                            .padding(.trailing, 20)
+                    }
+                }
+                .padding(.vertical, 20)
+            }
+            .frame(height: 110)
+            .cornerRadius(20)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+        }
+        .frame(height: 110 + topInset + 8)
+        .ignoresSafeArea(.container, edges: .top)
     }
 }
 

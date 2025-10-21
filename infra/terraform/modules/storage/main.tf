@@ -74,6 +74,21 @@ resource "aws_s3_bucket_policy" "allow_ec2_read_compose" {
         Resource = [
           "${aws_s3_bucket.uploads.arn}/uploads/*"
         ]
+      },
+      {
+        Sid      = "AllowTextractServiceAccess",
+        Effect   = "Allow",
+        Principal = {
+          Service = "textract.amazonaws.com"
+        },
+        Action   = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ],
+        Resource = [
+          "${aws_s3_bucket.uploads.arn}",
+          "${aws_s3_bucket.uploads.arn}/*"
+        ]
       }
     ]
   })

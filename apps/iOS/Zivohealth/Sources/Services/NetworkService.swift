@@ -2327,6 +2327,23 @@ extension NetworkService {
                    let message = error["detail"] as? String
                 {
                     print("📄 [NetworkService] Error message from server: \(message)")
+                    // If backend says credentials are invalid, force a one-time token refresh and retry
+                    let lower = message.lowercased()
+                    if requiresAuth && !isRetry && authRetryCount < maxAuthRetries &&
+                        (lower.contains("not valid credentials") || lower.contains("could not validate credentials") || lower.contains("invalid credentials")) {
+                        print("🔄 [NetworkService] 'Not valid credentials' detected - forcing token refresh and retry")
+                        authRetryCount += 1
+                        clearAuthToken()
+                        return try await request(
+                            path: path,
+                            method: method,
+                            body: body,
+                            bodyData: bodyData,
+                            contentType: contentType,
+                            requiresAuth: requiresAuth,
+                            isRetry: true
+                        )
+                    }
                     throw NetworkError.serverError("HTTP \(httpResponse.statusCode): \(message)")
                 }
                 print("❓ [NetworkService] Unknown error occurred")

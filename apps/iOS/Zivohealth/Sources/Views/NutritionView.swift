@@ -60,29 +60,21 @@ struct NutritionView: View {
     @State private var navigateToGoalSetup = false
     @State private var navigateToGoalDetail = false
     @State private var navigateToManagePlans = false
+    @State private var navigateToMealsList = false
     
     var body: some View {
-            VStack(spacing: 0) {
-                // Main Content
-                TabView(selection: $selectedTab) {
-                    // Overview Tab
-                    overviewTab
-                        .tabItem {
-                            Image(systemName: "chart.bar.fill")
-                            Text("Overview")
-                        }
-                        .tag(0)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Scrollable header
+                    NutritionHeaderView(topInset: geometry.safeAreaInsets.top)
                     
-                    // Meals List Tab
-                    mealsListTab
-                        .tabItem {
-                            Image(systemName: "list.bullet")
-                            Text("Meals")
-                        }
-                        .tag(1)
+                    // Content
+                    overviewContent
                 }
-            .id("NutritionTabView")
             }
+            .background(Color(.systemGroupedBackground))
+            .ignoresSafeArea(.container, edges: .top)
             
             .sheet(isPresented: $showingImageViewer) {
                 if let meal = selectedMealForImage {
@@ -111,16 +103,32 @@ struct NutritionView: View {
                 )
                 .hidden()
             )
+            .background(
+                NavigationLink(
+                    destination: MealsListView(nutritionManager: nutritionManager),
+                    isActive: $navigateToMealsList,
+                    label: { EmptyView() }
+                )
+                .hidden()
+            )
             .onAppear {
-            nutritionManager.loadTodaysData()
-            nutritionGoalsManager.loadGoalsData()
-            // Ensure progress fetch triggers on first render when goal already active
-            if nutritionGoalsManager.activeGoalSummary?.hasActiveGoal == true {
-                nutritionGoalsManager.loadActiveGoalProgress()
+                // Only load data if user is authenticated
+                guard NetworkService.shared.isAuthenticated() else {
+                    print("⚠️ [NutritionView] User not authenticated - skipping data load")
+                    return
+                }
+                
+                nutritionManager.loadTodaysData()
+                nutritionGoalsManager.loadGoalsData()
+                // Ensure progress fetch triggers on first render when goal already active
+                if nutritionGoalsManager.activeGoalSummary?.hasActiveGoal == true {
+                    nutritionGoalsManager.loadActiveGoalProgress()
+                }
+                // Load meals for today when view appears
+                loadMealsForDate(selectedDate)
             }
-            // Load meals for today when view appears
-            loadMealsForDate(selectedDate)
         }
+        .navigationBarHidden(true)
     }
     
     // MARK: - Computed Properties
@@ -137,95 +145,30 @@ struct NutritionView: View {
         }
     }
     
-    private var overviewTab: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(spacing: 16) {
-                // Today's summary card
-                todaysSummaryCard
-                    .cardStyle()
-                
-                // Log meal button (prominent)
-                logMealCard
-                
-                // Nutrition goals card
-                nutritionGoalsCard
-                    .cardStyle()
-                
-                // Charts container
-                NutritionChartsContainer(nutritionManager: nutritionManager)
-                
-                // Recent meals preview card
-                recentMealsPreview
-                    .cardStyle()
-                
-                Spacer(minLength: 100)
-            }
-            .padding(.horizontal)
-            .padding(.top, 8)
-        }
-        .scrollContentBackground(.hidden)
-        .background(Color(.systemGroupedBackground))
-        .coordinateSpace(name: "NutritionOverview")
-    }
-    
-    private var mealsListTab: some View {
-        VStack(spacing: 0) {
-            // Date picker header
-            VStack(spacing: 12) {
-                HStack {
-                    Text("Select Date")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                    Spacer()
-                }
-                
-                DatePicker(
-                    "Meal Date",
-                    selection: $selectedDate,
-                    in: ...Date(),
-                    displayedComponents: .date
-                )
-                .datePickerStyle(.compact)
-                .onChange(of: selectedDate) { newDate in
-                    loadMealsForDate(newDate)
-                }
-            }
-            .padding()
-            .background(Color(.systemBackground))
+    private var overviewContent: some View {
+        LazyVStack(spacing: 16) {
+            // Today's summary card
+            todaysSummaryCard
+                .cardStyle()
             
-            Divider()
+            // Log meal button (prominent)
+            logMealCard
             
-            // Meals list
-            List {
-                ForEach(filteredMealsForSelectedDate, id: \.id) { meal in
-                    mealRow(meal)
-                        .id("meal-\(meal.id)")
-                        .onTapGesture {
-                            selectedMealForDetail = meal
-                            showingMealDetail = true
-                        }
-                }
-                
-                if filteredMealsForSelectedDate.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "fork.knife")
-                            .font(.title2)
-                            .foregroundColor(.secondary)
-                        Text("No meals found for \(selectedDate.formatted(date: .abbreviated, time: .omitted))")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 40)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                }
-            }
-            .listStyle(.insetGrouped)
-            .id("NutritionMealsList")
-            .coordinateSpace(name: "NutritionMeals")
+            // Nutrition goals card
+            nutritionGoalsCard
+                .cardStyle()
+            
+            // Charts container
+            NutritionChartsContainer(nutritionManager: nutritionManager)
+            
+            // Recent meals preview card
+            recentMealsPreview
+                .cardStyle()
+            
+            Spacer(minLength: 100)
         }
+        .padding(.horizontal)
+        .padding(.top, 8)
     }
     
     private var todaysSummaryCard: some View {
@@ -363,7 +306,7 @@ struct NutritionView: View {
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
-            .background(Color.red)
+            .background(Color.green)
             .cornerRadius(12)
         }
         .buttonStyle(.plain)
@@ -614,8 +557,7 @@ struct NutritionView: View {
                     .fontWeight(.semibold)
                 Spacer()
                 Button("See All") {
-                    selectedTab = 1
-                    selectedDate = Date()
+                    navigateToMealsList = true
                 }
                 .font(.subheadline)
                 .foregroundColor(.blue)
@@ -772,6 +714,346 @@ struct NutritionView: View {
             endDate: endOfDay,
             granularity: .daily
         )
+    }
+}
+
+// Nutrition header
+struct NutritionHeaderView: View {
+    let topInset: CGFloat
+    @Environment(\.dismiss) private var dismiss
+    
+    private var brandRedGradient: Gradient {
+        Gradient(colors: [
+            Color.zivoRed,                 // darker (left)
+            Color.zivoRed.opacity(0.7)     // lighter (right)
+        ])
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Top spacer for status bar
+            Color.clear
+                .frame(height: topInset)
+            
+            // Card content with back button
+            ZStack(alignment: .topLeading) {
+                LinearGradient(
+                    gradient: brandRedGradient,
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                ZStack {
+                    // Centered title and subtitle with offset to move down
+                    VStack(spacing: 4) {
+                        Text("Nutrition")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Text("Track your meals and nutrition goals")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                    .offset(y: 15)
+                    
+                    // Back button on the left, vertically centered
+                    HStack {
+                        Button(action: {
+                            dismiss()
+                        }) {
+                            Image(systemName: "arrow.backward")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.leading, 20)
+                        
+                        Spacer()
+                    }
+                    .offset(y: 10)
+                    
+                    // Fork and knife icon on the right, vertically centered
+                    HStack {
+                        Spacer()
+                        
+                        Image(systemName: "fork.knife")
+                            .font(.system(size: 40))
+                            .foregroundColor(.white.opacity(0.9))
+                            .padding(.trailing, 20)
+                    }
+                }
+                .padding(.vertical, 20)
+            }
+            .frame(height: 110)
+            .cornerRadius(20)
+            .padding(.horizontal, 16)
+            .padding(.top, 0)
+        }
+        .frame(height: 110 + topInset + 0)
+        .ignoresSafeArea(.container, edges: .top)
+    }
+}
+
+// MARK: - Meals List View (Separate Page)
+struct MealsListView: View {
+    @ObservedObject var nutritionManager: NutritionManager
+    @State private var selectedDate = Date()
+    @State private var showingMealDetail = false
+    @State private var selectedMealForDetail: NutritionDataResponse?
+    @Environment(\.dismiss) private var dismiss
+    
+    // Filter meals for the selected date
+    private var filteredMealsForSelectedDate: [NutritionDataResponse] {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        
+        return nutritionManager.nutritionData.filter { meal in
+            guard let mealDate = formatter.date(from: meal.mealDate) else { return false }
+            return calendar.isDate(mealDate, inSameDayAs: selectedDate)
+        }
+    }
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Scrollable header
+                    MealsListHeaderView(topInset: geometry.safeAreaInsets.top)
+                    
+                    // Content
+                    LazyVStack(spacing: 16) {
+                        // Date picker header card
+                    VStack(spacing: 12) {
+                        HStack {
+                            Text("Select Date")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                            Spacer()
+                        }
+                        
+                        DatePicker(
+                            "Meal Date",
+                            selection: $selectedDate,
+                            in: ...Date(),
+                            displayedComponents: .date
+                        )
+                        .datePickerStyle(.compact)
+                        .onChange(of: selectedDate) { newDate in
+                            loadMealsForDate(newDate)
+                        }
+                    }
+                    .padding()
+                    .background(Color(.systemBackground))
+                    .cornerRadius(12)
+                    .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+                    .padding(.horizontal)
+
+                    // Meals as stacked cards
+                    Group {
+                        if filteredMealsForSelectedDate.isEmpty {
+                            VStack(spacing: 8) {
+                                Image(systemName: "fork.knife")
+                                    .font(.title2)
+                                    .foregroundColor(.secondary)
+                                Text("No meals found for \(selectedDate.formatted(date: .abbreviated, time: .omitted))")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 40)
+                        } else {
+                            ForEach(filteredMealsForSelectedDate, id: \.id) { meal in
+                                mealRow(meal)
+                                    .onTapGesture {
+                                        selectedMealForDetail = meal
+                                        showingMealDetail = true
+                                    }
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    }
+                }
+            }
+            .background(Color(.systemGroupedBackground))
+            .ignoresSafeArea(.container, edges: .top)
+        }
+        .navigationBarHidden(true)
+        .sheet(isPresented: $showingMealDetail) {
+            if let meal = selectedMealForDetail {
+                MealDetailView(meal: meal)
+            }
+        }
+        .onAppear {
+            loadMealsForDate(selectedDate)
+        }
+    }
+    
+    private func mealRow(_ meal: NutritionDataResponse) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    // Meal type and time
+                    HStack(spacing: 8) {
+                        Text(meal.mealType.emoji)
+                            .font(.title3)
+                        Text(meal.mealType.displayName)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                        
+                        Spacer()
+                        
+                        if let mealTime = meal.mealDateTime {
+                            Text(mealTime, style: .time)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    // Dish name
+                    Text(meal.displayName)
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .lineLimit(2)
+                    
+                    // Calories
+                    Text("\(Int(meal.calories)) calories")
+                        .font(.subheadline)
+                        .foregroundColor(.orange)
+                        .fontWeight(.medium)
+                }
+                
+                Spacer()
+                
+                // Tap indicator
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            // Macronutrients badges
+            HStack {
+                nutritionBadge("P", value: Int(meal.proteinG), unit: "g", color: .red)
+                nutritionBadge("C", value: Int(meal.carbsG), unit: "g", color: .blue)
+                nutritionBadge("F", value: Int(meal.fatG), unit: "g", color: .yellow)
+                
+                if meal.fiberG > 0 {
+                    nutritionBadge("Fiber", value: Int(meal.fiberG), unit: "g", color: .green)
+                }
+                
+                Spacer()
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+    }
+    
+    private func nutritionBadge(_ label: String, value: Int, unit: String, color: Color) -> some View {
+        HStack(spacing: 2) {
+            Text(label)
+                .font(.caption2)
+                .fontWeight(.medium)
+                .foregroundColor(color)
+            Text("\(value)\(unit)")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+    }
+    
+    private func loadMealsForDate(_ date: Date) {
+        let startOfDay = Calendar.current.startOfDay(for: date)
+        let endOfDay = Calendar.current.date(byAdding: .day, value: 1, to: startOfDay) ?? date
+        
+        nutritionManager.loadNutritionData(
+            startDate: startOfDay,
+            endDate: endOfDay,
+            granularity: .daily
+        )
+    }
+}
+
+// Meals List Header
+struct MealsListHeaderView: View {
+    let topInset: CGFloat
+    @Environment(\.dismiss) private var dismiss
+    
+    private var brandRedGradient: Gradient {
+        Gradient(colors: [
+            Color.zivoRed,                 // darker (left)
+            Color.zivoRed.opacity(0.7)     // lighter (right)
+        ])
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Top spacer for status bar
+            Color.clear
+                .frame(height: topInset)
+            
+            // Card content with back button
+            ZStack(alignment: .topLeading) {
+                LinearGradient(
+                    gradient: brandRedGradient,
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                ZStack {
+                    // Centered title and subtitle with offset to move down
+                    VStack(spacing: 4) {
+                        Text("Meals")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Text("View all your logged meals")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                    .offset(y: 15)
+                    
+                    // Back button on the left, vertically centered
+                    HStack {
+                        Button(action: {
+                            dismiss()
+                        }) {
+                            Image(systemName: "arrow.backward")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.leading, 20)
+                        
+                        Spacer()
+                    }
+                    .offset(y: 10)
+                    
+                    // List icon on the right, vertically centered
+                    HStack {
+                        Spacer()
+                        
+                        Image(systemName: "list.bullet")
+                            .font(.system(size: 40))
+                            .foregroundColor(.white.opacity(0.9))
+                            .padding(.trailing, 20)
+                    }
+                }
+                .padding(.vertical, 20)
+            }
+            .frame(height: 110)
+            .cornerRadius(20)
+            .padding(.horizontal, 16)
+            .padding(.top, 0)
+        }
+        .frame(height: 110 + topInset + 0)
+        .ignoresSafeArea(.container, edges: .top)
     }
 }
 

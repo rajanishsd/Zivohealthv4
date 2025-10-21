@@ -28,6 +28,7 @@ class NutritionManager: ObservableObject {
     
     private let nutritionAPIService = NutritionAPIService.shared
     private var cancellables = Set<AnyCancellable>()
+    private var authStateSubscription: AnyCancellable?
     
     // DO NOT cache today's date; compute dynamically to avoid stale values after midnight
     private var today: Date { Date() }
@@ -94,6 +95,28 @@ class NutritionManager: ObservableObject {
     
     init() {
         // Initialize if needed
+        setupAuthObserver()
+    }
+    
+    // MARK: - Auth State Observer
+    /// Observe authentication state and clear data on logout
+    private func setupAuthObserver() {
+        authStateSubscription = NetworkService.shared.$isAuthenticatedState
+            .sink { [weak self] isAuthenticated in
+                if !isAuthenticated {
+                    print("🔒 [NutritionManager] User logged out - clearing nutrition data")
+                    self?.clearData()
+                }
+            }
+    }
+    
+    /// Clear all cached data
+    private func clearData() {
+        DispatchQueue.main.async { [weak self] in
+            self?.nutritionData = []
+            self?.chartData = nil
+            self?.errorMessage = nil
+        }
     }
     
     // MARK: - Public Methods

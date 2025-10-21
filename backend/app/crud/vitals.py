@@ -710,8 +710,8 @@ class VitalsCRUD:
             # Initialize LOINC mapper for vitals
             loinc_mapper = None
             try:
-                if 'LabTestLOINCMapper' in globals():
-                    from app.crud.lab_categorization import LabTestLOINCMapper
+                from app.crud.lab_categorization import LabTestLOINCMapper
+                if LabTestLOINCMapper is not None:
                     loinc_mapper = LabTestLOINCMapper()
                     logger.info("🔧 [VitalsCategorization] LOINC mapper initialized for vitals processing")
             except Exception as e:

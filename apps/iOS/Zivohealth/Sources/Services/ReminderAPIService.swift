@@ -10,6 +10,15 @@ final class ReminderAPIService: @unchecked Sendable {
     static let shared = ReminderAPIService()
     private init() {}
 
+    // MARK: - Authentication Guards
+    /// Check if user is authenticated before making API calls
+    private func ensureAuthenticated() throws {
+        guard NetworkService.shared.isAuthenticated() else {
+            print("⚠️ [ReminderAPIService] User not authenticated - skipping API call")
+            throw URLError(.userAuthenticationRequired)
+        }
+    }
+
     // Configure these via AppConfig if available
     private var baseURL: String {
         var root = AppConfig.remindersBaseURL
@@ -20,6 +29,14 @@ final class ReminderAPIService: @unchecked Sendable {
     }
 
     func registerDevice(userId: String, fcmToken: String, apiKey: String, completion: ((Error?) -> Void)? = nil) {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            completion?(error)
+            return
+        }
+        
         let payload = ReminderDeviceRegistration(user_id: userId, platform: "ios", fcm_token: fcmToken)
         guard let url = URL(string: baseURL + "/devices") else {
             completion?(NSError(domain: "ReminderAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"]))

@@ -261,6 +261,9 @@ class Settings(BaseSettings):
     OTP_MAX_ATTEMPTS: int = 5
     OTP_RATE_LIMIT_PER_EMAIL: int = 5  # Max OTP requests per email per day
 
+    # Mental Health Dictionaries version (values are served from DB dictionaries)
+    MENTALHEALTH_DICT_VERSION: int = 1
+
     # Environment-specific properties
     @property
     def is_development(self) -> bool:

@@ -100,7 +100,22 @@ class AuthService:
         self.redis_client.setex(redis_key, settings.OTP_EXPIRY_MINUTES * 60, otp_hash)
         
         # Send OTP via email
-        self.email_service.send_otp_email(email, otp)
+        email_sent = self.email_service.send_otp_email(email, otp)
+        
+        if not email_sent:
+            # Clean up the OTP from Redis if email failed
+            self.redis_client.delete(redis_key)
+            
+            # Log failed OTP request
+            self._log_login_event(
+                user_id=None,
+                method="email_otp",
+                device_info=device_info,
+                ip_address=ip_address,
+                success=False,
+                error_code="email_send_failed"
+            )
+            raise ValueError("Failed to send OTP email. Please check your email configuration.")
         
         # Log OTP request
         self._log_login_event(

@@ -349,7 +349,10 @@ struct ChatView: View {
                 )
             }
         }
-        .sheet(isPresented: $showingConsultationOptions) {
+        .sheet(isPresented: $showingConsultationOptions, onDismiss: {
+            // Switch to appointments tab when consultation is booked
+            NotificationCenter.default.post(name: Notification.Name("SwitchToAppointmentsTab"), object: nil)
+        }) {
             NavigationView {
                 ConsultationOptionsView()
             }

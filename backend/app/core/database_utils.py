@@ -191,7 +191,6 @@ def check_connection_pool_stats() -> Dict[str, Any]:
             "checked_in": pool.checkedin(),
             "checked_out": pool.checkedout(),
             "overflow": pool.overflow(),
-            "invalid": pool.invalid(),
             "total_connections": pool.size() + pool.overflow(),
             "status": "healthy" if pool.checkedout() < pool.size() + pool.overflow() else "exhausted"
         }

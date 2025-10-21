@@ -17,20 +17,22 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '3PData', 'l
 from app.models.health_data import LabReport
 from app.models.lab_test_mapping import LabTestMapping
 from app.utils.lab_test_mapper import LabTestMapper
+from app.health_scoring.services import HealthScoringService
 
 # Import LOINC mapper components with proper error handling
 LabTestLOINCMapper = None
 LabTest = None
+LOINC_MAPPER_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 try:
     from lab_test_loinc_mapper import LabTestLOINCMapper, LabTest
-    logger = logging.getLogger(__name__)
+    LOINC_MAPPER_AVAILABLE = True
     logger.info("✅ LOINC mapper imported successfully")
 except ImportError as e:
-    logger = logging.getLogger(__name__)
-    logger.warning(f"⚠️  LOINC mapper not available - LOINC codes will not be assigned: {e}")
-
-logger = logging.getLogger(__name__)
+    logger.error(f"❌ CRITICAL: LOINC mapper not available - install dependencies: {e}")
+    # This is a critical error in production - LOINC codes won't be assigned
 
 class LabCategorizationRecord:
     """Model for lab_report_categorized table records"""
@@ -47,7 +49,7 @@ class LabCategorizationCRUD:
         try:
             # Check if LOINC mapper is available
             if not loinc_mapper:
-                logger.warning("⚠️  LOINC mapper not available - skipping LOINC code assignment")
+                logger.debug("LOINC mapper not available - skipping LOINC code assignment")
                 return None, None
             
             # Create a LabTest object for the LOINC mapper
@@ -201,12 +203,14 @@ class LabCategorizationCRUD:
         
         # Initialize LOINC mapper once for all tests
         loinc_mapper = None
-        try:
-            if 'LabTestLOINCMapper' in globals():
+        if LOINC_MAPPER_AVAILABLE and LabTestLOINCMapper is not None:
+            try:
                 loinc_mapper = LabTestLOINCMapper()
                 logger.info("🔧 [LabCategorization] LOINC mapper initialized for batch processing")
-        except Exception as e:
-            logger.warning(f"⚠️ [LabCategorization] Failed to initialize LOINC mapper: {e}")
+            except Exception as e:
+                logger.error(f"❌ [LabCategorization] Failed to initialize LOINC mapper: {e}")
+        else:
+            logger.warning("⚠️ [LabCategorization] LOINC mapper not available - will use 'UNKNOWN' for LOINC codes")
         
         for lab_report in lab_reports:
             try:
@@ -240,6 +244,13 @@ class LabCategorizationCRUD:
                 continue
         
         db.commit()
+        # After mapping updates and categorization, sync metric anchors from LOINC mappings
+        try:
+            svc = HealthScoringService(db)
+            upserts = svc.sync_metric_anchors_from_lab_mapping()
+            logger.info(f"🔄 [LabCategorization] Synced metric anchors from LOINC mappings (upserts={upserts})")
+        except Exception as e:
+            logger.error(f"❌ [LabCategorization] Anchor sync failed: {e}")
         return processed_count
     
     @staticmethod

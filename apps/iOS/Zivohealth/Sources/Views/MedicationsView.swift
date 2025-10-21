@@ -15,113 +15,159 @@ struct MedicationsView: View {
 @available(iOS 16.0, *)
 struct MedicationsViewModern: View {
     @StateObject private var viewModel = MedicationsViewModel()
+    @State private var navigateToUploadPrescription = false
     
     var body: some View {
-        medicationsContent
-    }
-    
-    private var medicationsContent: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                // Medications Overview Card
-                MedicationsOverviewCard(prescriptions: viewModel.prescriptions)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Scrollable header
+                    MedicationsHeaderView(topInset: geometry.safeAreaInsets.top)
                 
-                // Active Medications Card
-                ActiveMedicationsCard(prescriptions: viewModel.prescriptions)
-                
-                // Prescriptions List Card
-                PrescriptionsListCard(
-                    prescriptions: viewModel.prescriptions,
-                    isLoading: viewModel.isLoading,
-                    error: viewModel.error,
-                    onRefresh: {
-                        Task {
-                            await viewModel.loadPrescriptions()
+                VStack(spacing: 20) {
+                    // Medications Overview Card
+                    MedicationsOverviewCard(prescriptions: viewModel.prescriptions)
+                    
+                    // Upload Prescription button (prominent)
+                    uploadPrescriptionCard
+                    
+                    // Active Medications Card
+                    ActiveMedicationsCard(prescriptions: viewModel.prescriptions)
+                    
+                    // Prescriptions List Card
+                    PrescriptionsListCard(
+                        prescriptions: viewModel.prescriptions,
+                        isLoading: viewModel.isLoading,
+                        error: viewModel.error,
+                        onRefresh: {
+                            Task {
+                                await viewModel.loadPrescriptions()
+                            }
                         }
-                    }
-                )
-                
-                Spacer(minLength: 100)
+                    )
+                    
+                    Spacer(minLength: 100)
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
             }
-            .padding(.horizontal)
-            .padding(.top, 8)
         }
         .background(Color(.systemGray6))
-        .navigationTitle("Medications")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    Task {
-                        await viewModel.loadPrescriptions()
-                    }
-                }) {
-                    Image(systemName: "arrow.clockwise")
-                }
-            }
-        }
+        .ignoresSafeArea(.container, edges: .top)
         .task {
             await viewModel.loadPrescriptions()
         }
         .refreshable {
             await viewModel.loadPrescriptions()
         }
+        .background(
+            NavigationLink(
+                destination: UploadPrescriptionView(),
+                isActive: $navigateToUploadPrescription,
+                label: { EmptyView() }
+            )
+            .hidden()
+        )
+    }
+    .navigationBarHidden(true)
+    }
+    
+    private var uploadPrescriptionCard: some View {
+        Button(action: { navigateToUploadPrescription = true }) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.badge.plus")
+                    .font(.title3)
+                Text("Upload Prescription")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.green)
+            .cornerRadius(12)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
     }
 }
 
 // MARK: - Legacy iOS 15 View
 struct MedicationsViewLegacy: View {
     @StateObject private var viewModel = MedicationsViewModel()
+    @State private var navigateToUploadPrescription = false
     
     var body: some View {
-        medicationsContent
-    }
-    
-    private var medicationsContent: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                // Medications Overview Card
-                MedicationsOverviewCard(prescriptions: viewModel.prescriptions)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Scrollable header
+                    MedicationsHeaderView(topInset: geometry.safeAreaInsets.top)
                 
-                // Active Medications Card
-                ActiveMedicationsCard(prescriptions: viewModel.prescriptions)
-                
-                // Prescriptions List Card
-                PrescriptionsListCard(
-                    prescriptions: viewModel.prescriptions,
-                    isLoading: viewModel.isLoading,
-                    error: viewModel.error,
-                    onRefresh: {
-                        Task {
-                            await viewModel.loadPrescriptions()
+                VStack(spacing: 20) {
+                    // Medications Overview Card
+                    MedicationsOverviewCard(prescriptions: viewModel.prescriptions)
+                    
+                    // Upload Prescription button (prominent)
+                    uploadPrescriptionCard
+                    
+                    // Active Medications Card
+                    ActiveMedicationsCard(prescriptions: viewModel.prescriptions)
+                    
+                    // Prescriptions List Card
+                    PrescriptionsListCard(
+                        prescriptions: viewModel.prescriptions,
+                        isLoading: viewModel.isLoading,
+                        error: viewModel.error,
+                        onRefresh: {
+                            Task {
+                                await viewModel.loadPrescriptions()
+                            }
                         }
-                    }
-                )
-                
-                Spacer(minLength: 100)
+                    )
+                    
+                    Spacer(minLength: 100)
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
             }
-            .padding(.horizontal)
-            .padding(.top, 8)
         }
         .background(Color(.systemGray6))
-        .navigationTitle("Medications")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    Task {
-                        await viewModel.loadPrescriptions()
-                    }
-                }) {
-                    Image(systemName: "arrow.clockwise")
-                }
-            }
-        }
+        .ignoresSafeArea(.container, edges: .top)
         .onAppear {
             Task {
                 await viewModel.loadPrescriptions()
             }
         }
+        .background(
+            NavigationLink(
+                destination: UploadPrescriptionView(),
+                isActive: $navigateToUploadPrescription,
+                label: { EmptyView() }
+            )
+            .hidden()
+        )
+    }
+    .navigationBarHidden(true)
+    }
+    
+    private var uploadPrescriptionCard: some View {
+        Button(action: { navigateToUploadPrescription = true }) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.badge.plus")
+                    .font(.title3)
+                Text("Upload Prescription")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.green)
+            .cornerRadius(12)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
     }
 }
 
@@ -564,5 +610,83 @@ class MedicationsViewModel: ObservableObject {
         }
         
         isLoading = false
+    }
+}
+
+// MARK: - Medications Header
+struct MedicationsHeaderView: View {
+    let topInset: CGFloat
+    @Environment(\.dismiss) private var dismiss
+    
+    private var brandRedGradient: Gradient {
+        Gradient(colors: [
+            Color.zivoRed,                 // darker (left)
+            Color.zivoRed.opacity(0.7)     // lighter (right)
+        ])
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Top spacer for status bar
+            Color.clear
+                .frame(height: topInset)
+            
+            // Card content with back button
+            ZStack(alignment: .topLeading) {
+                LinearGradient(
+                    gradient: brandRedGradient,
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                
+                ZStack {
+                    // Centered title and subtitle with offset to move down
+                    VStack(spacing: 4) {
+                        Text("Medications")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Text("Manage your prescriptions and medications")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                    .offset(y: 15)
+                    
+                    // Back button on the left, vertically centered
+                    HStack {
+                        Button(action: {
+                            dismiss()
+                        }) {
+                            Image(systemName: "arrow.backward")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.leading, 20)
+                        
+                        Spacer()
+                    }
+                    .offset(y: 10)
+                    
+                    // Pills icon on the right, vertically centered
+                    HStack {
+                        Spacer()
+                        
+                        Image(systemName: "pills.fill")
+                            .font(.system(size: 40))
+                            .foregroundColor(.white.opacity(0.9))
+                            .padding(.trailing, 20)
+                    }
+                }
+                .padding(.vertical, 20)
+            }
+            .frame(height: 110)
+            .cornerRadius(20)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+        }
+        .frame(height: 110 + topInset + 8)
+        .ignoresSafeArea(.container, edges: .top)
     }
 } 

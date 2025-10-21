@@ -23,6 +23,15 @@ final class NutritionAPIService: ObservableObject, @unchecked Sendable {
     
     private init() {}
     
+    // MARK: - Authentication Guards
+    /// Check if user is authenticated before making API calls
+    private func ensureAuthenticated() throws {
+        guard NetworkService.shared.isAuthenticated() else {
+            print("⚠️ [NutritionAPIService] User not authenticated - skipping API call")
+            throw URLError(.userAuthenticationRequired)
+        }
+    }
+    
     // MARK: - Authentication Headers
     private func getAuthHeaders() -> [String: String] {
         return NetworkService.shared.authHeaders(requiresAuth: true, body: nil)
@@ -42,6 +51,13 @@ final class NutritionAPIService: ObservableObject, @unchecked Sendable {
     
     // MARK: - Analyze Food Image with Nutrition Agent
     func analyzeFoodImage(imageData: Data, mealType: MealType = .other) -> AnyPublisher<NutritionAnalysisResponse, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let url = URL(string: "\(agentURL)/nutrition/analyze") else {
             return Fail(error: URLError(.badURL))
                 .eraseToAnyPublisher()
@@ -90,6 +106,13 @@ final class NutritionAPIService: ObservableObject, @unchecked Sendable {
     
     // MARK: - Create Nutrition Data
     func createNutritionData(_ data: NutritionDataCreate) -> AnyPublisher<NutritionDataResponse, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let url = URL(string: "\(baseURL)/data") else {
             return Fail(error: URLError(.badURL))
                 .eraseToAnyPublisher()
@@ -123,6 +146,12 @@ final class NutritionAPIService: ObservableObject, @unchecked Sendable {
         limit: Int = 100,
         offset: Int = 0
     ) -> AnyPublisher<[NutritionDataResponse], Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
         
         var components = URLComponents(string: "\(baseURL)/data")!
         var queryItems: [URLQueryItem] = []
@@ -188,6 +217,12 @@ final class NutritionAPIService: ObservableObject, @unchecked Sendable {
         endDate: Date,
         granularity: NutritionTimeGranularity = .daily
     ) -> AnyPublisher<NutritionChartData, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
         
         var components = URLComponents(string: "\(baseURL)/chart")!
         var queryItems: [URLQueryItem] = []
@@ -236,6 +271,13 @@ final class NutritionAPIService: ObservableObject, @unchecked Sendable {
     
     // MARK: - Delete Nutrition Data
     func deleteNutritionData(id: Int) -> AnyPublisher<Void, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let url = URL(string: "\(baseURL)/data/\(id)") else {
             return Fail(error: URLError(.badURL))
                 .eraseToAnyPublisher()

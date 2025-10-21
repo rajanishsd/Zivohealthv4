@@ -1365,10 +1365,11 @@ body {
 }
 
 /* Users table: enforce fixed column layout matching header and rows */
-.users-table .table-header,
-.users-table .table-row {
+.users-table .workflow-table .table-header,
+.users-table .workflow-table .table-row {
   /* Columns: [select] [id] [email] [name] [status] [delete date] [created] */
   grid-template-columns: 100px 80px 1.6fr 1.2fr 1fr 1.2fr 1.2fr;
+  gap: 12px;
 }
 
 .workflow-table .table-header {
@@ -1485,6 +1486,31 @@ body {
   background: #1565c0;
 }
 
+.view-workflow-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* User deletion buttons styling */
+.view-workflow-btn[title*="Deactivate"] {
+  background: #ff9800;
+}
+
+.view-workflow-btn[title*="Deactivate"]:hover:not(:disabled) {
+  background: #f57c00;
+  box-shadow: 0 2px 8px rgba(255, 152, 0, 0.3);
+}
+
+.view-workflow-btn[title*="Permanently"] {
+  background: #dc3545;
+}
+
+.view-workflow-btn[title*="Permanently"]:hover:not(:disabled) {
+  background: #c82333;
+  box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+  transform: scale(1.02);
+}
+
 .status-badge.success {
   background: #e8f5e8;
   color: #2e7d32;
@@ -1566,6 +1592,105 @@ body {
   padding: 24px;
   overflow-y: auto;
   flex: 1;
+}
+
+/* Admin Management Modal Styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-overlay .modal-content {
+  background: white;
+  border-radius: 12px;
+  padding: 30px;
+  max-width: 500px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.modal-overlay .modal-content h2 {
+  margin: 0 0 20px 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: #333;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #333;
+  font-size: 14px;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e6e8ea;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #333;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #1e88e5;
+  box-shadow: 0 0 0 3px rgba(30, 136, 229, 0.1);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 30px;
+}
+
+.modal-button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modal-button.cancel {
+  background: #f8f9fa;
+  color: #666;
+  border: 1px solid #e6e8ea;
+}
+
+.modal-button.cancel:hover {
+  background: #e6e8ea;
+  color: #333;
+}
+
+.modal-button.confirm {
+  background: #1e88e5;
+  color: white;
+}
+
+.modal-button.confirm:hover {
+  background: #1565c0;
+  box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
 }
 
 .workflow-summary {

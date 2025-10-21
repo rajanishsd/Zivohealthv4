@@ -30,9 +30,9 @@ class SmartDelayedAggregationWorker:
     
     def __init__(self, batch_size: int = None, delay_seconds: int = 30, allowed_domains: set = None):
         # Configuration - smaller batch sizes to prevent connection exhaustion
-        self.batch_size = batch_size or 100  # Reduced from default to 100
+        self.batch_size = batch_size or 50  # Reduced from 100 to 50 to minimize connection hold time
         self.delay_seconds = delay_seconds
-        self.max_batch_size = 500  # Hard limit to prevent connection pool exhaustion
+        self.max_batch_size = 200  # Reduced from 500 to 200 to prevent connection pool exhaustion
         
         # Optional domain filtering: {'vitals', 'nutrition', 'labs'} or None for all
         self.allowed_domains = set(allowed_domains) if allowed_domains else None
@@ -163,6 +163,11 @@ class SmartDelayedAggregationWorker:
 
     async def process_batch(self) -> int:
         """Process a batch of pending aggregation data"""
+        # Log connection pool stats before processing
+        from app.core.database_utils import check_connection_pool_stats
+        pool_stats = check_connection_pool_stats()
+        logger.debug(f"🔌 [SmartWorker] Connection pool before batch: {pool_stats}")
+        
         with get_db_session() as db:
             # Get pending entries for requested systems only
             vitals_entries = []
@@ -200,10 +205,14 @@ class SmartDelayedAggregationWorker:
             if lab_entries:
                 processed_count += await self._perform_lab_categorization_and_aggregation(db)
             
+            # Log connection pool stats after processing
+            pool_stats_after = check_connection_pool_stats()
+            logger.debug(f"🔌 [SmartWorker] Connection pool after batch: {pool_stats_after}")
+            
             return processed_count
 
     async def _process_vitals_batch(self, db: Session, entries: List[VitalsRawData]) -> int:
-        """Process a batch of vitals entries"""
+        """Process a batch of vitals entries with frequent commits to release connections"""
         processed_count = 0
         
         # Group entries by user and date for efficient aggregation
@@ -220,11 +229,15 @@ class SmartDelayedAggregationWorker:
         # Mark entries as processing
         entry_ids = [entry.id for entry in entries]
         VitalsCRUD.mark_aggregation_processing(db, entry_ids)
+        db.commit()  # Commit status updates immediately
         
         # Process each user-date group
         for (user_id, target_date), group_entries in user_date_groups.items():
             try:
                 await self._perform_vitals_aggregation(db, user_id, target_date)
+                
+                # Commit after each user-date aggregation to release locks
+                db.commit()
                 
                 # Note: Don't mark entries as "completed" - they are marked as "categorized" 
                 # in copy_raw_to_categorized_with_loinc method, which is the correct status
@@ -234,16 +247,18 @@ class SmartDelayedAggregationWorker:
                 logger.debug(f"✅ [SmartWorker] Completed vitals aggregation for user {user_id} on {target_date}")
                     
             except Exception as e:
+                db.rollback()  # Rollback failed transaction
                 logger.error(f"❌ [SmartWorker] Vitals aggregation failed for user {user_id} on {target_date}: {e}")
                 
                 # Mark entries as failed
                 group_entry_ids = [entry.id for entry in group_entries]
                 VitalsCRUD.mark_aggregation_failed(db, group_entry_ids, str(e))
+                db.commit()  # Commit failure status
         
         return processed_count
 
     async def _process_nutrition_batch(self, db: Session, entries: List[NutritionRawData]) -> int:
-        """Process a batch of nutrition entries"""
+        """Process a batch of nutrition entries with frequent commits to release connections"""
         processed_count = 0
         
         # Group entries by user and date for efficient aggregation
@@ -260,11 +275,15 @@ class SmartDelayedAggregationWorker:
         # Mark entries as processing
         entry_ids = [entry.id for entry in entries]
         NutritionCRUD.mark_aggregation_processing(db, entry_ids)
+        db.commit()  # Commit status updates immediately
         
         # Process each user-date group
         for (user_id, target_date), group_entries in user_date_groups.items():
             try:
                 await self._perform_nutrition_aggregation(db, user_id, target_date)
+                
+                # Commit after each user-date aggregation to release locks
+                db.commit()
                 
                 # Mark entries as completed (done inside the aggregation methods)
                 processed_count += len(group_entries)
@@ -272,11 +291,13 @@ class SmartDelayedAggregationWorker:
                 logger.info(f"✅ [SmartWorker] Completed nutrition aggregation for user {user_id} on {target_date}")
                 
             except Exception as e:
+                db.rollback()  # Rollback failed transaction
                 logger.error(f"❌ [SmartWorker] Nutrition aggregation failed for user {user_id} on {target_date}: {e}")
                 
                 # Mark entries as failed
                 group_entry_ids = [entry.id for entry in group_entries]
                 NutritionCRUD.mark_aggregation_failed(db, group_entry_ids, str(e))
+                db.commit()  # Commit failure status
         
         return processed_count
 

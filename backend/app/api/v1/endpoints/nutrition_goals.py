@@ -16,7 +16,6 @@ from app.schemas.nutrition_goals import (
     NutritionGoalTargetOut,
     NutritionGoalTargetNutrient,
     ActiveGoalSummaryOut,
-    DefaultTargetOut,
     UserNutrientFocusOut,
     ProgressItemOut,
     ProgressResponseOut,
@@ -753,25 +752,7 @@ def delete_goal(
     return {"success": True}
 
 
-@router.get("/defaults", response_model=List[DefaultTargetOut])
-def list_defaults(
-    objective_code: str = Query(...),
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_active_user),
-):
-    defaults = crud.objective_defaults.list_for_objective(db, objective_code)
-    items: List[DefaultTargetOut] = []
-    for d in defaults:
-        items.append(DefaultTargetOut(
-            objective_code=d.objective_code,
-            timeframe=d.timeframe,
-            target_type=d.target_type,
-            target_min=d.target_min,
-            target_max=d.target_max,
-            priority=d.priority,
-            nutrient=NutritionGoalTargetNutrient(id=d.nutrient.id, key=d.nutrient.key, display_name=d.nutrient.display_name),
-        ))
-    return items
+# Removed: /defaults endpoint (table doesn't exist, not used by frontend)
 
 
 @router.get("/focus", response_model=List[UserNutrientFocusOut])

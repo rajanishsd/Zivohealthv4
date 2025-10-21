@@ -267,21 +267,29 @@ async def get_vitals_charts(
         end_date = today_local()
         start_date = end_date - timedelta(days=days)
         
+        logger.info(f"📊 [VitalsCharts] Request for user {current_user.id}: metric_types={[mt.value for mt in metric_types]}, granularity={granularity.value}, days={days}")
+        
         # If no metric types specified, get all available for user
         if not metric_types:
             available_metrics = db.query(VitalsRawData.metric_type).filter(
                 VitalsRawData.user_id == current_user.id
             ).distinct().all()
             metric_types = [m[0] for m in available_metrics]
+            logger.info(f"📊 [VitalsCharts] No metric types specified, found available: {[mt.value for mt in metric_types]}")
         
         charts = []
         for metric_type in metric_types:
+            logger.info(f"📊 [VitalsCharts] Processing metric: {metric_type.value}")
             chart_data = await get_chart_data(
                 db, current_user.id, metric_type, granularity, start_date, end_date
             )
             if chart_data:
+                logger.info(f"📊 [VitalsCharts] Found {len(chart_data.data_points)} data points for {metric_type.value}")
                 charts.append(chart_data)
+            else:
+                logger.info(f"📊 [VitalsCharts] No data found for {metric_type.value}")
         
+        logger.info(f"📊 [VitalsCharts] Returning {len(charts)} charts for user {current_user.id}")
         return VitalMetricsChartsResponse(
             user_id=current_user.id,
             charts=charts,
@@ -555,6 +563,7 @@ async def get_chart_data(
 ) -> Optional[ChartData]:
     """Get chart data for a specific metric"""
     try:
+        logger.info(f"📊 [get_chart_data] Getting data for {metric_type.value}, user {user_id}, {start_date} to {end_date}")
         data_points = []
         unit = ""
         
@@ -563,8 +572,10 @@ async def get_chart_data(
             daily_data = VitalsCRUD.get_daily_aggregates(
                 db, user_id, metric_type, start_date, end_date
             )
+            logger.info(f"📊 [get_chart_data] Found {len(daily_data)} daily aggregates for {metric_type.value}")
             
             for daily in daily_data:
+                logger.info(f"📊 [get_chart_data] Daily data: date={daily.date}, avg={daily.average_value}, total={daily.total_value}, min={daily.min_value}, max={daily.max_value}")
                 # For heart rate, include min/max values to show daily range
                 if metric_type == VitalMetricType.HEART_RATE:
                     data_points.append(ChartDataPoint(
@@ -590,11 +601,20 @@ async def get_chart_data(
             )
             
             for weekly in weekly_data:
-                data_points.append(ChartDataPoint(
-                    date=weekly.week_start_date.isoformat(),
-                    value=weekly.average_value or weekly.total_value or 0,
-                    source=weekly.primary_source
-                ))
+                if metric_type == VitalMetricType.HEART_RATE:
+                    data_points.append(ChartDataPoint(
+                        date=weekly.week_start_date.isoformat(),
+                        value=weekly.average_value or weekly.total_value or 0,
+                        min_value=weekly.min_value,
+                        max_value=weekly.max_value,
+                        source=weekly.primary_source
+                    ))
+                else:
+                    data_points.append(ChartDataPoint(
+                        date=weekly.week_start_date.isoformat(),
+                        value=weekly.average_value or weekly.total_value or 0,
+                        source=weekly.primary_source
+                    ))
             
             unit = weekly_data[0].unit if weekly_data else ""
             
@@ -616,19 +636,30 @@ async def get_chart_data(
             for monthly in filtered_monthly:
                 # Create date as first day of month
                 month_date = date(monthly.year, monthly.month, 1)
-                data_points.append(ChartDataPoint(
-                    date=month_date.isoformat(),
-                    value=monthly.average_value or monthly.total_value or 0,
-                    source=monthly.primary_source
-                ))
+                if metric_type == VitalMetricType.HEART_RATE:
+                    data_points.append(ChartDataPoint(
+                        date=month_date.isoformat(),
+                        value=monthly.average_value or monthly.total_value or 0,
+                        min_value=monthly.min_value,
+                        max_value=monthly.max_value,
+                        source=monthly.primary_source
+                    ))
+                else:
+                    data_points.append(ChartDataPoint(
+                        date=month_date.isoformat(),
+                        value=monthly.average_value or monthly.total_value or 0,
+                        source=monthly.primary_source
+                    ))
             
             unit = filtered_monthly[0].unit if filtered_monthly else ""
         
         if not data_points:
+            logger.info(f"📊 [get_chart_data] No data points found for {metric_type.value}")
             return None
         
         # Calculate chart metadata
         values = [dp.value for dp in data_points if dp.value is not None]
+        logger.info(f"📊 [get_chart_data] Returning {len(data_points)} data points for {metric_type.value}, values: {values[:5]}...")
         
         return ChartData(
             metric_type=metric_type,

@@ -54,10 +54,11 @@ struct ContentView: View {
                 NavigationStack {
                     TabView(selection: $selectedTab) {
                         // Home Tab
-                        MainHomeView()
+                        HomeView()
                         .tabItem {
                             Label("Home", systemImage: "house.fill")
                         }
+                        .tag(0)
 
                         Health360OverviewView(healthKitManager: BackendVitalsManager.shared)
                         .tabItem {
@@ -85,6 +86,9 @@ struct ContentView: View {
                     }
                     .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToChatTab"))) { _ in
                         selectedTab = 2 // Chat tab for patients
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SwitchToAppointmentsTab"))) { _ in
+                        selectedTab = 3 // Appointments tab
                     }
                     .navigationDestination(for: String.self) { category in
                         switch category {
@@ -173,10 +177,11 @@ struct ContentView: View {
             NavigationView {
                 TabView(selection: $selectedTab) {
                     // Home Tab
-                    MainHomeView()
+                    HomeView()
                     .tabItem {
                         Label("Home", systemImage: "house.fill")
                     }
+                    .tag(0)
 
                     Health360OverviewView(healthKitManager: BackendVitalsManager.shared)
                     .tabItem {
@@ -276,90 +281,7 @@ struct ContentView: View {
     }
 }
 
-// Main home view for patient mode
-struct MainHomeView: View {
-    @AppStorage("userMode") private var userMode: UserMode = .patient
-
-    var body: some View {
-        ZStack {
-            // Background gradient
-            LinearGradient(
-                gradient: Gradient(colors: [Color.blue.opacity(0.1), Color.purple.opacity(0.1)]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            VStack(spacing: 40) {
-                Spacer()
-
-                // App Logo and Title
-                VStack(spacing: 16) {
-                    Image(systemName: "heart.circle.fill")
-                        .font(.system(size: 80))
-                        .foregroundColor(.blue)
-
-                    Text("ZivoHealth")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                        .foregroundColor(.primary)
-
-                    Text("Smart Healthcare Platform")
-                        .font(.title3)
-                        .foregroundColor(.secondary)
-                }
-
-                // Welcome message
-                VStack(spacing: 8) {
-                    Text("Welcome! You can now:")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("• Chat with AI for health guidance")
-                        Text("• Request consultations with doctors")
-                        Text("• Track your health metrics")
-                        Text("• View your chat history")
-                    }
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                }
-                .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
-
-                // Quick actions
-                VStack(spacing: 16) {
-                    Text("Get started by exploring the tabs below")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-
-                    HStack(spacing: 20) {
-                        QuickActionButton(
-                            icon: "message.circle.fill",
-                            title: "Start Chat",
-                            subtitle: "Chat tab"
-                        )
-
-                        QuickActionButton(
-                            icon: "heart.circle.fill",
-                            title: "Health Metrics",
-                            subtitle: "Health tab"
-                        )
-                    }
-                }
-
-                Spacer()
-            }
-            .padding()
-        }
-        .navigationTitle("ZivoHealth")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-// Quick action buttons for the home view
+// Quick action buttons for the home view (kept for backward compatibility)
 struct QuickActionButton: View {
     let icon: String
     let title: String

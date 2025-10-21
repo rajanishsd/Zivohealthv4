@@ -28,7 +28,7 @@ struct AboutZivoView: View {
             .listRowSeparator(.hidden)
             
             Section {
-                NavigationLink(destination: Text("Privacy Policy coming soon")) {
+                NavigationLink(destination: PrivacyPolicyView()) {
                     HStack(spacing: 12) {
                         Image(systemName: "lock.shield")
                             .foregroundColor(.secondary)
@@ -37,7 +37,7 @@ struct AboutZivoView: View {
                     }
                     .padding(.vertical, 6)
                 }
-                NavigationLink(destination: Text("Terms & Conditions coming soon")) {
+                NavigationLink(destination: TermsOfServiceView()) {
                     HStack(spacing: 12) {
                         Image(systemName: "doc.text")
                             .foregroundColor(.secondary)

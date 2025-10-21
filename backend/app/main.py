@@ -251,6 +251,7 @@ def create_application() -> FastAPI:
     # This delays agent loading until after the app is configured
     try:
         from app.api.v1.api import api_router
+        from app.health_scoring.api import router as health_score_internal_router
         logger.info("API router imported successfully")
     except Exception as e:
         logger.error(f"Failed to import API router: {e}")
@@ -271,6 +272,7 @@ def create_application() -> FastAPI:
         raise
     
     app.include_router(api_router, prefix=settings.API_V1_STR)
+    app.include_router(health_score_internal_router, prefix=settings.API_V1_STR)
     app.include_router(performance_router, prefix="/performance")
     app.include_router(dashboard_router, prefix="/dashboard")
     

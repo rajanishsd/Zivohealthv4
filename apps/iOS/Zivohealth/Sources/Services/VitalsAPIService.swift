@@ -289,6 +289,15 @@ final class VitalsAPIService: ObservableObject, @unchecked Sendable {
     
     private init() {}
     
+    // MARK: - Authentication Guards
+    /// Check if user is authenticated before making API calls
+    private func ensureAuthenticated() throws {
+        guard NetworkService.shared.isAuthenticated() else {
+            print("⚠️ [VitalsAPIService] User not authenticated - skipping API call")
+            throw URLError(.userAuthenticationRequired)
+        }
+    }
+    
     // MARK: - Date Encoder/Decoder
     private func createDateEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
@@ -407,6 +416,13 @@ final class VitalsAPIService: ObservableObject, @unchecked Sendable {
     
     // MARK: - Data Submission
     func submitHealthData(_ data: VitalDataSubmission) -> AnyPublisher<VitalSubmissionResponse, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let url = URL(string: "\(baseURL)/submit") else {
             return Fail(error: URLError(.badURL))
                 .eraseToAnyPublisher()
@@ -435,6 +451,13 @@ final class VitalsAPIService: ObservableObject, @unchecked Sendable {
     }
     
     func submitBulkHealthData(_ data: [VitalDataSubmission], chunkInfo: ChunkInfo?) -> AnyPublisher<VitalSubmissionResponse, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let url = URL(string: "\(baseURL)/bulk-submit") else {
             return Fail(error: URLError(.badURL))
                 .eraseToAnyPublisher()
@@ -484,6 +507,13 @@ final class VitalsAPIService: ObservableObject, @unchecked Sendable {
     
     // MARK: - Data Retrieval
     func getDashboard() -> AnyPublisher<VitalDashboard, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let url = URL(string: "\(baseURL)/dashboard") else {
             return Fail(error: URLError(.badURL))
                 .eraseToAnyPublisher()
@@ -530,28 +560,62 @@ final class VitalsAPIService: ObservableObject, @unchecked Sendable {
         granularity: TimeGranularity = .daily,
         days: Int = 30
     ) -> AnyPublisher<ChartData, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
+        // Log ALL chart data requests for debugging
+        print("📊 [VitalsAPI] Fetching chart data for \(metricType.rawValue) - granularity: \(granularity.rawValue), days: \(days)")
+        
         // Encode metric type for URL
         let encodedMetricType = metricType.rawValue.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? metricType.rawValue
         guard let url = URL(string: "\(baseURL)/charts?metric_types=\(encodedMetricType)&granularity=\(granularity.rawValue)&days=\(days)") else {
+            print("❌ [VitalsAPI] Failed to create URL for \(metricType.rawValue) chart request")
             return Fail(error: URLError(.badURL))
                 .eraseToAnyPublisher()
         }
+        
+        print("🌐 [VitalsAPI] Making API request to: \(url.absoluteString)")
         
         var request = URLRequest(url: url)
         request.allHTTPHeaderFields = getAuthHeaders()
         
         return URLSession.shared.dataTaskPublisher(for: request)
-            .map(\.data)
+            .map { data, response in
+                print("🔄 [VitalsAPI] DEBUG: Received response with \(data.count) bytes")
+                if let httpResponse = response as? HTTPURLResponse {
+                    print("🔄 [VitalsAPI] DEBUG: HTTP status: \(httpResponse.statusCode)")
+                }
+                return data
+            }
             .decode(type: VitalMetricsChartsResponse.self, decoder: createDateDecoder())
             .compactMap { response in
+                print("🔄 [VitalsAPI] DEBUG: Decoded response with \(response.charts.count) charts")
                 // Find the chart for the requested metric type
-                return response.charts.first { $0.metricType == metricType }
+                let chartData = response.charts.first { $0.metricType == metricType }
+                if let chart = chartData {
+                    print("✅ [VitalsAPI] Successfully received \(chart.dataPoints.count) data points for \(metricType.rawValue)")
+                } else {
+                    print("⚠️ [VitalsAPI] No chart data found for \(metricType.rawValue) in response")
+                    print("🔄 [VitalsAPI] DEBUG: Available chart types: \(response.charts.map { $0.metricType.rawValue })")
+                }
+                return chartData
             }
             .receive(on: DispatchQueue.main)
             .eraseToAnyPublisher()
     }
     
     func getSyncStatus() -> AnyPublisher<VitalSyncStatus, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let url = URL(string: "\(baseURL)/sync-status/apple_healthkit") else {
             return Fail(error: URLError(.badURL))
                 .eraseToAnyPublisher()
@@ -584,6 +648,13 @@ final class VitalsAPIService: ObservableObject, @unchecked Sendable {
     }
     
     func getDataCount(days: Int = 30) -> AnyPublisher<VitalDataCount, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let url = URL(string: "\(baseURL)/data-count?days=\(days)") else {
             return Fail(error: URLError(.badURL))
                 .eraseToAnyPublisher()

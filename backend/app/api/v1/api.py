@@ -8,6 +8,7 @@ from app.api.v1.endpoints import health
 from app.api.v1.endpoints import appointments
 from app.api.v1.endpoints import vitals
 from app.api.v1.endpoints import nutrition
+from app.api.v1.endpoints import mental_health
 from app.api.v1.endpoints import nutrition_goals
 from app.api.v1.endpoints import agents
 from app.api.v1.endpoints import lab_reports
@@ -16,6 +17,8 @@ from app.api.v1.endpoints import feedback
 from app.api.v1.endpoints import video
 from app.api.v1.endpoints import dashboard as dashboard_v1
 from app.api.v1.endpoints import admin_users
+from app.api.v1.endpoints import admin_management
+from app.api.v1.endpoints import admin_auth
 from app.api.v1.endpoints import password_reset
 from app.api.v1.endpoints import onboarding
 from app.api.v1.endpoints import profile
@@ -24,6 +27,7 @@ from app.api.v1.endpoints import devices
 from app.api.v1.endpoints import notifications
 from app.api.v1.endpoints import timezones
 from app.api.v1.endpoints import country_codes
+from app.api.v1.endpoints import health_score
 # Reminders are handled by a separate microservice - no need to import here
 from app.routes import audit
 from app.routes import dashboard
@@ -34,12 +38,14 @@ api_router = APIRouter()
 
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(dual_auth.router, prefix="/auth", tags=["dual-auth"])
+api_router.include_router(admin_auth.router, prefix="/auth", tags=["admin-auth"])
 api_router.include_router(password_reset.router, prefix="/auth", tags=["auth"])
 api_router.include_router(chat_sessions.router, prefix="/chat-sessions", tags=["chat-sessions"])
 api_router.include_router(doctors.router, prefix="/doctors", tags=["doctors"])
 api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(vitals.router, prefix="/vitals", tags=["vitals"])
 api_router.include_router(nutrition.router, prefix="/nutrition", tags=["nutrition"])
+api_router.include_router(mental_health.router, prefix="/mental-health", tags=["mental-health"])
 api_router.include_router(nutrition_goals.router, prefix="/nutrition-goals", tags=["nutrition-goals"])
 api_router.include_router(appointments.router, prefix="/appointments", tags=["appointments"])
 api_router.include_router(agents.router, prefix="/agents", tags=["agents"])
@@ -59,6 +65,10 @@ api_router.include_router(country_codes.router, prefix="/country-codes", tags=["
 api_router.include_router(dashboard_v1.router, prefix="/dashboard", tags=["dashboard-v1"])
 # Admin users management
 api_router.include_router(admin_users.router, prefix="/admin", tags=["admin-users"])
+# Admin management (create, delete, change password for admins)
+api_router.include_router(admin_management.router, prefix="/admin", tags=["admin-management"])
+# Health score (user-facing)
+api_router.include_router(health_score.router, tags=["health-score"])
 # Reminders are handled by a separate microservice at http://localhost:8085 
 
 # api_router.include_router(telemetry_dashboard.router, prefix="/telemetry-audit", tags=["telemetry-dashboard"])

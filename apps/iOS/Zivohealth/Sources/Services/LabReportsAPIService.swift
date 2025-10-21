@@ -16,6 +16,15 @@ final class LabReportsAPIService: ObservableObject, @unchecked Sendable {
     
     private init() {}
     
+    // MARK: - Authentication Guards
+    /// Check if user is authenticated before making API calls
+    private func ensureAuthenticated() throws {
+        guard NetworkService.shared.isAuthenticated() else {
+            print("⚠️ [LabReportsAPIService] User not authenticated - skipping API call")
+            throw URLError(.userAuthenticationRequired)
+        }
+    }
+    
     private func getAuthHeaders() -> [String: String] {
         return NetworkService.shared.authHeaders(requiresAuth: true, body: nil)
     }
@@ -33,6 +42,13 @@ final class LabReportsAPIService: ObservableObject, @unchecked Sendable {
     }
     
     func getLabCategories() -> AnyPublisher<LabCategoriesResponse, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let url = URL(string: "\(baseURL)/categories") else {
             return Fail(error: URLError(.badURL))
                 .eraseToAnyPublisher()
@@ -50,6 +66,13 @@ final class LabReportsAPIService: ObservableObject, @unchecked Sendable {
     }
     
     func getDiabetesPanelData() -> AnyPublisher<DiabetesPanelResponse, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let url = URL(string: "\(baseURL)/diabetes-panel") else {
             return Fail(error: URLError(.badURL))
                 .eraseToAnyPublisher()
@@ -69,6 +92,13 @@ final class LabReportsAPIService: ObservableObject, @unchecked Sendable {
     }
     
     func getLiverFunctionTestsData() -> AnyPublisher<LiverFunctionTestsResponse, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let url = URL(string: "\(baseURL)/liver-function-tests") else {
             return Fail(error: URLError(.badURL))
                 .eraseToAnyPublisher()
@@ -88,6 +118,13 @@ final class LabReportsAPIService: ObservableObject, @unchecked Sendable {
     }
     
     func getKidneyFunctionTestsData() -> AnyPublisher<KidneyFunctionTestsResponse, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let url = URL(string: "\(baseURL)/kidney-function-tests") else {
             return Fail(error: URLError(.badURL))
                 .eraseToAnyPublisher()
@@ -107,6 +144,13 @@ final class LabReportsAPIService: ObservableObject, @unchecked Sendable {
     }
     
     func getAvailableCategories() -> AnyPublisher<AvailableCategoriesResponse, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let url = URL(string: "\(baseURL)/available-categories") else {
             return Fail(error: URLError(.badURL))
                 .eraseToAnyPublisher()
@@ -126,6 +170,13 @@ final class LabReportsAPIService: ObservableObject, @unchecked Sendable {
     }
     
     func getCategoryTestsData(category: String) -> AnyPublisher<CategoryTestsResponse, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let encodedCategory = category.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "\(baseURL)/category/\(encodedCategory)/tests") else {
             return Fail(error: URLError(.badURL))
@@ -146,6 +197,13 @@ final class LabReportsAPIService: ObservableObject, @unchecked Sendable {
     }
     
     func getTestTrends(testName: String) -> AnyPublisher<TestTrendsResponse, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let encodedTestName = testName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "\(baseURL)/trends/\(encodedTestName)") else {
             return Fail(error: URLError(.badURL))
@@ -166,6 +224,13 @@ final class LabReportsAPIService: ObservableObject, @unchecked Sendable {
     }
     
     func getCategoryDetails(category: String) -> AnyPublisher<LabCategoryDetail, Error> {
+        // Guard: Check authentication first
+        do {
+            try ensureAuthenticated()
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+        
         guard let encodedCategory = category.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "\(baseURL)/category/\(encodedCategory)") else {
             return Fail(error: URLError(.badURL))

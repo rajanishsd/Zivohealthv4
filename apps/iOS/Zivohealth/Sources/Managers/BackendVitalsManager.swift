@@ -11,6 +11,7 @@ final class BackendVitalsManager: ObservableObject, @unchecked Sendable {
     private let healthStore = HKHealthStore()
     private let apiService = VitalsAPIService.shared
     private var cancellables = Set<AnyCancellable>()
+    private var authStateSubscription: AnyCancellable?
     
     @Published var isAuthorized = false
     @Published var isLoading = false
@@ -44,12 +45,35 @@ final class BackendVitalsManager: ObservableObject, @unchecked Sendable {
     private init() {
         print("🏥 [BackendVitalsManager] Initializing...")
         syncManager = VitalsSyncManager(vitalsManager: self)
+        setupAuthObserver()
         setupSyncObservation()
         refreshDevicesConfig()
         checkAuthorizationStatus()
         setupAutoSync()
         setupPeriodicSync()
         setupBackgroundNotifications()
+    }
+    
+    // MARK: - Auth State Observer
+    /// Observe authentication state and clear data on logout
+    private func setupAuthObserver() {
+        authStateSubscription = NetworkService.shared.$isAuthenticatedState
+            .sink { [weak self] isAuthenticated in
+                if !isAuthenticated {
+                    print("🔒 [BackendVitalsManager] User logged out - clearing vitals data")
+                    self?.clearData()
+                }
+            }
+    }
+    
+    /// Clear all cached data
+    private func clearData() {
+        DispatchQueue.main.async { [weak self] in
+            self?.healthMetrics = []
+            self?.dashboardData = nil
+            self?.syncStatus = nil
+            self?.errorMessage = nil
+        }
     }
     
     // MARK: - Sync Observation Setup

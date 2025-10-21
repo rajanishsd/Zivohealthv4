@@ -13,6 +13,8 @@ struct HealthMetricsView: View {
     // Track if this is the first load to show appropriate loading state
     @State private var isFirstLoad = true
     
+    
+    
     // Break up the complex array expression
     private let basicMetrics = ["Blood Pressure", "Heart Rate", "Blood Sugar", "Temperature"]
     private let bodyMetrics = ["Weight", "Height", "BMI", "Oxygen Saturation"]
@@ -25,11 +27,11 @@ struct HealthMetricsView: View {
     }
 
     var body: some View {
-        ZStack {
+        GeometryReader { geometry in
             ScrollView {
                 VStack(spacing: 0) {
-                    // Personal health header
-                    PersonalHealthHeaderView()
+                    // Scrollable header
+                    PersonalHealthHeaderView(topInset: geometry.safeAreaInsets.top)
                     
                     if healthKitManager.isLoading && isFirstLoad {
                         // Loading state
@@ -90,8 +92,13 @@ struct HealthMetricsView: View {
                     } else {
                         // Authorized - show charts or empty state
                         if let dashboardData = healthKitManager.dashboardData, !dashboardData.metrics.isEmpty {
-                        // Data available - show chart-based metrics view
-                        LazyVStack(spacing: 0) {
+                        // Data available - show summary card first, then chart-based metrics view
+                        LazyVStack(spacing: 16) {
+                            // Today's vitals summary card
+                            vitalsSummaryCard
+                                .padding(.horizontal)
+                                .padding(.top, 8)
+                            
                             ForEach(metricTypes, id: \.self) { metricType in
                                 let vitalMetricType = convertToVitalMetricType(metricType)
                                 let metricSummary = dashboardData.metrics.first { $0.metricType == vitalMetricType }
@@ -105,6 +112,11 @@ struct HealthMetricsView: View {
                                             .cornerRadius(12)
                                             .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
                                             .padding(.horizontal)
+                                            .onAppear {
+                                                // Log when metric cards are displayed
+                                                print("📱 [HealthMetricsView] Displaying \(metricType) chart with \(summary.dataPoints.count) data points")
+                                                print("📱 [HealthMetricsView] DEBUG: VitalChartView created for \(metricType)")
+                                            }
                                         
                                         Divider()
                                             .padding(.top, 16)
@@ -187,6 +199,8 @@ struct HealthMetricsView: View {
                     }
                 }
             }
+            .background(Color(UIColor.secondarySystemBackground))
+            .ignoresSafeArea(.container, edges: .top)
             
             // Sync Progress Overlay - shows when syncing is in progress
             if healthKitManager.isSyncing {
@@ -200,10 +214,186 @@ struct HealthMetricsView: View {
                     .animation(.easeInOut, value: healthKitManager.isSyncing)
             }
         }
-        .background(Color(UIColor.secondarySystemBackground))
-        .navigationTitle("Vitals")
-        .navigationBarTitleDisplayMode(.large)
-        // Remove all toolbar buttons - only pull-to-refresh now
+        .navigationBarHidden(true)
+    }
+    
+    // MARK: - Helper Functions for Vitals Summary
+    
+    // Helper view for individual vital metrics
+    private func vitalMetricView(label: String, value: Double?, unit: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            if let value = value {
+                if label == "Blood Pressure" {
+                    // Format blood pressure as systolic/diastolic
+                    if let diastolic = getLatestValue(for: .bloodPressureDiastolic) {
+                        Text("\(Int(value))/\(Int(diastolic))")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(color)
+                    } else {
+                        Text("\(Int(value))")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(color)
+                    }
+                } else if label == "Sleep" {
+                    // Format sleep hours
+                    Text(String(format: "%.1f%@", value, unit))
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(color)
+                } else {
+                    Text("\(Int(value))\(unit)")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(color)
+                }
+            } else {
+                Text("--")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.gray)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+    
+    // Get latest value for a specific metric type
+    private func getLatestValue(for metricType: VitalMetricType) -> Double? {
+        guard let dashboardData = healthKitManager.dashboardData else { return nil }
+        let metric = dashboardData.metrics.first { $0.metricType == metricType }
+        return metric?.latestValue
+    }
+    
+    // Get blood pressure value formatted
+    private func getBloodPressureValue() -> Double? {
+        guard let dashboardData = healthKitManager.dashboardData else { return nil }
+        // For blood pressure, we'll show systolic/diastolic if available
+        // For now, return systolic as the primary value
+        let systolic = dashboardData.metrics.first { $0.metricType == .bloodPressureSystolic }?.latestValue
+        return systolic
+    }
+    
+    // MARK: - Vitals Summary Card
+    private var vitalsSummaryCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Card Header
+            HStack {
+                Image(systemName: "heart.circle.fill")
+                    .foregroundColor(.red)
+                    .font(.title2)
+                Text("Today's Summary")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                Spacer()
+                Text(Date().formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            // Key metrics row - Heart Rate and Steps
+            HStack {
+                VStack(alignment: .leading) {
+                    Text("Heart Rate")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    if let heartRate = getLatestValue(for: .heartRate) {
+                        Text("\(Int(heartRate))")
+                            .font(.system(size: 44, weight: .bold))
+                            .foregroundColor(.red)
+                        Text("bpm")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("--")
+                            .font(.system(size: 44, weight: .bold))
+                            .foregroundColor(.gray)
+                    }
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing) {
+                    Text("Steps")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    if let steps = getLatestValue(for: .stepCount) {
+                        Text("\(Int(steps))")
+                            .font(.title3)
+                            .fontWeight(.medium)
+                    } else {
+                        Text("--")
+                            .font(.title3)
+                            .fontWeight(.medium)
+                            .foregroundColor(.gray)
+                    }
+                }
+            }
+            
+            Divider()
+            
+            // Additional vitals grid
+            VStack(spacing: 8) {
+                HStack(spacing: 0) {
+                    // Blood Pressure
+                    vitalMetricView(
+                        label: "Blood Pressure",
+                        value: getBloodPressureValue(),
+                        unit: "",
+                        color: .red
+                    )
+                    
+                    // Weight
+                    vitalMetricView(
+                        label: "Weight",
+                        value: getLatestValue(for: .bodyMass),
+                        unit: "kg",
+                        color: .blue
+                    )
+                    
+                    // Blood Sugar
+                    vitalMetricView(
+                        label: "Blood Sugar",
+                        value: getLatestValue(for: .bloodSugar),
+                        unit: "mg/dL",
+                        color: .purple
+                    )
+                }
+                
+                HStack(spacing: 0) {
+                    // Oxygen Saturation
+                    vitalMetricView(
+                        label: "Oxygen",
+                        value: getLatestValue(for: .oxygenSaturation),
+                        unit: "%",
+                        color: .mint
+                    )
+                    
+                    // Active Energy
+                    vitalMetricView(
+                        label: "Active Energy",
+                        value: getLatestValue(for: .activeEnergy),
+                        unit: "kcal",
+                        color: .orange
+                    )
+                    
+                    // Sleep
+                    vitalMetricView(
+                        label: "Sleep",
+                        value: getLatestValue(for: .sleep),
+                        unit: "hrs",
+                        color: .indigo
+                    )
+                }
+            }
+        }
+        .padding()
+        .background(Color(UIColor.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
     
     private func getMetricIcon(for type: String) -> String {
@@ -286,6 +476,7 @@ struct VitalChartView: View {
     @State private var cancellables = Set<AnyCancellable>()
     
     var body: some View {
+        let _ = print("🔄 [VitalChartView] DEBUG: VitalChartView body computed for \(metricType)")
         VStack(spacing: 16) {
             // Metric section header
             if showHeader {
@@ -404,18 +595,26 @@ struct VitalChartView: View {
                 }
             }
         }
-        .onChange(of: selectedGranularity) { _ in
+        .onChange(of: selectedGranularity) { newGranularity in
+            // Log ALL granularity changes for debugging
+            print("📅 [VitalChartView] Granularity changed for \(metricType): \(selectedGranularity.rawValue) → \(newGranularity.rawValue)")
             fetchChartData()
         }
-        .onChange(of: selectedDays) { _ in
+        .onChange(of: selectedDays) { newDays in
+            // Log ALL days changes for debugging
+            print("📅 [VitalChartView] Days changed for \(metricType): \(selectedDays) → \(newDays)")
             fetchChartData()
         }
         .onAppear {
+            print("🚨🚨🚨 [VitalChartView] ON APPEAR CALLED FOR \(metricType) 🚨🚨🚨")
             fetchChartData()
         }
     }
     
     private func fetchChartData() {
+        // Log ALL chart data fetches for debugging
+        print("🔄 [VitalChartView] fetchChartData() called for \(metricType)")
+        
         isLoading = true
         errorMessage = nil
         
@@ -503,6 +702,10 @@ struct VitalChartView: View {
     }
     
     private func fetchSingleMetricData(_ metricType: VitalMetricType) {
+        // Log ALL chart data fetches for debugging
+        print("🔄 [VitalChartView] Starting fetch for \(metricType.rawValue) - granularity: \(selectedGranularity.rawValue), days: \(selectedDays)")
+        print("🔄 [VitalChartView] DEBUG: About to call apiService.getChartData")
+        
         apiService.getChartData(
             for: metricType,
             granularity: selectedGranularity,
@@ -511,17 +714,20 @@ struct VitalChartView: View {
         .sink(
             receiveCompletion: { completion in
                 DispatchQueue.main.async {
+                    print("🔄 [VitalChartView] DEBUG: Received completion for \(metricType.rawValue)")
                     self.isLoading = false
                     if case .failure(let error) = completion {
                         self.errorMessage = "Failed to load chart data: \(error.localizedDescription)"
-                        print("❌ [VitalChartView] Failed to fetch chart data: \(error)")
+                        print("❌ [VitalChartView] Failed to fetch \(metricType.rawValue) chart data: \(error)")
                     }
                 }
             },
             receiveValue: { data in
                 DispatchQueue.main.async {
+                    print("🔄 [VitalChartView] DEBUG: Received data for \(metricType.rawValue) with \(data.dataPoints.count) points")
                     self.chartData = data
                     self.errorMessage = nil
+                    print("✅ [VitalChartView] Successfully loaded \(metricType.rawValue) chart with \(data.dataPoints.count) data points")
                 }
             }
         )
@@ -983,30 +1189,79 @@ struct FallbackVitalChartView: View {
 
 // Personal health header
 struct PersonalHealthHeaderView: View {
+    let topInset: CGFloat
+    @Environment(\.dismiss) private var dismiss
+    
+    private var brandRedGradient: Gradient {
+        Gradient(colors: [
+            Color.zivoRed,                 // darker (left)
+            Color.zivoRed.opacity(0.7)     // lighter (right)
+        ])
+    }
+    
     var body: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Image(systemName: "heart.text.square")
-                    .font(.title2)
-                    .foregroundColor(.red)
-                
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Vitals")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                    
-                    Text("Your health metrics from Apple Health app")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                Spacer()
-            }
-            .padding(.horizontal)
+        VStack(spacing: 0) {
+            // Top spacer for status bar
+            Color.clear
+                .frame(height: topInset)
             
-            Divider()
+            // Card content with back button
+            ZStack(alignment: .topLeading) {
+                LinearGradient(
+                    gradient: brandRedGradient,
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                
+                ZStack {
+                    // Centered title and subtitle with offset to move down
+                    VStack(spacing: 4) {
+                        Text("Vitals")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Text("Your health metrics from Apple Health")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                    .offset(y: 15)
+                    
+                    // Back button on the left, vertically centered
+                    HStack {
+                        Button(action: {
+                            dismiss()
+                        }) {
+                            Image(systemName: "arrow.backward")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.leading, 20)
+                        
+                        Spacer()
+                    }
+                    .offset(y: 10)
+                    
+                    // Heart icon on the right, vertically centered
+                    HStack {
+                        Spacer()
+                        
+                        Image(systemName: "heart.text.square.fill")
+                            .font(.system(size: 40))
+                            .foregroundColor(.white.opacity(0.9))
+                            .padding(.trailing, 20)
+                    }
+                }
+                .padding(.vertical, 20)
+            }
+            .frame(height: 110)
+            .cornerRadius(20)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
         }
-        .background(Color(UIColor.systemBackground))
+        .frame(height: 110 + topInset + 8)
+        .ignoresSafeArea(.container, edges: .top)
     }
 }
 

@@ -11,10 +11,13 @@ struct Health360OverviewView: View {
         ScrollView {
                 VStack(spacing: 20) {
                     // Health Score Header
-                    HealthScoreHeaderView()
+                    NavigationLink(destination: HealthScoreDetailView().navigationTitle("Health Score")) {
+                        HealthScoreHeaderView()
+                    }
+                    .buttonStyle(PlainButtonStyle())
                     
-                    // Active Health Alerts
-                    ActiveHealthAlertsView()
+                    // Active Health Alerts (hidden)
+                    // ActiveHealthAlertsView()
                     
                     // Main Health Categories - Vertical Layout
                     VStack(spacing: 16) {
@@ -26,6 +29,9 @@ struct Health360OverviewView: View {
                             VitalsCardContentView(healthKitManager: healthKitManager)
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .onTapGesture {
+                            print("🚨🚨🚨 [Health360OverviewView] VITALS CARD TAPPED 🚨🚨🚨")
+                        }
                         
                         // Nutrition Card - navigates to detailed NutritionView
                         if #available(iOS 16.0, *) {
@@ -68,13 +74,16 @@ struct Health360OverviewView: View {
                         }
                         .buttonStyle(PlainButtonStyle())
                         
-                        // Mental Well-being Card
-                        MentalWellbeingCardView()
+                        // Mental Health Card
+                        NavigationLink(destination: MentalHealthView()) {
+                            MentalWellbeingCardView()
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
                     .padding(.horizontal)
                     
-                    // AI Health Insights Section
-                    AIHealthInsightsView()
+                    // AI Health Insights Section (hidden)
+                    // AIHealthInsightsView()
                 }
                 .padding(.bottom, 100)
         }
@@ -82,6 +91,12 @@ struct Health360OverviewView: View {
         .navigationTitle("Health 360")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            // Only load data if user is authenticated
+            guard NetworkService.shared.isAuthenticated() else {
+                print("⚠️ [Health360OverviewView] User not authenticated - skipping data load")
+                return
+            }
+            
             print("🏥 [Health360OverviewView] onAppear - Health360 view loaded")
             
             // Check and request authorization if needed
@@ -100,6 +115,11 @@ struct Health360OverviewView: View {
 
 // MARK: - Health Score Header
 struct HealthScoreHeaderView: View {
+    @StateObject private var api = HealthScoreAPIService.shared
+    @State private var scoreText: String = "--"
+    @State private var subtitle: String = "Overall Health Score"
+    @State private var reasons: [String] = []
+    @State private var cancellables = Set<AnyCancellable>()
     var body: some View {
         ZStack {
             // Gradient background
@@ -125,75 +145,55 @@ struct HealthScoreHeaderView: View {
                 }
                 
                 VStack(spacing: 8) {
-                    Text("84")
+                    Text(scoreText)
                         .font(.system(size: 48, weight: .bold))
                         .foregroundColor(.white)
                     
-                    Text("Overall Health Score")
+                    Text(subtitle)
                         .font(.headline)
                         .foregroundColor(.white.opacity(0.9))
-                    
-                    Text("Excellent")
-                        .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.8))
-                }
-                
-                // Progress bar
-                VStack(spacing: 8) {
-                    Rectangle()
-                        .fill(Color.black.opacity(0.2))
-                        .frame(height: 8)
-                        .cornerRadius(4)
-                        .overlay(
-                            HStack {
-                                Rectangle()
-                                    .fill(Color.white)
-                                    .frame(width: 200, height: 8)
-                                    .cornerRadius(4)
-                                Spacer()
-                            }
-                        )
-                    
+                    // CTA to navigate to details
                     HStack {
-                        VStack {
-                            Text("Physical")
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.9))
-                            Text("85%")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.white)
-                        }
-                        
                         Spacer()
-                        
-                        VStack {
-                            Text("Mental")
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.9))
-                            Text("82%")
-                                .font(.caption)
+                        HStack(spacing: 6) {
+                            Text("Know why")
+                                .font(.subheadline)
                                 .fontWeight(.semibold)
-                                .foregroundColor(.white)
+                            Image(systemName: "chevron.right")
+                                .font(.subheadline)
                         }
-                        
-                        Spacer()
-                        
-                        VStack {
-                            Text("Lifestyle")
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.9))
-                            Text("86%")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.white)
-                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.15))
+                        .cornerRadius(12)
                     }
                 }
             }
             .padding(20)
         }
         .padding(.horizontal)
+        .onAppear {
+            // Only load data if user is authenticated
+            guard NetworkService.shared.isAuthenticated() else {
+                print("⚠️ [HealthScoreHeaderView] User not authenticated - skipping data load")
+                return
+            }
+            
+            api.getToday()
+                .receive(on: DispatchQueue.main)
+                .sink(receiveCompletion: { _ in }, receiveValue: { json in
+                    if let s = json["overall"] as? Double {
+                        scoreText = String(format: "%.0f", s)
+                    }
+                    if let detail = json["detail"] as? [String: Any],
+                       let insights = detail["insights"] as? [String: Any],
+                       let rs = insights["reasons"] as? [[String: Any]] {
+                        reasons = rs.compactMap { $0["message"] as? String }
+                    }
+                })
+                .store(in: &cancellables)
+        }
     }
 }
 
@@ -391,8 +391,17 @@ struct VitalsCardContentView: View {
 // MARK: - Nutrition Card
 struct NutritionCardView: View {
     @StateObject private var nutritionManager = NutritionManager.shared
+    @StateObject private var nutritionGoalsManager = NutritionGoalsManager.shared
     
-    private var dailyCalorieGoal: Double { 2000 }
+    private var dailyCalorieGoal: Double {
+        // Try to get the calorie goal from nutrition goals manager
+        if let caloriesItem = nutritionGoalsManager.progressItems.first(where: { $0.nutrientKey == "calories" }),
+           let targetMax = caloriesItem.targetMax {
+            return targetMax
+        }
+        // Fallback to 2000 if no goal is set
+        return 2000
+    }
     
     private var lastMealInfo: String {
         guard let lastMeal = nutritionManager.todaysMeals.last else {
@@ -505,6 +514,7 @@ struct NutritionCardView: View {
         .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
         .onAppear {
             nutritionManager.loadTodaysData()
+            nutritionGoalsManager.loadGoalsData()
         }
     }
     
@@ -845,6 +855,7 @@ struct BiomarkersCardView: View {
             return "normal"
         }
     }
+    
 }
 
 // MARK: - Medications Card
@@ -1008,29 +1019,15 @@ struct ActivitySleepCardView: View {
     }
     
     private func getLatestSteps() -> String {
-        if let dashboardData = healthKitManager.dashboardData,
-           let stepsMetric = dashboardData.metrics.first(where: { $0.metricType == .stepCount }),
-           let latestPoint = stepsMetric.dataPoints.last {
-            return "\(Int(latestPoint.averageValue ?? 0))"
-        }
-        return "6000"
+        return VitalsDisplayHelper.getLatestSteps(from: healthKitManager.dashboardData)
     }
     
     private func getLatestSleep() -> String {
-        if let dashboardData = healthKitManager.dashboardData,
-           let sleepMetric = dashboardData.metrics.first(where: { $0.metricType == .sleep }),
-           let latestPoint = sleepMetric.dataPoints.last {
-            let hours = Int(latestPoint.averageValue ?? 0)
-            let minutes = Int(((latestPoint.averageValue ?? 0) - Double(hours)) * 60)
-            return "\(hours)h \(minutes)m"
-        }
-        return "7h 30m"
+        return VitalsDisplayHelper.getLatestSleep(from: healthKitManager.dashboardData)
     }
     
     private func getStepsProgress() -> Double {
-        let stepsString = getLatestSteps()
-        let steps = Double(stepsString) ?? 6000
-        return min(steps / 10000.0, 1.0)
+        return VitalsDisplayHelper.getStepsProgress(from: healthKitManager.dashboardData)
     }
     
     private func getLatestDataDate() -> String {
@@ -1088,64 +1085,110 @@ struct ActivitySleepCardView: View {
     }
 }
 
-// MARK: - Mental Well-being Card
+// MARK: - Mental Health Card
 struct MentalWellbeingCardView: View {
+    @StateObject private var mhService = MentalHealthService.shared
+    private let dateFormatter: DateFormatter = {
+        let df = DateFormatter(); df.dateStyle = .medium; return df
+    }()
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: "brain.head.profile")
                     .foregroundColor(.purple)
-                Text("Mental Well-being")
+                Text("Mental Health")
                     .font(.headline)
                     .fontWeight(.semibold)
                 Spacer()
-                Text("Updated")
+                Text(headerDateText)
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
             
-            VStack(spacing: 8) {
-                HStack {
-                    Text("Current Mood")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
+            VStack(alignment: .leading, spacing: 8) {
+                if let today = todayEntry {
                     HStack {
-                        Text("😊")
-                            .font(.subheadline)
-                        Text("Stable")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundColor(.green)
+                        Text(mhService.labelForScore(today.pleasantnessScore))
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Text("Today")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
-                }
-                
-                HStack {
-                    Text("Stress Level")
-                        .font(.subheadline)
+                    if let feelings = Optional(today.feelings), !feelings.isEmpty {
+                        feelingsRow(feelings)
+                    }
+                } else if let last = lastPoint {
+                    HStack {
+                        Text(mhService.labelForScore(last.score))
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Text(dateFormatter.string(from: last.date))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    if !last.feelings.isEmpty {
+                        feelingsRow(last.feelings)
+                    }
+                } else {
+                    Text("No mental health data yet")
                         .foregroundColor(.secondary)
-                    Spacer()
-                    Text("Low")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.green)
-                }
-                
-                HStack {
-                    Text("Mindfulness")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text("15 min today")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
                 }
             }
+        }
+        .onAppear {
+            if mhService.dailyPoints.isEmpty { mhService.loadRollup(rangeDays: 30) }
         }
         .padding()
         .background(Color(.systemBackground))
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+    }
+    
+    private var todayEntry: MentalHealthEntry? {
+        return mhService.latestEntryToday
+    }
+    private var lastPoint: MentalHealthDailyPoint? {
+        if let today = mhService.dailyPoints.first(where: { Calendar.current.isDateInToday($0.date) }) { return today }
+        return mhService.dailyPoints.sorted { $0.date > $1.date }.first
+    }
+    private var headerDateText: String {
+        if todayEntry != nil { return "Today" }
+        if let last = lastPoint { return dateFormatter.string(from: last.date) }
+        return ""
+    }
+
+    // MARK: - Feelings UI
+    @ViewBuilder
+    private func feelingsRow(_ feelings: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Feelings")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(feelings, id: \.self) { tag in
+                        tagChip(tag)
+                    }
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func tagChip(_ label: String) -> some View {
+        let palette: [Color] = [.pink, .purple, .mint, .orange, .teal, .blue, .indigo, .yellow]
+        let color = palette[abs(label.hashValue) % palette.count]
+        return Text(label)
+            .font(.caption)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(color.opacity(0.15))
+            .foregroundColor(color)
+            .cornerRadius(8)
     }
 }
 

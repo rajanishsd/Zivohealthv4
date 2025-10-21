@@ -1,0 +1,20 @@
+{
+  "specVersion": "1.0.0",
+  "updated": "2025-10-15",
+  "scoring": {
+    "overall": {
+      "blend": { "chronic": 0.7, "acute": 0.3 },
+      "acuteWeights": { "vitals_today": 0.40, "sleep_last_night": 0.35, "activity_today": 0.25 },
+      "chronicWeightsByAge": {
+        "18-39": { "biomarkers": 0.25, "vitals_30d": 0.10, "activity": 0.20, "sleep": 0.17, "nutrition": 0.18, "medications": 0.10 },
+        "40-64": { "biomarkers": 0.35, "vitals_30d": 0.10, "activity": 0.15, "sleep": 0.15, "nutrition": 0.15, "medications": 0.10 },
+        "65+":   { "biomarkers": 0.45, "vitals_30d": 0.15, "activity": 0.10, "sleep": 0.10, "nutrition": 0.10, "medications": 0.10 }
+      }
+    }
+  },
+  "modalities": {},
+  "ageSexAdjustments": {},
+  "explainability": { "topDrivers": 3 }
+}
+
+

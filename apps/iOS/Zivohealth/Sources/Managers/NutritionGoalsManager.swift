@@ -22,11 +22,41 @@ class NutritionGoalsManager: ObservableObject {
     }
     
     private var cancellables = Set<AnyCancellable>()
+    private var authStateSubscription: AnyCancellable?
     
     // MARK: - Singleton
     static let shared = NutritionGoalsManager()
     
-    private init() {}
+    private init() {
+        setupAuthObserver()
+    }
+    
+    // MARK: - Auth State Observer
+    /// Observe authentication state and clear data on logout
+    private func setupAuthObserver() {
+        authStateSubscription = NetworkService.shared.$isAuthenticatedState
+            .sink { [weak self] isAuthenticated in
+                if !isAuthenticated {
+                    print("🔒 [NutritionGoalsManager] User logged out - clearing nutrition goals data")
+                    self?.clearData()
+                }
+            }
+    }
+    
+    /// Clear all cached data
+    private func clearData() {
+        DispatchQueue.main.async { [weak self] in
+            self?.activeGoalSummary = nil
+            self?.progressItems = []
+            self?.objectives = []
+            self?.nutrientCatalog = []
+            self?.currentGoalDetail = nil
+            self?.inactiveGoals = []
+            self?.allGoals = []
+            self?.currentGoalReminders = nil
+            self?.errorMessage = nil
+        }
+    }
     
     // MARK: - Authentication Headers
     private func getAuthHeaders() -> [String: String] {

@@ -71,14 +71,7 @@ class ActiveGoalSummaryOut(BaseModel):
     focus_nutrients: Optional[List["UserNutrientFocusOut"]] = None
 
 
-class DefaultTargetOut(BaseModel):
-    objective_code: str
-    timeframe: str
-    target_type: str
-    target_min: Optional[float] = None
-    target_max: Optional[float] = None
-    priority: str
-    nutrient: NutritionGoalTargetNutrient
+# Removed: DefaultTargetOut (not used by frontend, related table doesn't exist)
 
 
 class UserNutrientFocusOut(BaseModel):

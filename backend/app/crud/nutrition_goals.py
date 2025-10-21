@@ -7,7 +7,6 @@ from app.models.nutrition_goals import (
     NutritionNutrientCatalog,
     NutritionGoal,
     NutritionGoalTarget,
-    NutritionObjectiveDefaultTarget,
     UserNutrientFocus,
 )
 
@@ -52,13 +51,7 @@ class CRUDNutritionGoals:
         ).first()
 
 
-class CRUDObjectiveDefaults:
-    @staticmethod
-    def list_for_objective(db: Session, objective_code: str) -> List[NutritionObjectiveDefaultTarget]:
-        return db.query(NutritionObjectiveDefaultTarget).options(joinedload(NutritionObjectiveDefaultTarget.nutrient)).filter(
-            and_(NutritionObjectiveDefaultTarget.objective_code == objective_code,
-                 NutritionObjectiveDefaultTarget.is_enabled == True)
-        ).all()
+# Removed: CRUDObjectiveDefaults (table doesn't exist, not used by frontend)
 
 
 class CRUDUserNutrientFocus:
@@ -72,5 +65,5 @@ class CRUDUserNutrientFocus:
 nutrition_objectives = CRUDNutritionObjectives()
 nutrient_catalog = CRUDNutrientCatalog()
 nutrition_goals = CRUDNutritionGoals()
-objective_defaults = CRUDObjectiveDefaults()
+# Removed: objective_defaults = CRUDObjectiveDefaults()
 user_nutrient_focus = CRUDUserNutrientFocus()

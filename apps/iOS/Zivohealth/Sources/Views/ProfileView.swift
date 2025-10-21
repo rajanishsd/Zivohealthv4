@@ -14,65 +14,74 @@ struct ProfileView: View {
     
     var body: some View {
         NavigationView {
-            List {
-                headerCard
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                    .listRowBackground(Color.clear)
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    // Reserve space below the overlay header so list starts after it
+                    Color.clear.frame(height: 220)
 
-                // Primary options (no cards)
-                NavigationLink(destination: EditProfileView()) {
-                    navRow(title: "Edit profile", systemImage: "person.fill", showChevron: false)
-                }
-                .hideListSeparatorIfAvailable()
-                NavigationLink(destination: NotificationsSettingsView()) {
-                    navRow(title: "Notifications", systemImage: "bell.fill", showChevron: false)
-                }
-                .hideListSeparatorIfAvailable()
-                NavigationLink(destination: ConnectedDevicesView()) {
-                    navRow(title: "Connected devices", systemImage: "display", showChevron: false)
-                }
-                .hideListSeparatorIfAvailable()
-                Button {
-                    showingDeleteAccountAlert = true
-                } label: {
-                    navRow(title: "Delete account", systemImage: "trash.fill", showChevron: false)
-                }
-                .hideListSeparatorIfAvailable()
+                    // Main profile list content (unchanged functionality)
+                    List {
+                        // Primary options (no cards)
+                        NavigationLink(destination: EditProfileView()) {
+                            navRow(title: "Edit profile", systemImage: "person.fill", showChevron: false)
+                        }
+                        .hideListSeparatorIfAvailable()
+                        NavigationLink(destination: NotificationsSettingsView()) {
+                            navRow(title: "Notifications", systemImage: "bell.fill", showChevron: false)
+                        }
+                        .hideListSeparatorIfAvailable()
+                        NavigationLink(destination: ConnectedDevicesView()) {
+                            navRow(title: "Connected devices", systemImage: "display", showChevron: false)
+                        }
+                        .hideListSeparatorIfAvailable()
+                        Button {
+                            showingDeleteAccountAlert = true
+                        } label: {
+                            navRow(title: "Delete account", systemImage: "trash.fill", showChevron: false)
+                        }
+                        .hideListSeparatorIfAvailable()
 
-                // Secondary options
-                Button {
-                    MailOpener.open(to: "contactus@zivohealth.ai")
-                } label: {
-                    navRow(title: "Contact Us", systemImage: "questionmark.circle.fill", showChevron: false)
-                }
-                .hideListSeparatorIfAvailable()
-                NavigationLink(destination: AboutZivoView()) {
-                    navRow(title: "About Zivo", systemImage: "info.circle.fill", showChevron: false)
-                }
-                .hideListSeparatorIfAvailable()
+                        // Secondary options
+                        Button {
+                            MailOpener.open(to: "contactus@zivohealth.ai")
+                        } label: {
+                            navRow(title: "Contact Us", systemImage: "questionmark.circle.fill", showChevron: false)
+                        }
+                        .hideListSeparatorIfAvailable()
+                        NavigationLink(destination: AboutZivoView()) {
+                            navRow(title: "About Zivo", systemImage: "info.circle.fill", showChevron: false)
+                        }
+                        .hideListSeparatorIfAvailable()
 
-                // Actions
-                Button {
-                    NetworkService.shared.clearAuthToken()
-                    NetworkService.shared.handleRoleChange()
-                } label: {
-                    actionRow(title: "Refresh Authentication", systemImage: "arrow.clockwise")
+                        // Actions
+                        Button {
+                            NetworkService.shared.clearAuthToken()
+                            NetworkService.shared.handleRoleChange()
+                        } label: {
+                            actionRow(title: "Refresh Authentication", systemImage: "arrow.clockwise")
+                        }
+                        .hideListSeparatorIfAvailable()
+                        Button(role: .destructive) { showingSignOutAlert = true } label: {
+                            actionRow(title: "Logout", systemImage: "arrowshape.turn.up.left")
+                        }
+                        .hideListSeparatorIfAvailable()
+                    }
+                    .listStyle(.plain)
+                    .hideListSeparatorIfAvailable()
+                    .scrollContentBackgroundHiddenIfAvailable()
+                    .listRowBackground(Color.white)
+                    .background(Color.white)
+                    .environment(\.defaultMinListRowHeight, 32)
                 }
-                .hideListSeparatorIfAvailable()
-                Button(role: .destructive) { showingSignOutAlert = true } label: {
-                    actionRow(title: "Logout", systemImage: "arrowshape.turn.up.left")
+                // Overlay the full-width header like AppointmentsView
+                .overlay(alignment: .top) {
+                    profileHeader(topInset: geometry.safeAreaInsets.top)
                 }
-                .hideListSeparatorIfAvailable()
+                .ignoresSafeArea(.container, edges: .top)
             }
-            .listStyle(.plain)
-            .hideListSeparatorIfAvailable()
-            .scrollContentBackgroundHiddenIfAvailable()
-            .listRowBackground(Color.white)
-            .background(Color.white.ignoresSafeArea())
-            .environment(\.defaultMinListRowHeight, 32)
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationBarHidden(true)
             .task { await loadHeaderData() }
         .alert("Delete Account?", isPresented: $showingDeleteAccountAlert) {
             Button("No", role: .cancel) { }
@@ -128,29 +137,43 @@ struct ProfileView: View {
             Color.zivoRed.opacity(0.7)     // lighter (right)
         ])
     }
-    private var headerCard: some View {
-        ZStack(alignment: .bottomLeading) {
-            LinearGradient(gradient: brandRedGradient, startPoint: .leading, endPoint: .trailing)
-            .frame(height: 140)
-            .cornerRadius(16)
+    private func profileHeader(topInset: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            // Top spacer for status bar
+            Color.clear
+                .frame(height: topInset)
             
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Hey \(headerName.isEmpty ? "there" : headerName)!")
-                    .font(.title3).bold()
-                    .foregroundColor(.white)
-                if !headerPhone.isEmpty {
-                    Text(headerPhone)
-                        .font(.subheadline)
+            // Card content
+            ZStack(alignment: .bottomLeading) {
+                LinearGradient(gradient: brandRedGradient, startPoint: .leading, endPoint: .trailing)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    // Keep existing content (name/phone/email) but with header style
+                    Text("Hey \(headerName.isEmpty ? "there" : headerName)!")
+                        .font(.title3).bold()
                         .foregroundColor(.white)
+                    if !headerPhone.isEmpty {
+                        Text(headerPhone)
+                            .font(.subheadline)
+                            .foregroundColor(.white)
+                    }
+                    if !headerEmail.isEmpty {
+                        Text(headerEmail)
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.95))
+                    }
                 }
-                if !headerEmail.isEmpty {
-                    Text(headerEmail)
-                        .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.95))
-                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 20)
             }
-            .padding(16)
+            .frame(height: 140)
+            .cornerRadius(20)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
         }
+        .frame(height: 140 + topInset + 8)
+        .ignoresSafeArea(.container, edges: .top)
     }
     
     // MARK: - Rows

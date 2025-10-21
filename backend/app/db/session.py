@@ -14,11 +14,11 @@ else:
     # PostgreSQL configuration with connection pooling
     engine = create_engine(
         settings.SQLALCHEMY_DATABASE_URI,
-        pool_size=10,          # Increased base pool for concurrent requests
-        max_overflow=20,       # Allow more bursts under load
+        pool_size=20,          # Increased from 10 to 20 for concurrent requests + aggregation
+        max_overflow=30,       # Increased from 20 to 30 for higher burst capacity
         pool_recycle=300,      # Recycle connections every 5 minutes
         pool_pre_ping=True,    # Validate connections before use
-        pool_timeout=30,       # Timeout for getting connection from pool
+        pool_timeout=45,       # Increased from 30 to 45 seconds timeout
         echo=False             # Set to True for SQL logging
     )
 

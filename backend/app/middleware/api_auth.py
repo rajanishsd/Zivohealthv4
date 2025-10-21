@@ -129,39 +129,28 @@ class APIKeyMiddleware:
             signature = request.headers.get("X-App-Signature")
             timestamp = request.headers.get("X-Timestamp")
             
-            print(f"DEBUG HMAC: signature={signature}, timestamp={timestamp}")
-            
             if not signature or not timestamp:
-                print("DEBUG HMAC: Missing signature or timestamp")
                 return False
             
             # Check timestamp (prevent replay attacks)
             current_time = int(time.time())
             request_time = int(timestamp)
             
-            print(f"DEBUG HMAC: current_time={current_time}, request_time={request_time}, diff={abs(current_time - request_time)}")
-            
             # Allow 5-minute window for timestamp
             if abs(current_time - request_time) > 300:
-                print("DEBUG HMAC: Timestamp out of window")
                 return False
             
             # Handle HMAC verification for different request types
             if request.method == "POST":
                 # For POST requests, we'll skip HMAC verification to avoid body consumption issues
                 # This is a temporary workaround - in production, you'd want to implement a proper solution
-                print(f"DEBUG HMAC: Skipping HMAC verification for POST requests to avoid body consumption")
                 return True  # Skip HMAC verification for POST requests
             else:
                 # For GET requests, use empty payload
                 payload = ""
-                print(f"DEBUG HMAC: GET request, payload=''")
             
             # Generate expected signature for comparison
             expected_signature = generate_app_signature(payload, timestamp, settings.APP_SECRET_KEY)
-            print(f"DEBUG HMAC: expected_signature={expected_signature}")
-            print(f"DEBUG HMAC: received_signature={signature}")
-            print(f"DEBUG HMAC: match={expected_signature == signature}")
             
             return verify_app_signature(
                 payload, 

@@ -22,16 +22,6 @@ zivohealth.ai, www.zivohealth.ai {
         reverse_proxy dashboard:3000
     }
 
-    # Route dashboard assets to dashboard service
-    handle /favicon.ico {
-        reverse_proxy dashboard:3000
-    }
-
-    # Route dashboard manifest to dashboard service
-    handle /manifest.json {
-        reverse_proxy dashboard:3000
-    }
-
     # Route password reset requests to backend API
     handle /reset-password* {
         reverse_proxy api:8000
@@ -52,7 +42,30 @@ zivohealth.ai, www.zivohealth.ai {
         reverse_proxy api:8000
     }
 
-    # Serve all other requests as static files
-    root * /srv/www
-    file_server
+    # Proxy static website pages from S3
+    handle /privacy-policy.html {
+        reverse_proxy http://zivohealth-website-bucket.s3-website-us-east-1.amazonaws.com {
+            header_up Host zivohealth-website-bucket.s3-website-us-east-1.amazonaws.com
+        }
+    }
+
+    handle /terms-and-conditions.html {
+        reverse_proxy http://zivohealth-website-bucket.s3-website-us-east-1.amazonaws.com {
+            header_up Host zivohealth-website-bucket.s3-website-us-east-1.amazonaws.com
+        }
+    }
+
+    # Proxy images from S3
+    handle /images/* {
+        reverse_proxy http://zivohealth-website-bucket.s3-website-us-east-1.amazonaws.com {
+            header_up Host zivohealth-website-bucket.s3-website-us-east-1.amazonaws.com
+        }
+    }
+
+    # Proxy everything else (including root and other HTML files) from S3
+    handle {
+        reverse_proxy http://zivohealth-website-bucket.s3-website-us-east-1.amazonaws.com {
+            header_up Host zivohealth-website-bucket.s3-website-us-east-1.amazonaws.com
+        }
+    }
 }

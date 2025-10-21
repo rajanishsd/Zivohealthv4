@@ -25,17 +25,18 @@ The following email settings are **mandatory** and the application will fail to 
 ```env
 SMTP_SERVER=smtp.zoho.in
 SMTP_PORT=587
-SMTP_USERNAME=your_email@domain.com
+SMTP_USERNAME=noreply@zivohealth.ai
 SMTP_PASSWORD=your_app_password_here
-FROM_EMAIL=your_email@domain.com
+FROM_EMAIL=noreply@zivohealth.ai
 FRONTEND_URL=http://192.168.0.106:8000
 PASSWORD_RESET_TOKEN_EXPIRY_MINUTES=30
 ```
 
 **Important Notes:**
 - `SMTP_PASSWORD` should be an app-specific password, not your regular email password
-- `FROM_EMAIL` must match the authenticated email account
+- **⚠️ CRITICAL for Zoho:** `FROM_EMAIL` **MUST** match `SMTP_USERNAME` exactly, or you'll get "553 Sender is not allowed to relay emails" error
 - `FRONTEND_URL` should point to your backend server for local development
+- For detailed SMTP troubleshooting, see [EMAIL_SMTP_TROUBLESHOOTING.md](EMAIL_SMTP_TROUBLESHOOTING.md)
 
 ### Password Reset App Configuration
 
@@ -96,6 +97,10 @@ The built files will be automatically served by the backend at `/reset-password`
 3. **React app API errors:**
    - Ensure the React app is built: `cd password-reset-app && npm run build`
    - Check that the backend is running and serving the React app at `/reset-password`
+
+4. **Email sending errors (553 relay error):**
+   - For Zoho SMTP: Ensure `FROM_EMAIL` exactly matches `SMTP_USERNAME`
+   - See [EMAIL_SMTP_TROUBLESHOOTING.md](EMAIL_SMTP_TROUBLESHOOTING.md) for detailed solutions
 
 ### Validation Messages
 

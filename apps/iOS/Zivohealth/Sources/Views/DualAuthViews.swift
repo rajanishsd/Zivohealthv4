@@ -570,6 +570,10 @@ struct DualRegistrationView: View {
     @State private var otpSent: Bool = false
     @FocusState private var focusedField: Field?
     @State private var showOnboarding: Bool = false
+    @State private var acceptedPrivacyPolicy: Bool = false
+    @State private var acceptedTerms: Bool = false
+    @State private var showPrivacyPolicy: Bool = false
+    @State private var showTermsOfService: Bool = false
 
     var onSuccess: () -> Void
 
@@ -828,7 +832,7 @@ struct DualRegistrationView: View {
                 .cornerRadius(12)
                 .focused($focusedField, equals: .confirmPassword)
                 .submitLabel(.done)
-                .onSubmit { if isValidPassword { registerWithPassword() } }
+                .onSubmit { if isValidPasswordAndAgreed { registerWithPassword() } }
                 
                 // Password validation messages
                 if !password.isEmpty && password.count < 8 {
@@ -846,6 +850,9 @@ struct DualRegistrationView: View {
                 }
             }
             
+            // Privacy Policy and Terms Agreement
+            privacyAndTermsAgreement
+            
             Button(action: registerWithPassword) {
                 HStack {
                     if isLoading { ProgressView().tint(.white) }
@@ -857,7 +864,7 @@ struct DualRegistrationView: View {
             .buttonStyle(.borderedProminent)
             .tint(.zivoRed)
             .controlSize(.regular)
-            .disabled(!isValidPassword || isLoading)
+            .disabled(!isValidPasswordAndAgreed || isLoading)
             
             // Alternative: OTP registration
             Button("Use verification code instead") {
@@ -874,6 +881,30 @@ struct DualRegistrationView: View {
                 error = nil
             }
             .foregroundColor(.secondary)
+        }
+        .sheet(isPresented: $showPrivacyPolicy) {
+            NavigationView {
+                PrivacyPolicyView()
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") {
+                                showPrivacyPolicy = false
+                            }
+                        }
+                    }
+            }
+        }
+        .sheet(isPresented: $showTermsOfService) {
+            NavigationView {
+                TermsOfServiceView()
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") {
+                                showTermsOfService = false
+                            }
+                        }
+                    }
+            }
         }
     }
     
@@ -900,10 +931,13 @@ struct DualRegistrationView: View {
                 .cornerRadius(12)
                 .focused($focusedField, equals: .otp)
                 .onChange(of: otpCode) { newValue in
-                    if newValue.count == 6 {
+                    if newValue.count == 6 && isAgreementsAccepted {
                         registerWithOTP()
                     }
                 }
+            
+            // Privacy Policy and Terms Agreement
+            privacyAndTermsAgreement
             
             Button(action: registerWithOTP) {
                 HStack {
@@ -916,7 +950,7 @@ struct DualRegistrationView: View {
             .buttonStyle(.borderedProminent)
             .tint(.zivoRed)
             .controlSize(.regular)
-            .disabled(otpCode.count != 6 || isLoading)
+            .disabled(otpCode.count != 6 || !isAgreementsAccepted || isLoading)
             
             VStack(spacing: 12) {
                 Button("Resend Code") {
@@ -934,6 +968,97 @@ struct DualRegistrationView: View {
                 .foregroundColor(.secondary)
             }
         }
+        .sheet(isPresented: $showPrivacyPolicy) {
+            NavigationView {
+                PrivacyPolicyView()
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") {
+                                showPrivacyPolicy = false
+                            }
+                        }
+                    }
+            }
+        }
+        .sheet(isPresented: $showTermsOfService) {
+            NavigationView {
+                TermsOfServiceView()
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") {
+                                showTermsOfService = false
+                            }
+                        }
+                    }
+            }
+        }
+    }
+    
+    // MARK: - Privacy & Terms Agreement View
+    private var privacyAndTermsAgreement: some View {
+        VStack(spacing: 12) {
+            Divider()
+                .padding(.vertical, 4)
+            
+            // Privacy Policy Checkbox
+            HStack(alignment: .top, spacing: 12) {
+                Button(action: { acceptedPrivacyPolicy.toggle() }) {
+                    Image(systemName: acceptedPrivacyPolicy ? "checkmark.square.fill" : "square")
+                        .font(.system(size: 22))
+                        .foregroundColor(acceptedPrivacyPolicy ? .zivoRed : .gray)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Text("I have read and agree to the")
+                            .font(.subheadline)
+                            .foregroundColor(.primary)
+                        Button(action: { showPrivacyPolicy = true }) {
+                            Text("Privacy Policy")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.zivoRed)
+                                .underline()
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            
+            // Terms and Conditions Checkbox
+            HStack(alignment: .top, spacing: 12) {
+                Button(action: { acceptedTerms.toggle() }) {
+                    Image(systemName: acceptedTerms ? "checkmark.square.fill" : "square")
+                        .font(.system(size: 22))
+                        .foregroundColor(acceptedTerms ? .zivoRed : .gray)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Text("I accept the")
+                            .font(.subheadline)
+                            .foregroundColor(.primary)
+                        Button(action: { showTermsOfService = true }) {
+                            Text("Terms and Conditions")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.zivoRed)
+                                .underline()
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            
+            if !isAgreementsAccepted && (!acceptedPrivacyPolicy || !acceptedTerms) {
+                Text("Please accept both Privacy Policy and Terms to continue")
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
+            }
+        }
+        .padding(.vertical, 8)
     }
     
     // MARK: - Helper Methods
@@ -949,6 +1074,14 @@ struct DualRegistrationView: View {
     
     private var isValidPassword: Bool {
         password.count >= 8 && password == confirmPassword
+    }
+    
+    private var isAgreementsAccepted: Bool {
+        acceptedPrivacyPolicy && acceptedTerms
+    }
+    
+    private var isValidPasswordAndAgreed: Bool {
+        isValidPassword && isAgreementsAccepted
     }
     
     private func proceedToPasswordSetup() {

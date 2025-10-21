@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 import { hmacGenerator } from './utils/hmac';
+import HealthScoreOps from './components/HealthScoreOps';
+import AdminManagement from './components/AdminManagement';
+import AdminPasswordReset from './components/AdminPasswordReset';
 
 // API base URL: use env override if provided, otherwise use relative URLs (same origin)
 const API_BASE = (process.env.REACT_APP_API_BASE_URL || '');
@@ -14,6 +17,7 @@ interface AuthState {
   isAuthenticated: boolean;
   token: string | null;
   user: any | null;
+  isSuperAdmin?: boolean;
 }
 
 interface SystemHealth {
@@ -87,20 +91,28 @@ function App() {
   const [auth, setAuth] = useState<AuthState>({
     isAuthenticated: false,
     token: null,
-    user: null
+    user: null,
+    isSuperAdmin: false
   });
   const [loginForm, setLoginForm] = useState({
     username: '',
     password: ''
   });
-  const [loginMode, setLoginMode] = useState<'password' | 'otp'>('password');
+  const [loginMode, setLoginMode] = useState<'password' | 'otp' | 'otp-enter' | 'forgot-password'>('password');
   const [otpCode, setOtpCode] = useState('');
+  const [otpEmail, setOtpEmail] = useState('');
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
   const [forgotPasswordMessage, setForgotPasswordMessage] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isRefreshing, setIsRefreshing] = useState({
     system: false,
     app: false
   });
+
+  // Check if we're on the password reset page
+  const urlParams = new URLSearchParams(window.location.search);
+  const resetToken = urlParams.get('token');
+  const [showPasswordReset, setShowPasswordReset] = useState(!!resetToken);
 
   // Feedback state
   const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
@@ -118,14 +130,44 @@ function App() {
   });
 
   // Check for existing token on app load
+  // Helper function to fetch current admin info (including isSuperAdmin flag)
+  const fetchAdminInfo = async (token: string) => {
+    try {
+      const response = await fetch(apiUrl('/api/v1/admin/admins/me'), {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          ...(API_KEY ? { 'X-API-Key': API_KEY } : {})
+        }
+      });
+      if (response.ok) {
+        const adminData = await response.json();
+        return adminData.is_superadmin || false;
+      }
+    } catch (error) {
+      console.error('Failed to fetch admin info:', error);
+    }
+    return false;
+  };
+
   useEffect(() => {
     const token = localStorage.getItem('dashboard_token');
     const user = localStorage.getItem('dashboard_user');
+    const isSuperAdmin = localStorage.getItem('dashboard_is_superadmin') === 'true';
+    
     if (token && user) {
       setAuth({
         isAuthenticated: true,
         token,
-        user: JSON.parse(user)
+        user: JSON.parse(user),
+        isSuperAdmin
+      });
+      
+      // Re-fetch admin info to ensure it's up to date
+      fetchAdminInfo(token).then(superAdmin => {
+        if (superAdmin !== isSuperAdmin) {
+          localStorage.setItem('dashboard_is_superadmin', String(superAdmin));
+          setAuth(prev => ({ ...prev, isSuperAdmin: superAdmin }));
+        }
       });
     }
   }, []);
@@ -151,46 +193,83 @@ function App() {
         
         if (response.ok) {
           const data = await response.json();
+          
+          // Fetch admin info to check if super admin
+          const isSuperAdmin = await fetchAdminInfo(data.access_token);
+          
           const authState = {
             isAuthenticated: true,
             token: data.access_token,
-            user: data.admin || { username: loginForm.username }
+            user: data.admin || { username: loginForm.username },
+            isSuperAdmin
           };
           
           setAuth(authState);
           localStorage.setItem('dashboard_token', data.access_token);
           localStorage.setItem('dashboard_user', JSON.stringify(authState.user));
+          localStorage.setItem('dashboard_is_superadmin', String(isSuperAdmin));
           
           setLoginForm({ username: '', password: '' });
         } else {
           const errorData = await response.json().catch(() => ({}));
-          setLoginError(errorData.detail || 'Admin login failed');
+          // Handle FastAPI validation errors (detail is an array)
+          let errorMessage = 'Admin login failed';
+          if (errorData.detail) {
+            if (Array.isArray(errorData.detail)) {
+              // Validation errors: extract first error message
+              errorMessage = errorData.detail[0]?.msg || errorMessage;
+            } else if (typeof errorData.detail === 'string') {
+              errorMessage = errorData.detail;
+            }
+          }
+          setLoginError(errorMessage);
         }
-      } else {
-        const response = await fetch(apiUrl('/api/v1/auth/email/otp/verify'), {
+      } else if (loginMode === 'otp-enter') {
+        // Admin OTP verify
+        const payload = { email: loginForm.username, code: otpCode };
+        const hmacHeaders = hmacGenerator.generateJSONHeaders(payload);
+        
+        const response = await fetch(apiUrl('/api/v1/auth/admin/otp/verify'), {
           method: 'POST',
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
-            ...(API_KEY ? { 'X-API-Key': API_KEY } : {})
+            ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+            ...hmacHeaders
           },
-          body: JSON.stringify({ email: loginForm.username, code: otpCode })
+          body: JSON.stringify(payload)
         });
         
         if (response.ok) {
           const data = await response.json();
+          
+          // Fetch admin info to check if super admin
+          const isSuperAdmin = await fetchAdminInfo(data.access_token);
+          
           const authState = {
             isAuthenticated: true,
             token: data.access_token,
-            user: data.user || { username: loginForm.username }
+            user: data.admin || { username: loginForm.username },
+            isSuperAdmin
           };
           setAuth(authState);
           localStorage.setItem('dashboard_token', data.access_token);
           localStorage.setItem('dashboard_user', JSON.stringify(authState.user));
+          localStorage.setItem('dashboard_is_superadmin', String(isSuperAdmin));
           setLoginForm({ username: '', password: '' });
           setOtpCode('');
         } else {
-          const errorData = await response.json();
-          setLoginError(errorData.detail || 'OTP verification failed');
+          const errorData = await response.json().catch(() => ({}));
+          // Handle FastAPI validation errors (detail is an array)
+          let errorMessage = 'OTP verification failed';
+          if (errorData.detail) {
+            if (Array.isArray(errorData.detail)) {
+              // Validation errors: extract first error message
+              errorMessage = errorData.detail[0]?.msg || errorMessage;
+            } else if (typeof errorData.detail === 'string') {
+              errorMessage = errorData.detail;
+            }
+          }
+          setLoginError(errorMessage);
         }
       }
     } catch (error) {
@@ -199,38 +278,69 @@ function App() {
     }
   };
 
-  const requestOtp = async () => {
+  const requestOtp = async (email: string) => {
     setLoginError('');
     try {
-      const response = await fetch(apiUrl('/api/v1/auth/email/otp/request'), {
+      const payload = { email };
+      const hmacHeaders = hmacGenerator.generateJSONHeaders(payload);
+      
+      const response = await fetch(apiUrl('/api/v1/auth/admin/otp/request'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(API_KEY ? { 'X-API-Key': API_KEY } : {}) },
-        body: JSON.stringify({ email: loginForm.username })
+        headers: {
+          'Content-Type': 'application/json',
+          ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+          ...hmacHeaders
+        },
+        body: JSON.stringify(payload)
       });
+      
       if (response.ok) {
-        setLoginMode('otp');
+        const data = await response.json();
+        setOtpEmail(email);
+        setLoginMode('otp-enter');
+        // Show success message without alert
+        setLoginError('');
       } else {
-        const errorData = await response.json();
-        setLoginError(errorData.detail || 'Failed to request OTP');
+        const errorData = await response.json().catch(() => ({}));
+        let errorMessage = 'Failed to request OTP';
+        if (errorData.detail) {
+          if (Array.isArray(errorData.detail)) {
+            errorMessage = errorData.detail[0]?.msg || errorMessage;
+          } else if (typeof errorData.detail === 'string') {
+            errorMessage = errorData.detail;
+          }
+        }
+        setLoginError(errorMessage);
       }
     } catch (e) {
       setLoginError('Network error requesting OTP');
     }
   };
 
-  const requestPasswordReset = async () => {
+  const requestPasswordReset = async (email: string) => {
     setForgotPasswordMessage('');
     setLoginError('');
     try {
-      const response = await fetch(apiUrl('/api/v1/auth/forgot-password'), {
+      const payload = { email };
+      const hmacHeaders = hmacGenerator.generateJSONHeaders(payload);
+      
+      const response = await fetch(apiUrl('/api/v1/auth/admin/password/forgot'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(API_KEY ? { 'X-API-Key': API_KEY } : {}) },
-        body: JSON.stringify({ email: loginForm.username })
+        headers: {
+          'Content-Type': 'application/json',
+          ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
+          ...hmacHeaders
+        },
+        body: JSON.stringify(payload)
       });
+      
       if (response.ok) {
-        setForgotPasswordMessage('If the email exists, a reset link was sent.');
+        const data = await response.json();
+        setForgotPasswordMessage(data.message || 'If this email is registered as an admin, a password reset link has been sent.');
       } else {
-        setForgotPasswordMessage('If the email exists, a reset link was sent.');
+        const errorData = await response.json().catch(() => ({}));
+        // Still show success message for security (don't reveal if admin exists)
+        setForgotPasswordMessage('If this email is registered as an admin, a password reset link has been sent.');
       }
     } catch (e) {
       setLoginError('Network error requesting password reset');
@@ -241,10 +351,12 @@ function App() {
     setAuth({
       isAuthenticated: false,
       token: null,
-      user: null
+      user: null,
+      isSuperAdmin: false
     });
     localStorage.removeItem('dashboard_token');
     localStorage.removeItem('dashboard_user');
+    localStorage.removeItem('dashboard_is_superadmin');
   };
 
   const getAuthHeaders = (payload?: any): Record<string, string> => {
@@ -420,27 +532,82 @@ function App() {
     });
   };
 
-  const deleteSelectedUsers = async () => {
+  const markUsersForDeletion = async () => {
     const ids = Array.from(selectedUserIds.values());
     if (ids.length === 0) return;
-    if (!window.confirm(`Mark ${ids.length} user(s) for deletion?`)) return;
+    if (!window.confirm(`Mark ${ids.length} user(s) for deletion?\n\nThis will deactivate their accounts but preserve all data.`)) return;
     try {
       const payload = { user_ids: ids };
-      const resp = await fetch(apiUrl('/api/v1/admin/users/delete'), {
+      const resp = await fetch(apiUrl('/api/v1/admin/users/mark-for-deletion'), {
         method: 'POST',
         headers: getAuthHeaders(payload),
         body: JSON.stringify(payload)
       });
       if (!resp.ok) {
         const text = await resp.text();
-        alert(`Failed to delete users: ${resp.status} ${text}`);
+        alert(`Failed to mark users for deletion: ${resp.status} ${text}`);
         return;
       }
+      const result = await resp.json();
       await fetchUsers();
-      alert('Users marked for deletion');
+      setSelectedUserIds(new Set()); // Clear selection
+      alert(result.message || 'Users marked for deletion');
     } catch (e) {
-      console.error('Delete users failed', e);
-      alert('Delete users failed');
+      console.error('Mark for deletion failed', e);
+      alert('Failed to mark users for deletion');
+    }
+  };
+
+  const permanentlyDeleteUsers = async () => {
+    const ids = Array.from(selectedUserIds.values());
+    if (ids.length === 0) return;
+    
+    // Double confirmation for permanent deletion
+    const firstConfirm = window.confirm(
+      `⚠️ PERMANENT DELETION WARNING ⚠️\n\n` +
+      `You are about to PERMANENTLY DELETE ${ids.length} user(s) and ALL their data:\n` +
+      `- User accounts and profiles\n` +
+      `- All health data (nutrition, vitals, lab reports)\n` +
+      `- All appointments, prescriptions, and chat history\n` +
+      `- ALL related records\n\n` +
+      `This action is IRREVERSIBLE!\n\n` +
+      `Are you sure you want to continue?`
+    );
+    
+    if (!firstConfirm) return;
+    
+    const secondConfirm = window.confirm(
+      `FINAL CONFIRMATION\n\n` +
+      `Type or think "DELETE" to confirm.\n\n` +
+      `Delete ${ids.length} user(s) PERMANENTLY?`
+    );
+    
+    if (!secondConfirm) return;
+    
+    try {
+      const payload = { user_ids: ids };
+      const resp = await fetch(apiUrl('/api/v1/admin/users/delete-permanently'), {
+        method: 'POST',
+        headers: getAuthHeaders(payload),
+        body: JSON.stringify(payload)
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        alert(`Failed to delete users permanently: ${resp.status} ${text}`);
+        return;
+      }
+      const result = await resp.json();
+      await fetchUsers();
+      setSelectedUserIds(new Set()); // Clear selection
+      
+      let message = result.message || `Permanently deleted ${result.deleted} user(s)`;
+      if (result.errors && result.errors.length > 0) {
+        message += '\n\nErrors:\n' + result.errors.join('\n');
+      }
+      alert(message);
+    } catch (e) {
+      console.error('Permanent deletion failed', e);
+      alert('Failed to permanently delete users');
     }
   };
 
@@ -854,8 +1021,23 @@ function App() {
             >
               {usersLoading ? '⏳' : '🔄'}
             </button>
-            <button className="view-workflow-btn" style={{ background: '#dc3545' }} onClick={deleteSelectedUsers} disabled={selectedUserIds.size === 0}>
-              Delete Selected
+            <button 
+              className="view-workflow-btn" 
+              style={{ background: '#ff9800' }} 
+              onClick={markUsersForDeletion} 
+              disabled={selectedUserIds.size === 0}
+              title="Deactivate accounts but keep data"
+            >
+              Mark for Deletion
+            </button>
+            <button 
+              className="view-workflow-btn" 
+              style={{ background: '#dc3545' }} 
+              onClick={permanentlyDeleteUsers} 
+              disabled={selectedUserIds.size === 0}
+              title="⚠️ Permanently delete users and ALL data (irreversible)"
+            >
+              Delete Permanently
             </button>
           </div>
         </div>
@@ -901,6 +1083,20 @@ function App() {
 
 
 
+  // Password Reset component (if token is present in URL)
+  if (showPasswordReset && resetToken) {
+    return (
+      <AdminPasswordReset 
+        token={resetToken} 
+        onSuccess={() => {
+          setShowPasswordReset(false);
+          // Clear token from URL
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }} 
+      />
+    );
+  }
+
   // Login component
   if (!auth.isAuthenticated) {
     return (
@@ -909,19 +1105,20 @@ function App() {
           <h2>🏥 ZivoHealth Dashboard</h2>
           <p>Please login to access the admin dashboard</p>
           
-          <form onSubmit={login}>
-            <div className="form-group">
-              <label>Username:</label>
-              <input
-                type="text"
-                value={loginForm.username}
-                onChange={(e) => setLoginForm({...loginForm, username: e.target.value})}
-                placeholder="Enter your username"
-                required
-              />
-            </div>
-            
-            {loginMode === 'password' && (
+          {/* Password Login Mode */}
+          {loginMode === 'password' && (
+            <form onSubmit={login}>
+              <div className="form-group">
+                <label>Username:</label>
+                <input
+                  type="text"
+                  value={loginForm.username}
+                  onChange={(e) => setLoginForm({...loginForm, username: e.target.value})}
+                  placeholder="Enter your username"
+                  required
+                />
+              </div>
+              
               <div className="form-group">
                 <label>Password:</label>
                 <input
@@ -932,55 +1129,164 @@ function App() {
                   required
                 />
               </div>
-            )}
+              
+              {loginError && (
+                <div className="error-message">
+                  {loginError}
+                </div>
+              )}
+              
+              <button type="submit" className="login-button">
+                Login
+              </button>
 
-            {loginMode === 'otp' && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
+                <button type="button" className="login-button" style={{ background: '#6c757d', width: '48%' }} onClick={() => setLoginMode('otp')}>
+                  Login with OTP
+                </button>
+                <button type="button" className="login-button" style={{ background: '#17a2b8', width: '48%' }} onClick={() => setLoginMode('forgot-password')}>
+                  Forgot Password
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* OTP Email Entry Mode */}
+          {loginMode === 'otp' && (
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              requestOtp(otpEmail);
+            }}>
+              <div className="form-group">
+                <label>Email Address:</label>
+                <input
+                  type="email"
+                  value={otpEmail}
+                  onChange={(e) => setOtpEmail(e.target.value)}
+                  placeholder="Enter your email"
+                  required
+                />
+              </div>
+              
+              {loginError && (
+                <div className="error-message">
+                  {loginError}
+                </div>
+              )}
+              
+              <button type="submit" className="login-button">
+                Send OTP
+              </button>
+
+              <div style={{ marginTop: 10 }}>
+                <button type="button" className="login-button" style={{ background: '#6c757d' }} onClick={() => {
+                  setLoginMode('password');
+                  setOtpEmail('');
+                  setLoginError('');
+                }}>
+                  Back to Password Login
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* OTP Code Entry Mode */}
+          {loginMode === 'otp-enter' && (
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              // Set username to the email used for OTP
+              setLoginForm({...loginForm, username: otpEmail});
+              login(e);
+            }}>
+              <div className="demo-credentials" style={{ marginBottom: 15, background: '#d4edda', color: '#155724' }}>
+                <p>✅ OTP has been sent to <strong>{otpEmail}</strong></p>
+              </div>
+
               <div className="form-group">
                 <label>One-Time Password (OTP):</label>
                 <input
                   type="text"
                   value={otpCode}
                   onChange={(e) => setOtpCode(e.target.value)}
-                  placeholder="Enter the OTP sent to your email"
+                  placeholder="Enter the 6-digit OTP"
                   required
+                  maxLength={6}
                 />
               </div>
-            )}
-            
-            {loginError && (
-              <div className="error-message">
-                {loginError}
-              </div>
-            )}
-            
-            <button type="submit" className="login-button">
-              {loginMode === 'password' ? 'Login' : 'Verify OTP'}
-            </button>
+              
+              {loginError && (
+                <div className="error-message">
+                  {loginError}
+                </div>
+              )}
+              
+              <button type="submit" className="login-button">
+                Verify OTP
+              </button>
 
-            {loginMode === 'password' && (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <button type="button" className="login-button" style={{ background: '#6c757d', width: '48%' }} onClick={requestOtp}>
-                  Login with OTP
-                </button>
-                <button type="button" className="login-button" style={{ background: '#17a2b8', width: '48%' }} onClick={requestPasswordReset}>
-                  Forgot Password
-                </button>
-              </div>
-            )}
-
-            {loginMode === 'otp' && (
               <div style={{ marginTop: 10 }}>
-                <button type="button" className="login-button" style={{ background: '#6c757d' }} onClick={() => setLoginMode('password')}>
+                <button type="button" className="login-button" style={{ background: '#17a2b8' }} onClick={() => requestOtp(otpEmail)}>
+                  Resend OTP
+                </button>
+              </div>
+
+              <div style={{ marginTop: 10 }}>
+                <button type="button" className="login-button" style={{ background: '#6c757d' }} onClick={() => {
+                  setLoginMode('password');
+                  setOtpEmail('');
+                  setOtpCode('');
+                  setLoginError('');
+                }}>
                   Back to Password Login
                 </button>
               </div>
-            )}
-          </form>
+            </form>
+          )}
 
-          {forgotPasswordMessage && (
-            <div className="demo-credentials" style={{ marginTop: 12 }}>
-              <p>{forgotPasswordMessage}</p>
-            </div>
+          {/* Forgot Password Mode */}
+          {loginMode === 'forgot-password' && (
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              requestPasswordReset(forgotPasswordEmail);
+            }}>
+              <div className="form-group">
+                <label>Email Address:</label>
+                <input
+                  type="email"
+                  value={forgotPasswordEmail}
+                  onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                  placeholder="Enter your email"
+                  required
+                />
+              </div>
+              
+              {loginError && (
+                <div className="error-message">
+                  {loginError}
+                </div>
+              )}
+
+              {forgotPasswordMessage && (
+                <div className="demo-credentials" style={{ background: '#d4edda', color: '#155724' }}>
+                  <p>{forgotPasswordMessage}</p>
+                </div>
+              )}
+              
+              <button type="submit" className="login-button">
+                Send Reset Link
+              </button>
+
+              <div style={{ marginTop: 10 }}>
+                <button type="button" className="login-button" style={{ background: '#6c757d' }} onClick={() => {
+                  setLoginMode('password');
+                  setForgotPasswordEmail('');
+                  setForgotPasswordMessage('');
+                  setLoginError('');
+                }}>
+                  Back to Password Login
+                </button>
+              </div>
+            </form>
           )}
           
         </div>
@@ -1044,6 +1350,22 @@ function App() {
               <span className="nav-icon">👥</span>
               <span className="nav-label">Users</span>
             </button>
+            <button 
+              className={`nav-item ${activeTab === 'healthscore' ? 'active' : ''}`}
+              onClick={() => setActiveTab('healthscore')}
+            >
+              <span className="nav-icon">❤️</span>
+              <span className="nav-label">Health Score Ops</span>
+            </button>
+            {auth.isSuperAdmin && (
+              <button 
+                className={`nav-item ${activeTab === 'admins' ? 'active' : ''}`}
+                onClick={() => setActiveTab('admins')}
+              >
+                <span className="nav-icon">🔐</span>
+                <span className="nav-label">Admin Management</span>
+              </button>
+            )}
           </div>
         </nav>
 
@@ -1052,6 +1374,8 @@ function App() {
           {activeTab === 'app' && renderAppMonitoring()}
           {activeTab === 'feedback' && renderFeedback()}
           {activeTab === 'users' && renderUsers()}
+          {activeTab === 'healthscore' && <HealthScoreOps />}
+          {activeTab === 'admins' && auth.isSuperAdmin && <AdminManagement apiUrl={apiUrl} getAuthHeaders={getAuthHeaders} />}
         </main>
       </div>
     </div>

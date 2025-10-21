@@ -41,15 +41,6 @@ from .nutrition_goals import (
     NutritionGoalTarget,
     UserNutrientFocus
 )
-from .pharmacy_data import (
-    PharmacyRawData,
-    PharmacyDailyAggregate,
-    PharmacyWeeklyAggregate,
-    PharmacyMonthlyAggregate,
-    PharmacyDataSource,
-    MedicationType,
-    PharmacyType
-)
 from .health_data import (
     LabReport,
     LabReportCategorized,
@@ -78,3 +69,19 @@ from .admin import Admin
 from .user_device import UserDevice
 from .timezone import TimezoneDictionary
 from .country_code import CountryCodeDictionary
+from .mental_health import (
+    MentalHealthEntry,
+    MentalHealthDailyAggregate,
+    MentalHealthFeelingDictionary,
+    MentalHealthImpactDictionary,
+    MentalHealthPleasantnessDictionary,
+    MentalHealthEntryTypeDictionary,
+)
+
+# Health scoring models (internal)
+from app.health_scoring.models import (
+    HealthScoreSpec,
+    MetricAnchorRegistry,
+    HealthScoreResultDaily,
+    HealthScoreCalcLog,
+)
