@@ -985,9 +985,12 @@ class PrescriptionClinicalAgentLangGraph:
             
                 stored_records = []
                 
-                # Store each medication as a separate prescription record
+                # Compute a single group id for this upload/document
+                prescription_group_id = f"grp_{user_id}_{now_local().strftime('%Y%m%d_%H%M%S')}"
+                
+                # Store each medication as a separate prescription record under the same group
                 for idx, med_data in enumerate(prescription_data.get("medications", [])):
-                    # Generate unique ID
+                    # Generate unique row ID per medication
                     prescription_id = f"rx_{user_id}_{now_local().strftime('%Y%m%d_%H%M%S')}_{idx}"
                     
                     # Build instructions including additional details
@@ -1013,6 +1016,7 @@ class PrescriptionClinicalAgentLangGraph:
                         id=prescription_id,
                         session_id=session_id,
                         user_id=user_id,
+                        prescription_group_id=prescription_group_id,
                         medication_name=med_data.get("medication_name", "Unknown Medication"),
                         dosage=med_data.get("dosage") or med_data.get("strength"),
                         frequency=med_data.get("frequency"),

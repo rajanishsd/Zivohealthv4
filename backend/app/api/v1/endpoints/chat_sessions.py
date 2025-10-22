@@ -723,7 +723,52 @@ def get_patient_prescriptions_enhanced(
     from app.models.chat_session import Prescription
     from app.models.doctor import ConsultationRequest, Doctor
     
-    # Get prescriptions with session data
+    # If grouping is desired, return grouped prescriptions (one per document/upload)
+    try:
+        grouped = crud.prescription.get_grouped_by_group_id(
+            db=db, user_id=current_user.id, skip=skip, limit=limit
+        )
+        if grouped:
+            result = []
+            for group in grouped:
+                medications = group.get("medications", [])
+                first = medications[0] if medications else None
+                doctor_name = "Unknown Doctor"
+                consultation_id = None
+                if first:
+                    consultation_request = db.query(ConsultationRequest).filter(
+                        ConsultationRequest.chat_session_id == first.session_id
+                    ).first()
+                    if consultation_request:
+                        consultation_id = consultation_request.id
+                        doctor = db.query(Doctor).filter(Doctor.id == consultation_request.doctor_id).first()
+                        if doctor:
+                            doctor_name = doctor.full_name
+                result.append({
+                    "prescription_group_id": group.get("prescription_group_id"),
+                    "chat_session_id": group.get("session_id"),
+                    "consultation_id": consultation_id,
+                    "doctor_name": doctor_name,
+                    "prescribed_at": group.get("prescribed_at"),
+                    "prescription_image_link": group.get("prescription_image_link"),
+                    "medications": [
+                        {
+                            "id": m.id,
+                            "medication_name": m.medication_name,
+                            "dosage": m.dosage or "",
+                            "frequency": m.frequency or "",
+                            "instructions": m.instructions or "",
+                            "prescribed_by": m.prescribed_by,
+                            "prescribed_at": m.prescribed_at,
+                        } for m in medications
+                    ]
+                })
+            return result
+    except Exception:
+        # Fallback to legacy flat list below if grouping fails for any reason
+        pass
+
+    # Legacy flat-mode: Get prescriptions with session data
     prescriptions = db.query(Prescription).join(ChatSessionModel).filter(
         ChatSessionModel.user_id == current_user.id
     ).options(joinedload(Prescription.session)).order_by(
@@ -1363,29 +1408,16 @@ async def process_streaming_response(
         except Exception:
             pass
 
-        # Choose between enhanced customer agent and new customer workflow
-        if settings.USE_CUSTOMER_WORKFLOW:
-            # Use new customer workflow
-            from app.agentsv2.customer_workflow import process_customer_request_async
-            
-            agent_result = await process_customer_request_async(
-                user_id=str(user_id),
-                user_input=user_message,
-                conversation_history=messages,
-                uploaded_file=uploaded_file,
-                session_id=session_id  # Pass session_id to the workflow
-            )
-        else:
-            # Use enhanced customer agent for processing (legacy)
-            from app.agents import get_process_customer_request
-            
-            process_customer_request = get_process_customer_request()
-            agent_result = await process_customer_request(
-                user_message=user_message,
-                user_id=user_id,
-                session_id=session_id,
-                uploaded_file=uploaded_file
-            )
+        # Use customer workflow for processing
+        from app.agentsv2.customer_workflow import process_customer_request_async
+        
+        agent_result = await process_customer_request_async(
+            user_id=str(user_id),
+            user_input=user_message,
+            conversation_history=messages,
+            uploaded_file=uploaded_file,
+            session_id=session_id  # Pass session_id to the workflow
+        )
         
         # Extract AI response from standardized response_data format or fallback to legacy format
         ai_response = ""

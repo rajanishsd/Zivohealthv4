@@ -62,6 +62,75 @@ fi
 
 usermod -aG docker ubuntu || true
 
+# Install and configure Fail2Ban for API protection
+echo "Setting up Fail2Ban to protect against API attacks..."
+apt-get install -y fail2ban || true
+
+# Create custom filter for API env file scanning attacks
+cat > /etc/fail2ban/filter.d/api-env-scan.conf <<'EOF'
+[Definition]
+# Detect attempts to access sensitive files
+failregex = ^.*"(HEAD|GET|POST) /\.env[^"]*" 401.*$
+            ^.*"(HEAD|GET|POST) /\.git[^"]*" 401.*$
+            ^.*"(HEAD|GET|POST) /config\.json[^"]*" 401.*$
+            ^.*"(HEAD|GET|POST) /\.aws[^"]*" 401.*$
+            ^.*"(HEAD|GET|POST) /credentials[^"]*" 401.*$
+            ^.*"(HEAD|GET|POST) /secrets[^"]*" 401.*$
+
+ignoreregex =
+EOF
+
+# Create jail configuration
+cat > /etc/fail2ban/jail.d/api-protection.conf <<'EOF'
+[api-env-scan]
+enabled = true
+port = http,https
+filter = api-env-scan
+logpath = /var/log/docker/zivohealth-api.log
+maxretry = 5
+findtime = 300
+bantime = 3600
+action = iptables-multiport[name=API-ATTACK, port="http,https"]
+EOF
+
+# Create directory for docker logs
+mkdir -p /var/log/docker
+
+# Create docker log monitoring script
+cat > /usr/local/bin/monitor-docker-logs.sh <<'EOF'
+#!/bin/bash
+LOG_FILE="/var/log/docker/zivohealth-api.log"
+touch "$LOG_FILE"
+docker logs -f zivohealth-api 2>&1 | while read line; do
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $line" >> "$LOG_FILE"
+done
+EOF
+
+chmod +x /usr/local/bin/monitor-docker-logs.sh
+
+# Create systemd service for log monitoring
+cat > /etc/systemd/system/docker-api-logs.service <<'EOF'
+[Unit]
+Description=Docker API Log Monitoring for Fail2Ban
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/monitor-docker-logs.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable fail2ban and log monitoring (will start after docker is up)
+systemctl enable fail2ban
+systemctl enable docker-api-logs.service
+
+echo "Fail2Ban configured successfully!"
+
 # Create application directory
 mkdir -p /opt/zivohealth
 cd /opt/zivohealth
@@ -87,7 +156,7 @@ LIVEKIT_API_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption
 LIVEKIT_API_SECRET=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/livekit/api_secret" --query "Parameter.Value" --output text 2>/dev/null || echo "devsecret")
 REMINDER_FCM_CREDENTIALS_JSON=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/reminders/fcm_credentials_json" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 REMINDER_FCM_PROJECT_ID=$(aws --region ${AWS_REGION} ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/reminders/fcm_project_id" --query "Parameter.Value" --output text 2>/dev/null || echo "")
-SMTP_PASSWORD=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/smtp/password" --query "Parameter.Value" --output text 2>/dev/null || echo "changeme")
+SMTP_PASSWORD=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/smtp/password" --query "Parameter.Value" --output text 2>/dev/null || echo "yrR-1ryed123")
 REACT_APP_API_KEY=$(aws --region ${AWS_REGION} ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/react_app/api_key" --query "Parameter.Value" --output text 2>/dev/null || echo "")
 
 # Create keys directory for FCM credentials
@@ -108,91 +177,176 @@ else
     FCM_CREDENTIALS_PATH=""
 fi
 
-# Create comprehensive .env file
+# Create comprehensive .env file from production config
 cat > /opt/zivohealth/.env <<ENV
-# Project Information
+# =============================================================================
+# PROJECT INFORMATION
+# =============================================================================
 PROJECT_NAME=ZivoHealth
 VERSION=0.1.0
 PROJECT_VERSION=0.1.0
 API_V1_STR=/api/v1
 ENVIRONMENT=${ENVIRONMENT}
+
+# =============================================================================
+# SERVER SETTINGS
+# =============================================================================
 SERVER_HOST=0.0.0.0
 SERVER_PORT=8000
+
+# =============================================================================
+# SECURITY
+# =============================================================================
 SECRET_KEY=$${SECRET_KEY}
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# =============================================================================
+# DATABASE (PostgreSQL) - from SSM Parameter Store
+# =============================================================================
 POSTGRES_SERVER=$${POSTGRES_SERVER}
 POSTGRES_PORT=5432
 POSTGRES_USER=$${POSTGRES_USER}
 POSTGRES_PASSWORD=$${POSTGRES_PASSWORD}
 POSTGRES_DB=zivohealth_dev
+
+# =============================================================================
+# REDIS
+# =============================================================================
 REDIS_HOST=redis
 REDIS_PORT=6379
 REDIS_DB=0
 REDIS_URL=redis://redis:6379/0
+
+# =============================================================================
+# OPENAI
+# =============================================================================
 OPENAI_API_KEY="$${OPENAI_API_KEY}"
+
+# =============================================================================
+# AWS CONFIGURATION - from EC2 IAM role (no hardcoded credentials)
+# =============================================================================
 AWS_ACCESS_KEY_ID=$${AWS_ACCESS_KEY_ID}
 AWS_SECRET_ACCESS_KEY=$${AWS_SECRET_ACCESS_KEY}
 AWS_DEFAULT_REGION=${AWS_REGION}
 AWS_REGION=${AWS_REGION}
 AWS_S3_BUCKET=zivohealth-data
+USE_S3_UPLOADS=true
+UPLOADS_S3_PREFIX=uploads/chat
+
+# =============================================================================
+# OCR CONFIGURATION
+# =============================================================================
 OCR_PROVIDER=aws_textract
 OCR_TIMEOUT=120
 OCR_MAX_FILE_SIZE=10485760
-CORS_ORIGINS=["http://localhost:3000", "http://localhost:8000", "http://127.0.0.1:3000", "http://127.0.0.1:8000"]
+
+# =============================================================================
+# CORS
+# =============================================================================
+CORS_ORIGINS=["https://app.zivohealth.ai","https://www.zivohealth.ai","https://zivohealth.ai"]
+
+# =============================================================================
+# WEBSOCKET
+# =============================================================================
 WS_MESSAGE_QUEUE=chat_messages
+CHAT_WS_HEARTBEAT_MAX_SECONDS=300
+
+# =============================================================================
+# AI MODEL CONFIGURATION
+# =============================================================================
 BASE_AGENT_MODEL=o4-mini
 BASE_AGENT_TEMPERATURE=1
+
 LAB_AGENT=o4-mini
 LAB_AGENT_TEMPERATURE=1
+LAB_AGGREGATION_AGENT_MODEL=o4-mini
+LAB_AGGREGATION_AGENT_TEMPERATURE=0.1
+
 CUSTOMER_AGENT_MODEL=gpt-4o-mini
 CUSTOMER_AGENT_TEMPERATURE=0.3
+
 MEDICAL_DOCTOR_MODEL=gpt-4o-mini
 MEDICAL_DOCTOR_TEMPERATURE=0.1
+
 DOCUMENT_WORKFLOW_MODEL=gpt-4o-mini
 DOCUMENT_WORKFLOW_TEMPERATURE=0.1
+
 OPENAI_CLIENT_MODEL=gpt-4o-mini
 DEFAULT_AI_MODEL=gpt-4o-mini
+
+NUTRITION_VISION_MODEL=gpt-4.1-mini
+NUTRITION_AGENT_MODEL=o4-mini
+
+VITALS_VISION_MODEL=gpt-4.1-mini
+VITALS_AGENT_MODEL=o4-mini
+
+PRESCRIPTION_CLINICAL_AGENT_MODEL=o4-mini
+PRESCRIPTION_CLINICAL_VISION_MODEL=gpt-4.1-mini
+PRESCRIPTION_CLINICAL_VISION_MAX_TOKENS=4000
+
+PHARMACY_AGENT_MODEL=o4-mini
+PHARMACY_VISION_MODEL=gpt-4.1-mini
+
+# =============================================================================
+# AGGREGATION CONFIGURATION
+# =============================================================================
 VITALS_AGGREGATION_DELAY_BULK=60
 VITALS_AGGREGATION_DELAY_INCREMENTAL=15
 VITALS_BATCH_SIZE=20000
 PROCESS_PENDING_ON_STARTUP=False
+
+# =============================================================================
+# LANGSMITH (LANGCHAIN TRACING)
+# =============================================================================
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
 LANGCHAIN_PROJECT=zivohealth-document-workflow
 LANGCHAIN_API_KEY="$${LANGCHAIN_API_KEY}"
-LAB_AGGREGATION_AGENT_MODEL=o4-mini
-LAB_AGGREGATION_AGENT_TEMPERATURE=0.1
-NUTRITION_VISION_MODEL=gpt-4.1-mini
-NUTRITION_AGENT_MODEL=o4-mini
+
+# =============================================================================
+# EXTERNAL APIs
+# =============================================================================
 E2B_API_KEY="$${E2B_API_KEY}"
 SERPAPI_KEY="$${SERPAPI_KEY}"
-VITALS_VISION_MODEL=gpt-4.1-mini
-VITALS_AGENT_MODEL=o4-mini
-PRESCRIPTION_CLINICAL_AGENT_MODEL=o4-mini
-PRESCRIPTION_CLINICAL_VISION_MODEL=gpt-4.1-mini
-PRESCRIPTION_CLINICAL_VISION_MAX_TOKENS=4000
-PHARMACY_AGENT_MODEL=o4-mini
-PHARMACY_VISION_MODEL=gpt-4.1-mini
+
+# =============================================================================
+# LIVEKIT (VOICE)
+# =============================================================================
 LIVEKIT_URL=$${LIVEKIT_URL}
 LIVEKIT_API_KEY=$${LIVEKIT_API_KEY}
 LIVEKIT_API_SECRET=$${LIVEKIT_API_SECRET}
 LIVEKIT_KEYS=$${LIVEKIT_API_KEY}:$${LIVEKIT_API_SECRET}
-UPLOADS_S3_PREFIX=uploads/chat
+
+# =============================================================================
+# API SECURITY
+# =============================================================================
 VALID_API_KEYS="$${VALID_API_KEYS}"
 APP_SECRET_KEY="$${APP_SECRET_KEY}"
+REACT_APP_SECRET_KEY="$${APP_SECRET_KEY}"
 REQUIRE_API_KEY=true
 REQUIRE_APP_SIGNATURE=true
-REACT_APP_API_BASE_URL=https://api.zivohealth.ai
-REACT_APP_API_KEY="$${REACT_APP_API_KEY}"
+
+# =============================================================================
+# EMAIL CONFIGURATION (PASSWORD RESET)
+# =============================================================================
 SMTP_SERVER=smtp.zoho.in
 SMTP_PORT=587
-SMTP_USERNAME=rajanish@zivohealth.ai
-SMTP_PASSWORD="$${SMTP_PASSWORD}"
-FROM_EMAIL=rajanish@zivohealth.ai
-FRONTEND_URL=https://zivohealth.ai
+SMTP_USERNAME=noreply@zivohealth.ai
+SMTP_PASSWORD=$${SMTP_PASSWORD}
+FROM_EMAIL=noreply@zivohealth.ai
+FRONTEND_URL=https://api.zivohealth.ai
 PASSWORD_RESET_TOKEN_EXPIRY_MINUTES=30
 PASSWORD_RESET_APP_DIR=www/reset-password
+
+# =============================================================================
+# GOOGLE OAUTH
+# =============================================================================
+GOOGLE_CLIENT_ID=144471943832-qsmsessvagsqqmcap27oeh718beavb0h.apps.googleusercontent.com
+
+# =============================================================================
+# REMINDER SERVICE
+# =============================================================================
 REMINDER_SERVICE_HOST=${reminder_service_host}
 REMINDER_SERVICE_PORT=${reminder_service_port}
 REMINDER_RABBITMQ_URL=${reminder_rabbitmq_url}
@@ -209,8 +363,12 @@ REMINDER_FCM_CREDENTIALS_JSON=$${FCM_CREDENTIALS_PATH}
 REMINDER_FCM_PROJECT_ID=$${REMINDER_FCM_PROJECT_ID}
 GOOGLE_APPLICATION_CREDENTIALS=$${FCM_CREDENTIALS_PATH}
 
-# WebSocket Configuration
-CHAT_WS_HEARTBEAT_MAX_SECONDS=300
+# =============================================================================
+# REACT APP (FRONTEND)
+# =============================================================================
+REACT_APP_API_BASE_URL=https://api.zivohealth.ai
+REACT_APP_API_KEY="$${REACT_APP_API_KEY}"
+
 ENV
 
 ## Fetch docker-compose.yml from S3 and validate
@@ -249,4 +407,10 @@ mkdir -p /opt/zivohealth
 # Start services
 docker compose up -d
 
+# Start Fail2Ban services after docker is up
+echo "Starting Fail2Ban protection services..."
+systemctl start fail2ban
+systemctl start docker-api-logs.service
+
 echo "ZivoHealth deployment completed successfully!"
+echo "Fail2Ban API protection is active!"

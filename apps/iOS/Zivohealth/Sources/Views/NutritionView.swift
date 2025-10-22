@@ -133,6 +133,31 @@ struct NutritionView: View {
     
     // MARK: - Computed Properties
     
+    // Get daily calorie goal
+    private var dailyCalorieGoal: Double {
+        if let caloriesItem = nutritionGoalsManager.progressItems.first(where: { $0.nutrientKey == "calories" }),
+           let targetMax = caloriesItem.targetMax {
+            return targetMax
+        }
+        return 2000 // Fallback default
+    }
+    
+    // Get color for calories based on target
+    private func getCaloriesColor(current: Double, target: Double) -> Color {
+        let percentage = current / target
+        
+        if percentage <= 1.1 {
+            // On target or slightly over (within 10%)
+            return .green
+        } else if percentage <= 1.25 {
+            // Moderately over (10-25% over)
+            return .orange
+        } else {
+            // Significantly over (more than 25% over)
+            return .red
+        }
+    }
+    
     // Filter meals for the selected date
     private var filteredMealsForSelectedDate: [NutritionDataResponse] {
         let calendar = Calendar.current
@@ -195,7 +220,7 @@ struct NutritionView: View {
                         .foregroundColor(.secondary)
                     Text("\(Int(nutritionManager.todaysCalories))")
                         .font(.system(size: 44, weight: .bold))
-                        .foregroundColor(.red)
+                        .foregroundColor(getCaloriesColor(current: nutritionManager.todaysCalories, target: dailyCalorieGoal))
                 }
                 
                 Spacer()

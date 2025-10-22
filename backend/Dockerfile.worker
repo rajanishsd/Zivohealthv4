@@ -1,0 +1,63 @@
+# ML Worker Dockerfile - Runs on Fargate Spot for cost efficiency
+# This worker processes lab categorization and LOINC mapping jobs from SQS
+
+ARG BASE_IMAGE_REGISTRY=zivohealth-base
+ARG BASE_IMAGE_TAG=latest
+
+# Use the base image with ML dependencies
+FROM ${BASE_IMAGE_REGISTRY}:${BASE_IMAGE_TAG}
+
+# Environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    TRANSFORMERS_CACHE=/app/.cache/huggingface \
+    HF_HOME=/app/.cache/huggingface
+
+WORKDIR /app
+
+# Create cache directory for HuggingFace models
+RUN mkdir -p /app/.cache/huggingface
+
+# Install application dependencies (lightweight packages only)
+COPY requirements-app.txt /app/requirements-app.txt
+RUN pip install --no-cache-dir -r /app/requirements-app.txt
+
+# Copy application code needed for ML worker
+COPY app/__init__.py /app/app/
+COPY app/core/ /app/app/core/
+COPY app/db/ /app/app/db/
+COPY app/models/ /app/app/models/
+COPY app/schemas/ /app/app/schemas/
+COPY app/utils/ /app/app/utils/
+
+# Copy CRUD modules (all needed for aggregation)
+COPY app/crud/ /app/app/crud/
+
+# Copy health scoring module (needed for aggregation)
+COPY app/health_scoring/ /app/app/health_scoring/
+
+# Copy LOINC data for lab categorization
+COPY 3PData/loinc/ /app/3PData/loinc/
+
+# Pre-download BioBERT model for LOINC embeddings (prevents runtime download failures)
+RUN python -c "from langchain_community.embeddings import HuggingFaceEmbeddings; HuggingFaceEmbeddings(model_name='pritamdeka/BioBERT-mnli-snli-scinli-scitail-mednli-stsb')" && \
+    echo "✅ BioBERT model pre-downloaded to /app/.cache/huggingface"
+
+# Copy the ML worker service
+COPY app/services/ /app/app/services/
+
+# Copy aggregation worker (for background mode)
+COPY aggregation/ /app/aggregation/
+
+# Health check script
+RUN echo '#!/bin/bash\npython -c "import sys; sys.exit(0)"' > /app/healthcheck.sh && \
+    chmod +x /app/healthcheck.sh
+
+# Expose metrics port (optional, for Prometheus)
+EXPOSE 9090
+
+# Run the ML worker
+CMD ["python", "-m", "app.services.ml_worker"]
+

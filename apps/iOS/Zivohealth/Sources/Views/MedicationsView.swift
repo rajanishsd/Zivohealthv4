@@ -34,15 +34,13 @@ struct MedicationsViewModern: View {
                     // Active Medications Card
                     ActiveMedicationsCard(prescriptions: viewModel.prescriptions)
                     
-                    // Prescriptions List Card
-                    PrescriptionsListCard(
-                        prescriptions: viewModel.prescriptions,
+                    // Grouped Prescriptions List Card
+                    PrescriptionGroupsCard(
+                        groups: viewModel.groups,
                         isLoading: viewModel.isLoading,
                         error: viewModel.error,
                         onRefresh: {
-                            Task {
-                                await viewModel.loadPrescriptions()
-                            }
+                            Task { await viewModel.loadPrescriptions() }
                         }
                     )
                     
@@ -492,6 +490,176 @@ struct PrescriptionsListCard: View {
     }
 }
 
+// MARK: - Grouped Prescriptions Card
+struct PrescriptionGroupsCard: View {
+    let groups: [PrescriptionGroup]
+    let isLoading: Bool
+    let error: String?
+    let onRefresh: () -> Void
+    
+    @State private var selectedGroup: PrescriptionGroup?
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header
+            HStack {
+                Image(systemName: "clipboard.text")
+                    .foregroundColor(.blue)
+                    .font(.title2)
+                Text("All Prescriptions")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                Spacer()
+                Button(action: onRefresh) {
+                    Image(systemName: "arrow.clockwise")
+                        .foregroundColor(.blue)
+                }
+            }
+            
+            if isLoading {
+                HStack { Spacer(); ProgressView(); Spacer() }
+                    .padding(.vertical, 24)
+            } else if let error = error {
+                VStack(spacing: 8) {
+                    Text("Error loading prescriptions").font(.headline).foregroundColor(.secondary)
+                    Text(error).font(.caption).foregroundColor(.secondary)
+                    Button("Try Again", action: onRefresh).font(.caption).foregroundColor(.blue)
+                }.frame(maxWidth: .infinity).padding(.vertical, 20)
+            } else if groups.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "pills.circle").font(.system(size: 40)).foregroundColor(.gray)
+                    Text("No Prescriptions Yet").font(.headline).foregroundColor(.secondary)
+                    Text("Your prescriptions from doctor consultations will appear here")
+                        .font(.caption).foregroundColor(.secondary).multilineTextAlignment(.center)
+                }.frame(maxWidth: .infinity).padding(.vertical, 20)
+            } else {
+                LazyVStack(spacing: 12) {
+                    ForEach(groups, id: \.id) { group in
+                        PrescriptionGroupRow(group: group)
+                            .onTapGesture { selectedGroup = group }
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
+        .sheet(item: $selectedGroup) { group in
+            PrescriptionGroupDetailView(group: group)
+        }
+    }
+}
+
+struct PrescriptionGroupRow: View {
+    let group: PrescriptionGroup
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "pills.fill").foregroundColor(.orange)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(group.doctorName).font(.headline)
+                if let date = group.prescribedAt {
+                    Text(DateFormatter.prescriptionDate.string(from: date))
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                // Show up to two meds inline
+                ForEach(group.medications.prefix(2)) { med in
+                    Text("\(med.medicationName)\(med.dosage.isEmpty ? "" : " - \(med.dosage)")")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                if group.medications.count > 2 {
+                    Text("+ \(group.medications.count - 2) more")
+                        .font(.caption2).foregroundColor(.blue)
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right").foregroundColor(.secondary).font(.caption)
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+}
+
+struct PrescriptionGroupDetailView: View, Identifiable {
+    var id: String { group.id }
+    let group: PrescriptionGroup
+    
+    var body: some View {
+        NavigationView {
+            List {
+                if let link = group.prescriptionImageLink, !link.isEmpty {
+                    Section(header: Text("Prescription Document")) {
+                        NavigationLink(destination: PrescriptionFileViewer(urlString: link)) {
+                            HStack { Image(systemName: "doc.text"); Text("View uploaded prescription") }
+                        }
+                    }
+                }
+                Section(header: Text("Medications")) {
+                    ForEach(group.medications) { med in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(med.medicationName).font(.headline)
+                            if !med.dosage.isEmpty || !med.frequency.isEmpty {
+                                Text("\(med.dosage)\(med.dosage.isEmpty || med.frequency.isEmpty ? "" : ", ")\(med.frequency)")
+                                    .font(.caption).foregroundColor(.secondary)
+                            }
+                            if !med.instructions.isEmpty {
+                                Text(med.instructions).font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .navigationTitle(group.doctorName)
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+struct PrescriptionFileViewer: View {
+    let urlString: String
+    
+    var body: some View {
+        VStack {
+            if let url = URL(string: urlString) {
+                if url.pathExtension.lowercased() == "pdf" {
+                    PDFKitRepresentable(url: url)
+                } else {
+                    AsyncImage(url: url) { image in
+                        image.resizable().scaledToFit()
+                    } placeholder: {
+                        ProgressView()
+                    }
+                }
+            } else {
+                Text("Invalid file link")
+            }
+        }
+        .padding()
+    }
+}
+
+import PDFKit
+struct PDFKitRepresentable: UIViewRepresentable {
+    let url: URL
+    
+    func makeUIView(context: Context) -> PDFView {
+        let pdfView = PDFView()
+        pdfView.autoScales = true
+        pdfView.displayMode = .singlePageContinuous
+        pdfView.displayDirection = .vertical
+        pdfView.document = PDFDocument(url: url)
+        return pdfView
+    }
+    
+    func updateUIView(_ uiView: PDFView, context: Context) {
+        // no-op
+    }
+}
+
 // MARK: - Prescription Card
 struct PrescriptionCard: View {
     let prescription: PrescriptionWithSession
@@ -588,9 +756,10 @@ struct PrescriptionCard: View {
 }
 
 // MARK: - Medications ViewModel
-@MainActor
-class MedicationsViewModel: ObservableObject {
-    @Published var prescriptions: [PrescriptionWithSession] = []
+    @MainActor
+    class MedicationsViewModel: ObservableObject {
+        @Published var prescriptions: [PrescriptionWithSession] = []
+        @Published var groups: [PrescriptionGroup] = []
     @Published var isLoading = false
     @Published var error: String?
     
@@ -601,9 +770,12 @@ class MedicationsViewModel: ObservableObject {
         error = nil
         
         do {
-            let fetchedPrescriptions = try await networkService.getPatientPrescriptions()
-            prescriptions = fetchedPrescriptions.sorted { $0.prescribedAt > $1.prescribedAt }
-            print("✅ [MedicationsViewModel] Loaded \(prescriptions.count) prescriptions from backend")
+                async let flatTask = networkService.getPatientPrescriptions()
+                async let groupTask = networkService.getPrescriptionGroups()
+                let (fetchedPrescriptions, fetchedGroups) = try await (flatTask, groupTask)
+                prescriptions = fetchedPrescriptions.sorted { $0.prescribedAt > $1.prescribedAt }
+                groups = fetchedGroups.sorted { ($0.prescribedAt ?? .distantPast) > ($1.prescribedAt ?? .distantPast) }
+                print("✅ [MedicationsViewModel] Loaded \(prescriptions.count) prescriptions; groups=\(groups.count)")
         } catch {
             self.error = "Failed to load prescriptions: \(error.localizedDescription)"
             print("❌ [MedicationsViewModel] Error loading prescriptions: \(error)")

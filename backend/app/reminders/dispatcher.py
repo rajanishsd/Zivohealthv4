@@ -84,6 +84,30 @@ def send_push_via_fcm(event: Dict[str, Any]) -> None:
     """
     print(f"🔍 [FCM] Dispatch event: {event}")
     
+    # Check if user has notifications enabled before proceeding
+    user_id = event.get("user_id")
+    if user_id:
+        db = SessionLocal()
+        try:
+            from app.models.user import User
+            user = db.query(User).filter(User.id == int(user_id)).first()
+            if user and not user.notifications_enabled:
+                print(f"⏭️  [FCM] User {user_id} has notifications disabled - skipping push notification")
+                # Mark reminder as skipped since user opted out
+                reminder_id = str(event.get("reminder_id"))
+                if reminder_id:
+                    from .repository import mark_skipped
+                    mark_skipped(db, reminder_id)
+                return
+            elif not user:
+                print(f"⚠️  [FCM] User {user_id} not found - skipping push notification")
+                return
+        except Exception as e:
+            print(f"⚠️  [FCM] Failed to check user notification settings: {e!r}")
+            # Continue with sending in case of error to avoid blocking legitimate notifications
+        finally:
+            db.close()
+    
     # Ensure Firebase is initialized (attempt initialization if not already done)
     _ensure_firebase_initialized()
 

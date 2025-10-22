@@ -15,6 +15,19 @@ data "aws_vpc" "existing" {
   id = "vpc-04d23036cd269f2a6"
 }
 
+# Manage DNS attributes on the existing VPC to support Interface Endpoint private DNS
+resource "aws_vpc" "managed_existing" {
+  cidr_block = data.aws_vpc.existing.cidr_block
+
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+
+  # Do not manage tags or other attributes on the shared VPC
+  lifecycle {
+    ignore_changes = [tags]
+  }
+}
+
 data "aws_subnets" "existing_public" {
   filter {
     name   = "vpc-id"
@@ -34,6 +47,16 @@ data "aws_subnets" "existing_private" {
   filter {
     name   = "map-public-ip-on-launch"
     values = ["false"]
+  }
+}
+
+# Get route tables for private subnets (for S3 gateway endpoint)
+data "aws_route_tables" "private" {
+  vpc_id = data.aws_vpc.existing.id
+
+  filter {
+    name   = "association.subnet-id"
+    values = data.aws_subnets.existing_private.ids
   }
 }
 
@@ -149,7 +172,7 @@ module "ssm" {
   project               = var.project_name
   environment           = var.environment
   image_tag             = var.image_tag
-  db_endpoint           = data.aws_db_instance.existing.endpoint
+  db_endpoint           = split(":", data.aws_db_instance.existing.endpoint)[0]  # Remove port from endpoint
   db_username           = var.db_username
   db_password_ssm_key   = var.db_password_ssm_name
   s3_bucket_name        = module.storage.bucket_name
@@ -157,6 +180,7 @@ module "ssm" {
   reminders_fcm_credentials_json = var.reminders_fcm_credentials_json
   reminders_fcm_project_id = var.reminders_fcm_project_id
   react_app_api_key     = local.react_app_api_key
+  ml_worker_queue_url   = module.ml_worker.sqs_queue_url
 }
 
 module "compute" {
@@ -196,10 +220,70 @@ module "compute" {
   compose_s3_key    = "deploy/${var.environment}/docker-compose.yml"
 }
 
+# VPC Endpoints - Allow Fargate tasks in private subnets to access AWS services
+module "vpc_endpoints" {
+  source = "./modules/vpc_endpoints"
+  
+  environment        = var.environment
+  aws_region         = var.aws_region
+  vpc_id             = data.aws_vpc.existing.id
+  private_subnet_ids = data.aws_subnets.existing_private.ids
+  route_table_ids    = data.aws_route_tables.private.ids
+}
+
+# ML Worker module for lab categorization and aggregation
+module "ml_worker" {
+  source = "./modules/ml_worker"
+  depends_on = [module.vpc_endpoints]  # Ensure VPC endpoints exist first
+  
+  environment        = var.environment
+  aws_region         = var.aws_region
+  vpc_id             = data.aws_vpc.existing.id
+  private_subnet_ids = data.aws_subnets.existing_public.ids  # Use public subnets for internet egress
+  ecr_repository_url = module.ecr.registry_host
+  
+  # IAM roles for Fargate tasks
+  execution_role_arn = module.iam.ecs_execution_role_arn
+  task_role_arn      = module.iam.ecs_task_role_arn
+  api_role_arn       = module.iam.ec2_role_arn
+  
+  # Database configuration
+  db_host            = split(":", data.aws_db_instance.existing.endpoint)[0]
+  db_port            = data.aws_db_instance.existing.port
+  db_name            = data.aws_db_instance.existing.db_name
+  
+  # Worker mode: 'sqs' for queue-based triggering (enables scale-to-zero)
+  # - 'sqs': Process SQS messages only (ALL domains: labs, vitals, nutrition)
+  # - 'aggregation': Background worker only (no scale-to-zero, DEPRECATED)
+  # - 'both': SQS + background worker (hybrid approach, DEPRECATED)
+  worker_mode        = "sqs"  # All domains now use SQS for full scale-to-zero
+  
+  # Scaling configuration - Scale to zero for cost savings
+  min_capacity       = 0  # Scale to 0 when queue is empty (saves cost)
+  max_capacity       = 5  # Up to 5 workers for high load
+  target_queue_depth = 0.5  # Start worker immediately when 1+ messages (1÷0.5=2 tasks, capped at max)
+}
+
 module "route53" {
   source      = "./modules/route53"
   project     = var.project_name
   environment = var.environment
   zone_name   = "zivohealth.ai"
   target_ip   = module.compute.public_ip
+}
+
+# Outputs
+output "ml_worker_queue_url" {
+  description = "SQS Queue URL for ML Worker"
+  value       = module.ml_worker.sqs_queue_url
+}
+
+output "ml_worker_cluster_name" {
+  description = "ECS Cluster name for ML Worker"
+  value       = module.ml_worker.ecs_cluster_name
+}
+
+output "ml_worker_service_name" {
+  description = "ECS Service name for ML Worker"
+  value       = module.ml_worker.ecs_service_name
 }

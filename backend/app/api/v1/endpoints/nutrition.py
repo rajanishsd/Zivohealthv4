@@ -18,9 +18,11 @@ from app.schemas.nutrition import (
 )
 from app.models.user import User
 from app.models.nutrition_data import NutritionSyncStatus
-from app.core.background_worker import trigger_smart_aggregation
+from app.utils.sqs_client import get_ml_worker_client
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.post("/data", response_model=NutritionDataResponse)
 def create_nutrition_data(
@@ -45,14 +47,14 @@ def create_nutrition_data(
             error_message=None
         )
         
-        # Trigger coalesced aggregation for nutrition only (post-commit)
+        # Trigger ML worker via SQS to process pending nutrition (post-commit)
         try:
-            # Use a short debounce via the smart worker; domains limited to nutrition
-            import asyncio
-            # If this endpoint is sync, fire-and-forget the coroutine
-            asyncio.create_task(trigger_smart_aggregation(user_id=current_user.id, domains=["nutrition"]))
-        except Exception:
+            ml_worker_client = get_ml_worker_client()
+            if ml_worker_client.is_enabled():
+                ml_worker_client.send_nutrition_processing_trigger(user_id=current_user.id, priority='normal')
+        except Exception as e:
             # Non-fatal if background trigger fails
+            logger.warning(f"⚠️  Failed to trigger ML worker for nutrition: {e}")
             pass
         return nutrition_data
         

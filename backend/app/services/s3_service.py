@@ -96,6 +96,30 @@ def generate_presigned_get_url(s3_uri: str, expires_in: int = 3600) -> str:
     except (BotoCoreError, ClientError) as e:
         raise RuntimeError(f"Failed to generate presigned URL for {s3_uri}: {e}")
 
+def delete_file_from_s3(s3_uri: str) -> bool:
+    """
+    Delete a file from S3 given an s3://bucket/key URI.
+    Returns True if successful, False otherwise.
+    """
+    if not s3_uri or not s3_uri.startswith("s3://"):
+        raise RuntimeError("delete_file_from_s3 expects an s3:// URI")
+    
+    from urllib.parse import urlparse
+    parsed = urlparse(s3_uri)
+    bucket = parsed.netloc
+    key = parsed.path.lstrip('/')
+    
+    if not bucket or not key:
+        raise RuntimeError("Invalid S3 URI; missing bucket or key")
+    
+    s3 = _get_s3_client()
+    try:
+        s3.delete_object(Bucket=bucket, Key=key)
+        return True
+    except (BotoCoreError, ClientError) as e:
+        raise RuntimeError(f"Failed to delete {s3_uri} from S3: {e}")
+
+
 def verify_s3_configuration(require_write: bool = False) -> Tuple[bool, str]:
     """
     Verify S3 configuration and access at startup.

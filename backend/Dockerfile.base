@@ -1,0 +1,41 @@
+# Base Image with Heavy ML Dependencies
+# Build this image rarely (only when ML dependencies change)
+# Usage: docker build -f Dockerfile.base -t zivohealth-base:latest .
+
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+# Install system dependencies required for building Python packages
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        gcc \
+        g++ \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create working directory
+WORKDIR /app
+
+# Copy base requirements
+COPY requirements-base.txt /app/requirements-base.txt
+
+# Install base dependencies (ML libraries - this takes the longest)
+# Using --no-cache-dir to reduce image size
+RUN pip install --no-cache-dir -r /app/requirements-base.txt
+
+# Clean up build dependencies to reduce image size
+RUN apt-get purge -y --auto-remove build-essential gcc g++ git && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Verify installations
+RUN python -c "import torch; import transformers; import sentence_transformers; print('Base dependencies installed successfully')"
+
+# This base image will be tagged and pushed to ECR
+# The app image will use this as its base
+

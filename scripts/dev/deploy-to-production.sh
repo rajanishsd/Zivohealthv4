@@ -6,12 +6,38 @@ if [[ "${DEBUG:-0}" == "1" ]]; then
   set -x
 fi
 
-# Two-step production deploy: (1) terraform apply (run separately), (2) build/push images and refresh EC2 services.
+# Production deploy: Build images locally, then push and deploy to EC2
+# This script calls two separate scripts to allow retrying push/deploy without rebuilding
 
-echo "🚀 Production Deploy (Step 2): Build, Push, Refresh Services"
-echo "============================================================"
+echo "🚀 Production Deploy: Build, Push, and Deploy"
+echo "=============================================="
+echo ""
+echo "This script runs two steps:"
+echo "  1. Build images locally (./build-production-images.sh)"
+echo "  2. Push to ECR and deploy to EC2 (./push-and-deploy.sh)"
+echo ""
 
-ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Step 1: Build images locally
+echo "Step 1: Building images..."
+"$SCRIPT_DIR/build-production-images.sh"
+
+echo ""
+echo "✅ Build complete!"
+echo ""
+
+# Step 2: Push and deploy
+echo "Step 2: Pushing and deploying..."
+"$SCRIPT_DIR/push-and-deploy.sh"
+
+exit 0
+
+# Original combined script below (kept for reference but not executed)
+exit 0
+
+ROOT_DIR_UNUSED="$(cd "$(dirname "$0")/../.." && pwd)"
 TF_DIR="$ROOT_DIR/infra/terraform"
 REGION="us-east-1"
 

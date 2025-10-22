@@ -59,6 +59,7 @@ class Prescription(Base):
     session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
     consultation_request_id = Column(Integer, ForeignKey("consultation_requests.id"), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Direct user reference
+    prescription_group_id = Column(String(64))  # Group multiple medication rows into one prescription
     
     medication_name = Column(String(255), nullable=False)
     dosage = Column(String(100))

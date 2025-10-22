@@ -39,7 +39,7 @@ from app.core.config import settings
 from app.core.database_utils import execute_query_safely_json, get_table_schema_safely, get_raw_db_connection
 from app.agentsv2.tools.nutrition_tools import internet_search_tool
 from app.utils.timezone import now_local, isoformat_now, get_user_timezone, user_now
-from app.core.background_worker import trigger_smart_aggregation
+from app.utils.sqs_client import get_ml_worker_client
 
 # Import nutrition configuration
 from app.configurations.nutrition_config import NUTRITION_TABLES, PRIMARY_NUTRITION_TABLE
@@ -1303,12 +1303,22 @@ IMPORTANT:
         # Fire-and-forget coalesced aggregation for nutrition domain
         try:
             import asyncio
+            import logging
+            logger = logging.getLogger(__name__)
             user_id = None
             if isinstance(nutrition_result, dict):
                 user_id = nutrition_result.get("user_id") or nutrition_result.get("userId")
             elif isinstance(nutrition_result, list) and nutrition_result and isinstance(nutrition_result[0], dict):
                 user_id = nutrition_result[0].get("user_id") or nutrition_result[0].get("userId")
-            asyncio.create_task(trigger_smart_aggregation(user_id=user_id, domains=["nutrition"]))
+            
+            # Trigger ML worker via SQS to process pending nutrition (fire-and-forget)
+            try:
+                ml_worker_client = get_ml_worker_client()
+                if ml_worker_client.is_enabled():
+                    ml_worker_client.send_nutrition_processing_trigger(user_id=user_id, priority='normal')
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to trigger ML worker for nutrition: {e}")
+                pass
         except Exception:
             pass
 

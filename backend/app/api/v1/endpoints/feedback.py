@@ -333,3 +333,51 @@ def update_feedback(
     return result
 
 
+@router.delete("/{feedback_id}")
+def delete_feedback(
+    feedback_id: str,
+    db: Session = Depends(deps.get_db),
+    current_admin: models.Admin = Depends(deps.get_current_active_admin)
+) -> Any:
+    """Delete feedback entry and associated screenshot from S3"""
+    print(f"🗑️ [Feedback Delete] Received DELETE request for feedback_id: {feedback_id}")
+    print(f"🗑️ [Feedback Delete] Admin user: {current_admin.email if current_admin else 'None'}")
+    
+    # Get the feedback object
+    obj = feedback_crud.get(db=db, id=feedback_id)
+    if not obj:
+        print(f"❌ [Feedback Delete] Feedback not found: {feedback_id}")
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    
+    print(f"✅ [Feedback Delete] Found feedback: {obj.id}, s3_key: {obj.s3_key}")
+    
+    # Delete from S3 first (before deleting from DB in case of errors)
+    s3_deleted = False
+    if obj.s3_key:
+        try:
+            from app.services.s3_service import delete_file_from_s3
+            s3_uri = f"s3://{settings.AWS_S3_BUCKET}/{obj.s3_key}"
+            print(f"🗑️ [Feedback Delete] Deleting from S3: {s3_uri}")
+            delete_file_from_s3(s3_uri)
+            s3_deleted = True
+            print(f"✅ [Feedback Delete] Successfully deleted from S3")
+        except Exception as e:
+            print(f"⚠️ [Feedback Delete] Failed to delete from S3: {e}")
+            # Continue with DB deletion even if S3 deletion fails
+    
+    # Delete from database
+    try:
+        db.delete(obj)
+        db.commit()
+        print(f"✅ [Feedback Delete] Successfully deleted feedback from database")
+    except Exception as e:
+        db.rollback()
+        print(f"❌ [Feedback Delete] Failed to delete from database: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete feedback: {e}")
+    
+    return {
+        "message": f"Feedback {feedback_id} deleted successfully",
+        "s3_deleted": s3_deleted
+    }
+
+

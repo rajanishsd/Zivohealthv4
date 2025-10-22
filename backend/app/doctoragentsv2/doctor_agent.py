@@ -1,6 +1,6 @@
 from typing import Dict, Any, List
 
-from app.agents.openai_client import get_chat_completion
+from app.utils.openai_client import get_chat_completion
 
 
 SYSTEM_PROMPT = """You are a medical assistant helping doctors review patient consultations.

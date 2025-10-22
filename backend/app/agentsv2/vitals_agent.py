@@ -1120,8 +1120,10 @@ IMPORTANT:
         """
         from app.crud.vitals import VitalsCRUD
         from app.core.database_utils import get_db_session
-        from app.core.background_worker import trigger_smart_aggregation
+        from app.utils.sqs_client import get_ml_worker_client
         import asyncio
+        import logging
+        logger = logging.getLogger(__name__)
 
         results = []
         stats = {
@@ -1141,10 +1143,13 @@ IMPORTANT:
                         # Create the vitals record using CRUD
                         stored_record = VitalsCRUD.create_raw_data(db, user_id, submission)
 
-                        # Fire-and-forget coalesced aggregation for vitals domain
+                        # Trigger ML worker via SQS to process pending vitals (fire-and-forget)
                         try:
-                            asyncio.create_task(trigger_smart_aggregation(user_id=user_id, domains=["vitals"]))
-                        except Exception:
+                            ml_worker_client = get_ml_worker_client()
+                            if ml_worker_client.is_enabled():
+                                ml_worker_client.send_vitals_processing_trigger(user_id=user_id, priority='normal')
+                        except Exception as e:
+                            logger.warning(f"⚠️  Failed to trigger ML worker for vitals: {e}")
                             pass
 
                         result = {

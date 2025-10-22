@@ -1,0 +1,18 @@
+# Base Image Requirements - Heavy ML dependencies
+# These are built into the base image and rarely change
+
+# Core Python packages needed by ML libraries
+numpy>=1.24.0
+
+# Machine Learning and NLP (Heavy dependencies - ~2GB)
+sentence-transformers>=2.2.0
+transformers>=4.35.0
+torch>=2.0.0
+
+# Data Processing (needed by ML libraries)
+pandas>=2.1.0
+scipy>=1.10.0
+
+# Image processing (needed by ML models)
+Pillow>=10.0.0
+

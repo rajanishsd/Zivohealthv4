@@ -65,3 +65,20 @@ resource "aws_ssm_parameter" "react_app_api_key" {
   value = var.react_app_api_key
   overwrite = true
 }
+
+# ML Worker configuration
+resource "aws_ssm_parameter" "ml_worker_queue_url" {
+  count = var.ml_worker_queue_url != "" ? 1 : 0
+  name  = "/${var.project}/${var.environment}/ml_worker/queue_url"
+  type  = "String"
+  value = var.ml_worker_queue_url
+  overwrite = true
+}
+
+resource "aws_ssm_parameter" "ml_worker_enabled" {
+  count = var.ml_worker_queue_url != "" ? 1 : 0
+  name  = "/${var.project}/${var.environment}/ml_worker/enabled"
+  type  = "String"
+  value = "true"
+  overwrite = true
+}

@@ -64,16 +64,10 @@ pgvector>=0.2.0
 # PDF parsing
 PyPDF2>=3.0.0
 
-# Telemetry (imported by app.core.telemetry)
-opentelemetry-api>=1.20.0
-opentelemetry-sdk>=1.20.0
-opentelemetry-exporter-otlp>=1.20.0
-opentelemetry-instrumentation-sqlalchemy>=0.41b0
-opentelemetry-instrumentation-requests>=0.41b0
-opentelemetry-instrumentation-fastapi>=0.41b0
-opentelemetry-instrumentation-redis>=0.41b0
+# Telemetry - Using simplified Redis-based telemetry (telemetry_simple.py)
+# OpenTelemetry libraries removed as they are not used in production
 
-# Guardrails (imported by app.agents.guardrails_system)
+# Guardrails
 guardrails-ai>=0.6.6
 
 # Task queues and scheduling

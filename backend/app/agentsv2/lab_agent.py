@@ -35,7 +35,7 @@ from app.agentsv2.lab_analyze_workflow import LabAnalyzeWorkflow
 from app.agentsv2.response_utils import format_agent_response, format_error_response
 from langchain.callbacks.tracers import LangChainTracer
 import os
-from app.core.background_worker import trigger_smart_aggregation
+from app.utils.sqs_client import get_ml_worker_client
 
 load_dotenv()
 
@@ -1284,11 +1284,21 @@ class LabAgentLangGraph:
                         }
                     
                     conn.commit()
-            # Trigger coalesced labs aggregation (fire-and-forget)
+            
+            # Trigger ML worker via SQS to process pending labs (fire-and-forget)
             try:
-                asyncio.create_task(trigger_smart_aggregation(user_id=cleaned_result.get('user_id'), domains=["labs"]))
-            except Exception:
-                pass
+                ml_worker_client = get_ml_worker_client()
+                if ml_worker_client.is_enabled():
+                    ml_worker_client.send_lab_processing_trigger(
+                        user_id=cleaned_result.get('user_id'),
+                        priority='normal'
+                    )
+                    logger.info(f"📤 Triggered ML worker for user {cleaned_result.get('user_id')}")
+                else:
+                    logger.warning("⚠️  ML worker is not enabled, lab will be processed by background worker")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to trigger ML worker: {e}")
+            
             return result
             
         except Exception as e:

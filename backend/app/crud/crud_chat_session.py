@@ -180,6 +180,10 @@ class CRUDPrescription(CRUDBase[Prescription, PrescriptionCreate, PrescriptionUp
         obj_in_data["session_id"] = session_id
         # Generate UUID for prescription ID since it's still a string field
         obj_in_data["id"] = str(uuid.uuid4())
+        # If group id missing, create one based on session and time; same id should be
+        # reused by callers to group multiple medications under a single prescription
+        if not obj_in_data.get("prescription_group_id"):
+            obj_in_data["prescription_group_id"] = f"grp_{session_id}_{int(datetime.utcnow().timestamp())}"
         db_obj = self.model(**obj_in_data)
         db.add(db_obj)
         db.commit()
@@ -216,6 +220,41 @@ class CRUDPrescription(CRUDBase[Prescription, PrescriptionCreate, PrescriptionUp
             .limit(limit)
             .all()
         )
+
+    def get_grouped_by_group_id(
+        self, db: Session, *, user_id: int, skip: int = 0, limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        # Returns list of groups with medications inside
+        from sqlalchemy import func as sa_func
+        groups_query = (
+            db.query(self.model.prescription_group_id)
+            .join(ChatSession)
+            .filter(ChatSession.user_id == user_id)
+            .filter(self.model.prescription_group_id.isnot(None))
+            .group_by(self.model.prescription_group_id)
+            .order_by(sa_func.max(self.model.prescribed_at).desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        groups = []
+        for (group_id,) in groups_query.all():
+            meds = (
+                db.query(self.model)
+                .join(ChatSession)
+                .filter(ChatSession.user_id == user_id)
+                .filter(self.model.prescription_group_id == group_id)
+                .order_by(self.model.prescribed_at.desc())
+                .all()
+            )
+            groups.append({
+                "prescription_group_id": group_id,
+                "medications": meds,
+                "prescribed_at": max([m.prescribed_at for m in meds]) if meds else None,
+                "session_id": meds[0].session_id if meds else None,
+                "consultation_request_id": meds[0].consultation_request_id if meds else None,
+                "prescription_image_link": next((m.prescription_image_link for m in meds if m.prescription_image_link), None),
+            })
+        return groups
 
 
 # Create instances

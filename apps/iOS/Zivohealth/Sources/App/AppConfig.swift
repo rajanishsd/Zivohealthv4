@@ -9,7 +9,7 @@ enum AppConfig {
 		
 		static var current: Environment {
 			// Manual override for testing (comment out to use automatic detection)
-			return .local
+			//return .local
 			// return .staging
 			return .production
 			

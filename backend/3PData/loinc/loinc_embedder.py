@@ -132,8 +132,9 @@ class CustomLOINCPGVector(PGVector):
         self.collection_table_name = LOINC_COLLECTION_TABLE
         self.embedding_table_name = LOINC_EMBEDDING_TABLE
         
-        # Create tables during initialization (once)
-        self._create_tables_if_not_exists()
+        # Optionally create tables during initialization (skip in ML worker)
+        if os.getenv("LOINC_CREATE_TABLES", "0") == "1":
+            self._create_tables_if_not_exists()
         
         # Cache collection ID to avoid repeated queries
         self._collection_id = None
@@ -375,7 +376,8 @@ class LOINCEmbeddingPipeline:
             collection_name=COLLECTION_NAME
         )
         
-        self.processor = LOINCCSVProcessor(LOINC_CSV_PATH)
+        # Defer CSV processor creation to when processing is explicitly invoked
+        self.processor = None
         
         # Progress tracking
         self.processed_count = 0
@@ -395,8 +397,8 @@ class LOINCEmbeddingPipeline:
                 conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
                 logger.info("✅ pgvector extension enabled")
             
-            # Tables are automatically created during vector store initialization
-            # Just verify they exist
+            # Tables may be created explicitly only when requested via env flag
+            # Verify they exist if creation was enabled
             with engine.connect() as conn:
                 result = conn.execute(text("""
                     SELECT table_name FROM information_schema.tables 
@@ -428,6 +430,9 @@ class LOINCEmbeddingPipeline:
         processed_batches = 0
         
         try:
+            # Initialize CSV processor lazily to avoid errors when CSV is unavailable
+            if self.processor is None:
+                self.processor = LOINCCSVProcessor(LOINC_CSV_PATH)
             for batch_records in self.processor.process_csv(batch_size=LOINC_EMBEDDER_BATCH_SIZE):
                 if max_codes and self.processed_count >= max_codes:
                     logger.info(f"Reached maximum codes limit: {max_codes}")

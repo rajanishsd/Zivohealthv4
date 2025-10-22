@@ -279,6 +279,7 @@ struct VitalsCardContentView: View {
                     Text(latestHeartRate)
                         .font(.subheadline)
                         .fontWeight(.medium)
+                        .foregroundColor(heartRateColor)
                 }
                 
                 // Blood Pressure
@@ -382,6 +383,21 @@ struct VitalsCardContentView: View {
                 return .orange
             } else {
                 return .green
+            }
+        }
+        return .primary
+    }
+    
+    private var heartRateColor: Color {
+        if let dashboardData = healthKitManager.dashboardData,
+           let heartRateMetric = dashboardData.metrics.first(where: { $0.metricType == .heartRate }),
+           let heartRate = heartRateMetric.latestValue {
+            
+            // Normal resting heart rate for adults is 60-100 bpm
+            if heartRate >= 60 && heartRate <= 100 {
+                return .green  // Normal range
+            } else {
+                return .red    // Outside normal range
             }
         }
         return .primary

@@ -2,6 +2,9 @@
 image_tag = "latest"
 environment = "production"
 
+# Database configuration
+db_password_ssm_name = "/zivohealth/production/db/password"
+
 # Optional: enable SSH tunneling (port 22) alongside SSM
 # Set your IP in CIDR format like "203.0.113.25/32" to restrict access
 enable_ssh_tunnel = false

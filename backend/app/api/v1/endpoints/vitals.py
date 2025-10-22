@@ -30,7 +30,7 @@ from app.models.vitals_data import VitalsRawData, VitalsSyncStatus, VitalsDailyA
 import logging
 import uuid
 from app.core.sync_state import sync_state_manager
-from app.core.background_worker import trigger_smart_aggregation
+from app.utils.sqs_client import get_ml_worker_client
 import asyncio
 
 router = APIRouter()
@@ -109,8 +109,13 @@ async def submit_vital_data(
             error_message=None
         )
         
-        # Coalesced, domain-specific aggregation trigger (vitals only) - fire and forget
-        asyncio.create_task(trigger_smart_aggregation(user_id=current_user.id, domains=["vitals"]))
+        # Trigger ML worker via SQS to process pending vitals (fire-and-forget)
+        try:
+            ml_worker_client = get_ml_worker_client()
+            if ml_worker_client.is_enabled():
+                ml_worker_client.send_vitals_processing_trigger(user_id=current_user.id, priority='normal')
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to trigger ML worker for vitals: {e}")
         
         return VitalSubmissionResponse(
             success=True,
@@ -192,8 +197,13 @@ async def bulk_submit_vital_data(
         
         if should_trigger_aggregation:
             logger.info(f"🚀 [BulkSubmit] Final chunk received - triggering coalesced vitals aggregation for session {session_id}")
-            # Fire and forget to avoid blocking the response
-            asyncio.create_task(trigger_smart_aggregation(user_id=current_user.id, domains=["vitals"])) 
+            # Trigger ML worker via SQS (fire-and-forget)
+            try:
+                ml_worker_client = get_ml_worker_client()
+                if ml_worker_client.is_enabled():
+                    ml_worker_client.send_vitals_processing_trigger(user_id=current_user.id, priority='normal')
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to trigger ML worker for vitals: {e}") 
         else:
             logger.info(f"⏳ [BulkSubmit] Intermediate chunk {chunk_number}/{total_chunks} - aggregation deferred until final chunk")
         
@@ -466,8 +476,13 @@ async def update_weight(
         
         db_data = VitalsCRUD.create_raw_data(db, current_user.id, vital_data)
         
-        # Coalesced, domain-specific aggregation trigger (vitals only) - fire and forget
-        asyncio.create_task(trigger_smart_aggregation(user_id=current_user.id, domains=["vitals"])) 
+        # Trigger ML worker via SQS to process pending vitals (fire-and-forget)
+        try:
+            ml_worker_client = get_ml_worker_client()
+            if ml_worker_client.is_enabled():
+                ml_worker_client.send_vitals_processing_trigger(user_id=current_user.id, priority='normal')
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to trigger ML worker for vitals: {e}") 
         
         return WeightUpdateResponse(
             success=True,

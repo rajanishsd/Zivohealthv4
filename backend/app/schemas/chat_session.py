@@ -120,6 +120,7 @@ class PrescriptionBase(BaseModel):
     duration: Optional[str] = None
     prescribed_by: str
     prescription_image_link: Optional[str] = None
+    prescription_group_id: Optional[str] = None
 
 
 class PrescriptionCreate(PrescriptionBase):

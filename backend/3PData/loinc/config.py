@@ -36,6 +36,9 @@ LAB_AGGREGATION_AGENT_TEMPERATURE = float(os.getenv('LAB_AGGREGATION_AGENT_TEMPE
 
 # OpenAI Configuration
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+if not OPENAI_API_KEY:
+    import sys
+    print(f"WARNING: OPENAI_API_KEY not found. Available env vars: {list(os.environ.keys())}", file=sys.stderr)
 
 # Custom Table Names (to avoid conflicts with existing PubMed tables)
 LOINC_COLLECTION_TABLE = "loinc_pg_collection"

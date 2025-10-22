@@ -277,6 +277,16 @@ struct HealthMetricsView: View {
         return systolic
     }
     
+    // Get color for heart rate based on whether it's in normal range
+    private func getHeartRateColor(for heartRate: Double) -> Color {
+        // Normal resting heart rate for adults is 60-100 bpm
+        if heartRate >= 60 && heartRate <= 100 {
+            return .green  // Normal range
+        } else {
+            return .red    // Outside normal range
+        }
+    }
+    
     // MARK: - Vitals Summary Card
     private var vitalsSummaryCard: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -303,7 +313,7 @@ struct HealthMetricsView: View {
                     if let heartRate = getLatestValue(for: .heartRate) {
                         Text("\(Int(heartRate))")
                             .font(.system(size: 44, weight: .bold))
-                            .foregroundColor(.red)
+                            .foregroundColor(getHeartRateColor(for: heartRate))
                         Text("bpm")
                             .font(.caption)
                             .foregroundColor(.secondary)

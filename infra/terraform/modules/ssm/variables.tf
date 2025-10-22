@@ -30,3 +30,9 @@ variable "react_app_api_key" {
   description = "API key for React dashboard app"
   sensitive   = true
 }
+
+variable "ml_worker_queue_url" {
+  description = "ML worker SQS queue URL"
+  type        = string
+  default     = ""
+}

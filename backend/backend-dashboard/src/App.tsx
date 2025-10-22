@@ -133,15 +133,28 @@ function App() {
   // Helper function to fetch current admin info (including isSuperAdmin flag)
   const fetchAdminInfo = async (token: string) => {
     try {
+      const headers: Record<string, string> = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      };
+      
+      if (API_KEY) {
+        headers['X-API-Key'] = API_KEY;
+      }
+      
+      // Add HMAC headers for GET requests with empty payload
+      const hmacHeaders = hmacGenerator.generateHeaders('');
+      Object.assign(headers, hmacHeaders);
+      
       const response = await fetch(apiUrl('/api/v1/admin/admins/me'), {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          ...(API_KEY ? { 'X-API-Key': API_KEY } : {})
-        }
+        headers: headers
       });
       if (response.ok) {
         const adminData = await response.json();
+        console.log('Admin info fetched:', adminData);
         return adminData.is_superadmin || false;
+      } else {
+        console.error('Failed to fetch admin info, status:', response.status);
       }
     } catch (error) {
       console.error('Failed to fetch admin info:', error);
@@ -466,6 +479,40 @@ function App() {
       alert('Error updating feedback status. Please try again.');
     } finally {
       setUpdatingFeedback(null);
+    }
+  };
+
+  const deleteFeedback = async (feedbackId: string) => {
+    const confirmed = window.confirm(
+      'Are you sure you want to delete this feedback?\n\n' +
+      'This will permanently delete:\n' +
+      '- The feedback entry from the database\n' +
+      '- The screenshot from S3\n\n' +
+      'This action cannot be undone.'
+    );
+    
+    if (!confirmed) return;
+    
+    try {
+      const response = await fetch(apiUrl(`/api/v1/feedback/${feedbackId}`), {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('Feedback deleted:', result);
+        // Remove from local state
+        setFeedback(prev => prev.filter(fb => fb.id !== feedbackId));
+        alert(result.message || 'Feedback deleted successfully');
+      } else {
+        const errorText = await response.text();
+        console.error('Failed to delete feedback:', response.status, errorText);
+        alert('Failed to delete feedback. Please try again.');
+      }
+    } catch (e) {
+      console.error('Error deleting feedback:', e);
+      alert('Error deleting feedback. Please try again.');
     }
   };
 
@@ -996,6 +1043,14 @@ function App() {
                     Edit
                   </button>
                 )}
+                <button 
+                  className="view-workflow-btn" 
+                  onClick={() => deleteFeedback(fb.id)}
+                  style={{ background: '#dc3545', minWidth: '80px' }}
+                  title="Delete feedback and screenshot"
+                >
+                  🗑️ Delete
+                </button>
               </div>
             </div>
           ))}

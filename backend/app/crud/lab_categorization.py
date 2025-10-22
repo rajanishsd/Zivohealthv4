@@ -27,9 +27,13 @@ LOINC_MAPPER_AVAILABLE = False
 logger = logging.getLogger(__name__)
 
 try:
-    from lab_test_loinc_mapper import LabTestLOINCMapper, LabTest
-    LOINC_MAPPER_AVAILABLE = True
-    logger.info("✅ LOINC mapper imported successfully")
+    # Allow disabling LOINC mapper in ML worker via env
+    if os.getenv("LOINC_ENABLED", "0") == "1":
+        from lab_test_loinc_mapper import LabTestLOINCMapper, LabTest
+        LOINC_MAPPER_AVAILABLE = True
+        logger.info("✅ LOINC mapper imported successfully")
+    else:
+        logger.info("ℹ️  LOINC mapper disabled via LOINC_ENABLED env var")
 except ImportError as e:
     logger.error(f"❌ CRITICAL: LOINC mapper not available - install dependencies: {e}")
     # This is a critical error in production - LOINC codes won't be assigned

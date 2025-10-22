@@ -1976,6 +1976,44 @@ extension NetworkService {
             throw error
         }
     }
+
+    // Get grouped prescriptions (by prescription_group_id)
+    func getPrescriptionGroups() async throws -> [PrescriptionGroup] {
+        print("💊 [NetworkService] Getting grouped prescriptions")
+        do {
+            let data = try await get("/chat-sessions/prescriptions/patient", requiresAuth: true)
+            // Endpoint returns either grouped objects or legacy flat items; try grouped first
+            if let groups = try? decoder.decode([PrescriptionGroup].self, from: data) {
+                print("📦 [NetworkService] Received \(groups.count) grouped prescriptions")
+                return groups
+            }
+            // Fallback: map flat list to single-med groups (for compatibility)
+            let flat = try decoder.decode([PrescriptionWithSession].self, from: data)
+            let mapped: [PrescriptionGroup] = flat.map { item in
+                PrescriptionGroup(
+                    id: item.id,
+                    chatSessionId: item.chatSessionId,
+                    consultationId: item.consultationId,
+                    doctorName: item.doctorName,
+                    prescribedAt: item.prescribedAt,
+                    prescriptionImageLink: nil,
+                    medications: [PrescriptionMedication(
+                        id: item.id,
+                        medicationName: item.medicationName,
+                        dosage: item.dosage,
+                        frequency: item.frequency,
+                        instructions: item.instructions,
+                        prescribedBy: item.prescribedBy,
+                        prescribedAt: item.prescribedAt
+                    )]
+                )
+            }
+            return mapped
+        } catch {
+            print("❌ [NetworkService] Error fetching grouped prescriptions: \(error)")
+            throw error
+        }
+    }
     
         // Add a prescription to a session
     func addPrescriptionToSession(sessionId: Int, prescription: PrescriptionData) async throws {

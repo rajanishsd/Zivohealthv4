@@ -1,7 +1,7 @@
 from typing import List
 from sqlalchemy.orm import Session
 from app import crud
-from app.agents.openai_client import get_chat_completion
+from app.utils.openai_client import get_chat_completion
 from app.models.chat_session import ChatMessage
 from app.schemas.chat_session import ChatMessageCreate
 
