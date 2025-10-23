@@ -212,6 +212,10 @@ sed -i "s|^ML_WORKER_SQS_QUEUE_URL=.*|ML_WORKER_SQS_QUEUE_URL=${ML_WORKER_SQS_QU
 # Set ENVIRONMENT to production
 sed -i "s|^ENVIRONMENT=.*|ENVIRONMENT=production|g" /tmp/.env.new
 
+# Remove or comment out separator lines that Docker can't parse
+sed -i 's/^=\+$/# &/' /tmp/.env.new
+sed -i 's/^-\+$/# &/' /tmp/.env.new
+
 # Move the file to the final location with sudo
 sudo mv /tmp/.env.new /opt/zivohealth/.env
 sudo chown root:root /opt/zivohealth/.env
