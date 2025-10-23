@@ -144,9 +144,14 @@ SMTP_PASSWORD=$(aws ssm get-parameter --with-decryption --name "/${PROJECT}/${EN
 REACT_APP_API_KEY=$(aws ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/react_app/api_key" --query "Parameter.Value" --output text --region $REGION 2>/dev/null || echo "")
 # REACT_APP_API_KEY fallback is in .env.production.base (uploaded from local)
 
+ML_WORKER_ENABLED=$(aws ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/ml_worker/enabled" --query "Parameter.Value" --output text --region $REGION 2>/dev/null || echo "false")
+ML_WORKER_SQS_QUEUE_URL=$(aws ssm get-parameter --name "/${PROJECT}/${ENVIRONMENT}/ml_worker/queue_url" --query "Parameter.Value" --output text --region $REGION 2>/dev/null || echo "")
+
 echo "Debug: REMINDER_FCM_PROJECT_ID=$REMINDER_FCM_PROJECT_ID"
 echo "Debug: REACT_APP_API_KEY=$REACT_APP_API_KEY"
 echo "Debug: SMTP_PASSWORD=${SMTP_PASSWORD:0:5}**** (length: ${#SMTP_PASSWORD})"
+echo "Debug: ML_WORKER_ENABLED=$ML_WORKER_ENABLED"
+echo "Debug: ML_WORKER_SQS_QUEUE_URL=$ML_WORKER_SQS_QUEUE_URL"
 
 # Check for FCM credentials
 REMINDER_FCM_CREDENTIALS_JSON=$(aws ssm get-parameter --with-decryption --name "/${PROJECT}/${ENVIRONMENT}/reminders/fcm_credentials_json" --query "Parameter.Value" --output text --region $REGION 2>/dev/null)
@@ -201,6 +206,8 @@ sed -i "s|^REMINDER_FCM_PROJECT_ID=.*|REMINDER_FCM_PROJECT_ID=${REMINDER_FCM_PRO
 sed -i "s|^REACT_APP_API_KEY=.*|REACT_APP_API_KEY=\"${REACT_APP_API_KEY}\"|g" /tmp/.env.new
 sed -i "s|^REMINDER_FCM_CREDENTIALS_JSON=.*|REMINDER_FCM_CREDENTIALS_JSON=${FCM_CREDENTIALS_PATH}|g" /tmp/.env.new
 sed -i "s|^GOOGLE_APPLICATION_CREDENTIALS=.*|GOOGLE_APPLICATION_CREDENTIALS=${FCM_CREDENTIALS_PATH}|g" /tmp/.env.new
+sed -i "s|^ML_WORKER_ENABLED=.*|ML_WORKER_ENABLED=${ML_WORKER_ENABLED}|g" /tmp/.env.new
+sed -i "s|^ML_WORKER_SQS_QUEUE_URL=.*|ML_WORKER_SQS_QUEUE_URL=${ML_WORKER_SQS_QUEUE_URL}|g" /tmp/.env.new
 
 # Set ENVIRONMENT to production
 sed -i "s|^ENVIRONMENT=.*|ENVIRONMENT=production|g" /tmp/.env.new
