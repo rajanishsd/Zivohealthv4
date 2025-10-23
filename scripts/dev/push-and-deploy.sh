@@ -179,38 +179,56 @@ else
     exit 1
 fi
 
-# Add/Override database configuration (these are commented out in .env.production)
-sed -i "/# POSTGRES_SERVER - from SSM/a\\
-POSTGRES_SERVER=${POSTGRES_SERVER}\\
-POSTGRES_PORT=5432\\
-POSTGRES_USER=${POSTGRES_USER}\\
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD}\\
-POSTGRES_DB=zivohealth_dev" /tmp/.env.new
-sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY}|g" /tmp/.env.new
-sed -i "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=\"${OPENAI_API_KEY}\"|g" /tmp/.env.new
-sed -i "s|^LANGCHAIN_API_KEY=.*|LANGCHAIN_API_KEY=\"${LANGCHAIN_API_KEY}\"|g" /tmp/.env.new
-sed -i "s|^E2B_API_KEY=.*|E2B_API_KEY=\"${E2B_API_KEY}\"|g" /tmp/.env.new
-sed -i "s|^SERPAPI_KEY=.*|SERPAPI_KEY=\"${SERPAPI_KEY}\"|g" /tmp/.env.new
-sed -i "s|^LIVEKIT_URL=.*|LIVEKIT_URL=${LIVEKIT_URL}|g" /tmp/.env.new
-sed -i "s|^LIVEKIT_API_KEY=.*|LIVEKIT_API_KEY=${LIVEKIT_API_KEY}|g" /tmp/.env.new
-sed -i "s|^LIVEKIT_API_SECRET=.*|LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}|g" /tmp/.env.new
-sed -i "s|^LIVEKIT_KEYS=.*|LIVEKIT_KEYS=${LIVEKIT_API_KEY}:${LIVEKIT_API_SECRET}|g" /tmp/.env.new
-sed -i "s|^VALID_API_KEYS=.*|VALID_API_KEYS=${VALID_API_KEYS}|g" /tmp/.env.new
-sed -i "s|^APP_SECRET_KEY=.*|APP_SECRET_KEY=${APP_SECRET_KEY}|g" /tmp/.env.new
-sed -i "s|^REACT_APP_SECRET_KEY=.*|REACT_APP_SECRET_KEY=${APP_SECRET_KEY}|g" /tmp/.env.new
+# Helper function to set or append environment variables
+set_env_var() {
+  local key="\$1"
+  local value="\$2"
+  if grep -q "^\${key}=" /tmp/.env.new 2>/dev/null; then
+    sed -i "s|^\${key}=.*|\${key}=\${value}|g" /tmp/.env.new
+  else
+    echo "\${key}=\${value}" >> /tmp/.env.new
+  fi
+}
+
+# Add/Override database configuration
+set_env_var "POSTGRES_SERVER" "${POSTGRES_SERVER}"
+set_env_var "POSTGRES_PORT" "5432"
+set_env_var "POSTGRES_USER" "${POSTGRES_USER}"
+set_env_var "POSTGRES_PASSWORD" "${POSTGRES_PASSWORD}"
+set_env_var "POSTGRES_DB" "zivohealth_dev"
+
+# Add/Override API keys and secrets
+set_env_var "SECRET_KEY" "${SECRET_KEY}"
+set_env_var "OPENAI_API_KEY" "\"${OPENAI_API_KEY}\""
+set_env_var "LANGCHAIN_API_KEY" "\"${LANGCHAIN_API_KEY}\""
+set_env_var "E2B_API_KEY" "\"${E2B_API_KEY}\""
+set_env_var "SERPAPI_KEY" "\"${SERPAPI_KEY}\""
+set_env_var "LIVEKIT_URL" "${LIVEKIT_URL}"
+set_env_var "LIVEKIT_API_KEY" "${LIVEKIT_API_KEY}"
+set_env_var "LIVEKIT_API_SECRET" "${LIVEKIT_API_SECRET}"
+set_env_var "LIVEKIT_KEYS" "${LIVEKIT_API_KEY}:${LIVEKIT_API_SECRET}"
+set_env_var "VALID_API_KEYS" "${VALID_API_KEYS}"
+set_env_var "APP_SECRET_KEY" "${APP_SECRET_KEY}"
+set_env_var "REACT_APP_SECRET_KEY" "${APP_SECRET_KEY}"
+
 # Only override SMTP_PASSWORD if we got a value from SSM
 if [ -n "${SMTP_PASSWORD}" ]; then
-  sed -i "s|^SMTP_PASSWORD=.*|SMTP_PASSWORD=${SMTP_PASSWORD}|g" /tmp/.env.new
+  set_env_var "SMTP_PASSWORD" "${SMTP_PASSWORD}"
 fi
-sed -i "s|^REMINDER_FCM_PROJECT_ID=.*|REMINDER_FCM_PROJECT_ID=${REMINDER_FCM_PROJECT_ID}|g" /tmp/.env.new
-sed -i "s|^REACT_APP_API_KEY=.*|REACT_APP_API_KEY=\"${REACT_APP_API_KEY}\"|g" /tmp/.env.new
-sed -i "s|^REMINDER_FCM_CREDENTIALS_JSON=.*|REMINDER_FCM_CREDENTIALS_JSON=${FCM_CREDENTIALS_PATH}|g" /tmp/.env.new
-sed -i "s|^GOOGLE_APPLICATION_CREDENTIALS=.*|GOOGLE_APPLICATION_CREDENTIALS=${FCM_CREDENTIALS_PATH}|g" /tmp/.env.new
-sed -i "s|^ML_WORKER_ENABLED=.*|ML_WORKER_ENABLED=${ML_WORKER_ENABLED}|g" /tmp/.env.new
-sed -i "s|^ML_WORKER_SQS_QUEUE_URL=.*|ML_WORKER_SQS_QUEUE_URL=${ML_WORKER_SQS_QUEUE_URL}|g" /tmp/.env.new
+
+set_env_var "REMINDER_FCM_PROJECT_ID" "${REMINDER_FCM_PROJECT_ID}"
+set_env_var "REACT_APP_API_KEY" "\"${REACT_APP_API_KEY}\""
+set_env_var "REMINDER_FCM_CREDENTIALS_JSON" "${FCM_CREDENTIALS_PATH}"
+set_env_var "GOOGLE_APPLICATION_CREDENTIALS" "${FCM_CREDENTIALS_PATH}"
+set_env_var "ML_WORKER_ENABLED" "${ML_WORKER_ENABLED}"
+set_env_var "ML_WORKER_SQS_QUEUE_URL" "${ML_WORKER_SQS_QUEUE_URL}"
+
+# Enable LOINC mapper for lab processing
+set_env_var "LOINC_ENABLED" "1"
+set_env_var "LOINC_CREATE_TABLES" "0"
 
 # Set ENVIRONMENT to production
-sed -i "s|^ENVIRONMENT=.*|ENVIRONMENT=production|g" /tmp/.env.new
+set_env_var "ENVIRONMENT" "production"
 
 # Remove or comment out separator lines that Docker can't parse
 sed -i 's/^=\+$/# &/' /tmp/.env.new
