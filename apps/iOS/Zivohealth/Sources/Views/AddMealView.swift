@@ -81,6 +81,7 @@ struct AddMealView: View {
     @State private var showManualEntryBox = false
     @State private var manualEntryText = ""
     @State private var lastSubmittedDisplayText = ""
+    @State private var followUpMessage = ""
     private enum EntryMode { case none, photo, manual }
     @State private var entryMode: EntryMode = .none
     
@@ -392,21 +393,65 @@ struct AddMealView: View {
             
             // Assistant bubble or status
             if didSubmitToChat, let assistantText = latestAssistantContent {
-                ScrollView {
-                    HStack(alignment: .top, spacing: 8) {
-                        Circle().fill(Color.gray.opacity(0.6)).frame(width: 24, height: 24).overlay(Image(systemName: "aqi.medium").font(.caption).foregroundColor(.white))
-                        Text(assistantText)
-                            .font(.subheadline)
-                            .foregroundColor(.primary)
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.gray.opacity(0.08))
-                            .cornerRadius(12)
-                        Spacer()
+                VStack(spacing: 12) {
+                    ScrollView {
+                        HStack(alignment: .top, spacing: 8) {
+                            Circle().fill(Color.gray.opacity(0.6)).frame(width: 24, height: 24).overlay(Image(systemName: "aqi.medium").font(.caption).foregroundColor(.white))
+                            Text(assistantText)
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.gray.opacity(0.08))
+                                .cornerRadius(12)
+                            Spacer()
+                        }
+                        .padding(.trailing, 6)
                     }
-                    .padding(.trailing, 6)
+                    .frame(height: UIScreen.main.bounds.height * 0.35)
+                    
+                    // Follow-up message input
+                    VStack(spacing: 8) {
+                        Text("Continue the conversation")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        
+                        HStack(alignment: .bottom, spacing: 8) {
+                            ZStack(alignment: .topLeading) {
+                                TextEditor(text: $followUpMessage)
+                                    .frame(minHeight: 40, maxHeight: 80)
+                                    .padding(8)
+                                    .background(Color(UIColor.systemBackground))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color(UIColor.systemGray4), lineWidth: 1)
+                                    )
+                                if followUpMessage.isEmpty {
+                                    Text("Type your response...")
+                                        .foregroundColor(.gray)
+                                        .padding(.top, 14)
+                                        .padding(.leading, 12)
+                                }
+                            }
+                            
+                            Button(action: {
+                                let trimmed = followUpMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !trimmed.isEmpty else { return }
+                                Task {
+                                    await chatViewModel.sendStreamingMessage(trimmed)
+                                    followUpMessage = ""
+                                }
+                            }) {
+                                Image(systemName: "arrow.up.circle.fill")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(followUpMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .gray : .blue)
+                            }
+                            .disabled(followUpMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .padding(.bottom, 4)
+                        }
+                    }
                 }
-                .frame(height: UIScreen.main.bounds.height * 0.5)
             } else if didSubmitToChat {
                 ScrollView {
                     HStack(alignment: .center, spacing: 8) {
@@ -463,18 +508,18 @@ struct AddMealView: View {
             }
             HStack {
                 Spacer()
-                Button(action: {
-                    let trimmed = manualEntryText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmed.isEmpty else { return }
-                    let final = trimmed + " log this meal and dont ask any followup questions."
-                    lastSubmittedDisplayText = trimmed
-                    didSubmitToChat = true
-                    persistedAnalyzing = true
-                    Task {
-                        await chatViewModel.createNewSession()
-                        await chatViewModel.sendStreamingMessage(final)
-                    }
-                }) {
+                    Button(action: {
+                            let trimmed = manualEntryText.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !trimmed.isEmpty else { return }
+                            let final = trimmed + " log this meal and dont ask any followup questions."
+                            lastSubmittedDisplayText = trimmed
+                            didSubmitToChat = true
+                            persistedAnalyzing = true
+                            Task {
+                                await chatViewModel.createNewSession()
+                                await chatViewModel.sendStreamingMessage(final)
+                            }
+                    }) {
                     Text("Submit")
                         .font(.subheadline)
                         .fontWeight(.semibold)

@@ -419,6 +419,8 @@ class VitalsCRUD:
                 daily_average = daily_total  # Daily total sleep
                 daily_min = min(min_values) if min_values else 0
                 daily_max = max(max_values) if max_values else 0
+                # Convert hours to minutes for duration_minutes field (expected by health scoring)
+                duration_mins = daily_total * 60.0 if daily_total > 0 else None
             else:
                 # Standard aggregation for other metrics
                 total_values = [h.total_value for h in hourly_data if h.total_value is not None]
@@ -430,6 +432,7 @@ class VitalsCRUD:
                 daily_average = sum(avg_values) / len(avg_values) if avg_values else None
                 daily_min = min(min_values) if min_values else None
                 daily_max = max(max_values) if max_values else None
+                duration_mins = None  # Only used for sleep
             
             sources = set()
             for h in hourly_data:
@@ -460,6 +463,7 @@ class VitalsCRUD:
                 existing.min_value = daily_min
                 existing.max_value = daily_max
                 existing.count = sum([h.count for h in hourly_data])
+                existing.duration_minutes = duration_mins  # Set duration_minutes for sleep
                 existing.unit = "hours" if metric_type == VitalMetricType.SLEEP else latest_entry.unit
                 existing.loinc_code = loinc_code  # Copy LOINC code
                 existing.primary_source = latest_entry.primary_source
@@ -477,6 +481,7 @@ class VitalsCRUD:
                     min_value=daily_min,
                     max_value=daily_max,
                     count=sum([h.count for h in hourly_data]),
+                    duration_minutes=duration_mins,  # Set duration_minutes for sleep
                     unit="hours" if metric_type == VitalMetricType.SLEEP else latest_entry.unit,
                     primary_source=latest_entry.primary_source,
                     sources_included=json.dumps(list(sources))

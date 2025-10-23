@@ -23,13 +23,21 @@
 			<string>GoogleSignIn</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.googleusercontent.apps.144471943832-qsmsessvagsqqmcap27oeh718beavb0h</string>
+				<string>com.googleusercontent.apps.859676155552-1rvd88iiqk7nkaa5eethknv8gqurjfgg</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>DeepLink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>zivohealth</string>
 			</array>
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>GIDClientID</key>
-	<string>144471943832-qsmsessvagsqqmcap27oeh718beavb0h.apps.googleusercontent.com</string>
+	<string>859676155552-1rvd88iiqk7nkaa5eethknv8gqurjfgg.apps.googleusercontent.com</string>
 </dict>
 </plist>

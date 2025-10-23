@@ -42,6 +42,16 @@ struct MealDetailView: View {
                     }
                 }
             }
+            .task {
+                // Initialize presign timestamp once
+                if presignTs == nil {
+                    presignTs = String(Int(Date().timeIntervalSince1970))
+                }
+                // Resolve S3 presigned URL once when view appears
+                if resolvedURL == nil, let urlStr = meal.imageUrl, urlStr.hasPrefix("s3://") {
+                    resolvedURL = await resolveSignedURL(from: urlStr)
+                }
+            }
         }
     }
     
@@ -260,22 +270,6 @@ struct MealDetailView: View {
         .padding()
         .background(Color(.systemGray6))
         .cornerRadius(12)
-        .onAppear {
-            if presignTs == nil {
-                presignTs = String(Int(Date().timeIntervalSince1970))
-            }
-            Task {
-                await MainActor.run {
-                    if resolvedURL == nil, let urlStr = meal.imageUrl, urlStr.hasPrefix("s3://") {
-                        Task { [meal, presignTs] in
-                            if let u = await resolveSignedURL(from: urlStr) {
-                                await MainActor.run { resolvedURL = u }
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
     
     // MARK: - Macronutrients Section

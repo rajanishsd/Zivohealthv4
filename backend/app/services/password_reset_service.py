@@ -21,6 +21,7 @@ class PasswordResetService:
         """
         try:
             from app.models.doctor import Doctor
+            from app.models.user_profile import UserProfile
             
             # Find user by email first
             user = db.query(User).filter(User.email == email).first()
@@ -28,7 +29,21 @@ class PasswordResetService:
             
             if user:
                 user_type = "user"
-                user_name = user.full_name
+                # Query user profile to get the actual name
+                user_profile = db.query(UserProfile).filter(UserProfile.user_id == user.id).first()
+                
+                if user_profile and user_profile.first_name and user_profile.last_name:
+                    # Construct full name from profile
+                    name_parts = [
+                        user_profile.first_name,
+                        user_profile.middle_name if user_profile.middle_name else None,
+                        user_profile.last_name
+                    ]
+                    user_name = " ".join([part for part in name_parts if part]).strip()
+                else:
+                    # Fallback to email username if no profile or names not set
+                    user_name = email.split('@')[0]
+                
                 user_id = user.id
                 doctor_id = None
             else:

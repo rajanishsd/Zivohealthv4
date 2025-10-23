@@ -181,12 +181,12 @@ fi
 
 # Helper function to set or append environment variables
 set_env_var() {
-  local key="\$1"
-  local value="\$2"
-  if grep -q "^\${key}=" /tmp/.env.new 2>/dev/null; then
-    sed -i "s|^\${key}=.*|\${key}=\${value}|g" /tmp/.env.new
+  local key="$1"
+  local value="$2"
+  if grep -q "^${key}=" /tmp/.env.new 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${value}|g" /tmp/.env.new
   else
-    echo "\${key}=\${value}" >> /tmp/.env.new
+    echo "${key}=${value}" >> /tmp/.env.new
   fi
 }
 
@@ -200,9 +200,16 @@ set_env_var "POSTGRES_DB" "zivohealth_dev"
 # Add/Override API keys and secrets
 set_env_var "SECRET_KEY" "${SECRET_KEY}"
 set_env_var "OPENAI_API_KEY" "\"${OPENAI_API_KEY}\""
-set_env_var "LANGCHAIN_API_KEY" "\"${LANGCHAIN_API_KEY}\""
-set_env_var "E2B_API_KEY" "\"${E2B_API_KEY}\""
-set_env_var "SERPAPI_KEY" "\"${SERPAPI_KEY}\""
+# Only override if SSM has values (preserve base file values if SSM is empty)
+if [ -n "${LANGCHAIN_API_KEY}" ]; then
+  set_env_var "LANGCHAIN_API_KEY" "\"${LANGCHAIN_API_KEY}\""
+fi
+if [ -n "${E2B_API_KEY}" ]; then
+  set_env_var "E2B_API_KEY" "\"${E2B_API_KEY}\""
+fi
+if [ -n "${SERPAPI_KEY}" ]; then
+  set_env_var "SERPAPI_KEY" "\"${SERPAPI_KEY}\""
+fi
 set_env_var "LIVEKIT_URL" "${LIVEKIT_URL}"
 set_env_var "LIVEKIT_API_KEY" "${LIVEKIT_API_KEY}"
 set_env_var "LIVEKIT_API_SECRET" "${LIVEKIT_API_SECRET}"
@@ -222,10 +229,6 @@ set_env_var "REMINDER_FCM_CREDENTIALS_JSON" "${FCM_CREDENTIALS_PATH}"
 set_env_var "GOOGLE_APPLICATION_CREDENTIALS" "${FCM_CREDENTIALS_PATH}"
 set_env_var "ML_WORKER_ENABLED" "${ML_WORKER_ENABLED}"
 set_env_var "ML_WORKER_SQS_QUEUE_URL" "${ML_WORKER_SQS_QUEUE_URL}"
-
-# Enable LOINC mapper for lab processing
-set_env_var "LOINC_ENABLED" "1"
-set_env_var "LOINC_CREATE_TABLES" "0"
 
 # Set ENVIRONMENT to production
 set_env_var "ENVIRONMENT" "production"

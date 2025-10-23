@@ -233,14 +233,34 @@ class HealthScoringService:
         return ModalityScore(score=score, confidence=conf, detail=sub_details)
 
     def _score_sleep(self, user_id: int, day: date, spec: HealthScoreSpec) -> ModalityScore:
-        # Placeholder: use daily aggregates of Sleep duration (minutes)
+        # Use daily aggregates of Sleep duration (minutes)
         agg = (
             self.db.query(VitalsDailyAggregate)
             .filter(and_(VitalsDailyAggregate.user_id == user_id, VitalsDailyAggregate.metric_type == "Sleep", VitalsDailyAggregate.date == day))
             .first()
         )
-        if not agg or not agg.duration_minutes:
+        if not agg:
             return ModalityScore(0.0, 0.0, {})
+        
+        # Try to get sleep duration from duration_minutes (preferred) or fall back to total_value
+        hours = None
+        if agg.duration_minutes is not None and agg.duration_minutes > 0:
+            # Duration is in minutes, convert to hours
+            hours = float(agg.duration_minutes) / 60.0
+        elif agg.total_value is not None and agg.total_value > 0:
+            # Fall back to total_value - check unit to determine if conversion needed
+            unit = (agg.unit or "").lower()
+            if unit == "minutes" or unit == "mins":
+                hours = float(agg.total_value) / 60.0
+            elif unit == "hours" or unit == "hrs" or unit == "h":
+                hours = float(agg.total_value)
+            else:
+                # Assume hours if unit not specified or unknown
+                hours = float(agg.total_value)
+        
+        if hours is None or hours <= 0:
+            return ModalityScore(0.0, 0.0, {})
+        
         reg = (
             self.db.query(MetricAnchorRegistry)
             .filter(MetricAnchorRegistry.domain == "sleep", MetricAnchorRegistry.key == "duration_h", MetricAnchorRegistry.active == True)
@@ -248,7 +268,6 @@ class HealthScoringService:
         )
         if not reg:
             return ModalityScore(0.0, 0.0, {})
-        hours = float(agg.duration_minutes) / 60.0
         score = interpolate_piecewise(hours, reg.anchors)
         return ModalityScore(score=score, confidence=1.0, detail={"duration_h": hours, "score": score})
 
@@ -404,7 +423,23 @@ class HealthScoringService:
         )
         if not reg:
             return ModalityScore(0.0, 0.0, {})
-        vals_h = [(r.duration_minutes or 0) / 60.0 for r in rows if r.duration_minutes]
+        
+        # Extract sleep hours from each row, handling both duration_minutes and total_value
+        vals_h = []
+        for r in rows:
+            if r.duration_minutes is not None and r.duration_minutes > 0:
+                vals_h.append(r.duration_minutes / 60.0)
+            elif r.total_value is not None and r.total_value > 0:
+                # Check unit for conversion
+                unit = (r.unit or "").lower()
+                if unit == "minutes" or unit == "mins":
+                    vals_h.append(r.total_value / 60.0)
+                elif unit == "hours" or unit == "hrs" or unit == "h":
+                    vals_h.append(r.total_value)
+                else:
+                    # Assume hours
+                    vals_h.append(r.total_value)
+        
         if not vals_h:
             return ModalityScore(0.0, 0.0, {})
         avg_h = sum(vals_h) / len(vals_h)

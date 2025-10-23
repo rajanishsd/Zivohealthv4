@@ -6,9 +6,17 @@ struct BasicDetailsView: View {
     var body: some View {
         Form {
             Section(header: Text("Contact")) {
-                TextField("Email", text: $vm.email)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
+                HStack {
+                    TextField("Email", text: $vm.email)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .disabled(true) // Email is pre-filled and verified from login
+                        .foregroundColor(.secondary)
+                    
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundColor(.green)
+                        .font(.system(size: 16))
+                }
                 HStack {
                     Picker("", selection: $vm.selectedCountryCodeId) {
                         Text("Code").tag(nil as Int?)

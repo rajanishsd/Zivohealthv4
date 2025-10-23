@@ -27,6 +27,23 @@ class GoogleSsoRequest(BaseModel):
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
+class EmailRegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=8)
+
+class EmailRegisterResponse(BaseModel):
+    message: str
+    email: str
+    verification_required: bool = True
+
+class EmailVerifyRequest(BaseModel):
+    token: str
+
+class EmailVerifyResponse(BaseModel):
+    message: str
+    email: str
+    verified: bool
+
 # Device information for login events
 class DeviceInfo(BaseModel):
     device_id: Optional[str] = None

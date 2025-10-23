@@ -86,6 +86,9 @@ struct ZivoHealthApp: App {
                         ReminderAPIService.shared.registerDevice(userId: userId, fcmToken: token, apiKey: apiKey, completion: nil)
                     }
                 }
+                .onOpenURL { url in
+                    handleDeepLink(url)
+                }
                 .onChange(of: scenePhase) { newPhase in
                     handleScenePhaseChange(newPhase)
                 }
@@ -115,6 +118,60 @@ struct ZivoHealthApp: App {
     }
     
     // MARK: - Helper Functions
+    
+    /// Handle deep links for email verification and other features
+    private func handleDeepLink(_ url: URL) {
+        print("🔗 [DeepLink] Received URL: \(url)")
+        print("🔗 [DeepLink] Scheme: \(url.scheme ?? "none"), Host: \(url.host ?? "none"), Path: \(url.path)")
+        
+        // Check for email verification link
+        // Expected format: zivohealth://verify-email?token=xxx or https://app.zivohealth.ai/verify-email?token=xxx
+        if url.path.contains("verify-email") || url.host == "verify-email" {
+            handleEmailVerification(url: url)
+        }
+    }
+    
+    private func handleEmailVerification(url: URL) {
+        print("📧 [DeepLink] Handling email verification")
+        
+        // Extract token from URL query parameters
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true),
+              let queryItems = components.queryItems,
+              let token = queryItems.first(where: { $0.name == "token" })?.value else {
+            print("❌ [DeepLink] No token found in verification URL")
+            return
+        }
+        
+        print("🔑 [DeepLink] Found verification token: \(token.prefix(20))...")
+        
+        // Verify email using NetworkService
+        Task {
+            do {
+                let message = try await NetworkService.shared.verifyEmail(token: token)
+                print("✅ [DeepLink] Email verified successfully: \(message)")
+                
+                // Post notification to update UI
+                await MainActor.run {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("EmailVerificationSuccess"),
+                        object: nil,
+                        userInfo: ["message": message]
+                    )
+                }
+            } catch {
+                print("❌ [DeepLink] Email verification failed: \(error)")
+                
+                // Post notification about failure
+                await MainActor.run {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("EmailVerificationFailed"),
+                        object: nil,
+                        userInfo: ["error": error.localizedDescription]
+                    )
+                }
+            }
+        }
+    }
     
     /// Determines if we're switching between different environment types
     /// This helps decide whether to clear stored tokens for security

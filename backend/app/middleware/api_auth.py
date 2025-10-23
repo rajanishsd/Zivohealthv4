@@ -19,7 +19,16 @@ class APIKeyMiddleware:
             request = Request(scope, receive)
             
             # Skip authentication for certain endpoints
-            if self._should_skip_auth(request.url.path):
+            path = request.url.path
+            should_skip = self._should_skip_auth(path)
+            
+            # Debug logging for verification endpoints
+            if "verify" in path or "resend" in path:
+                import logging
+                logger = logging.getLogger("app.middleware.api_auth")
+                logger.info(f"Path check: {path} -> skip_auth={should_skip}")
+            
+            if should_skip:
                 await self.app(scope, receive, send)
                 return
             
@@ -85,7 +94,7 @@ class APIKeyMiddleware:
         """
         Determine if authentication should be skipped for this path
         """
-        # Skip auth for health checks, documentation, and password reset
+        # Skip auth for health checks, documentation, password reset, and email verification
         skip_paths = [
             "/health",
             "/docs",
@@ -95,9 +104,12 @@ class APIKeyMiddleware:
             "/api/v1/redoc",
             "/api/v1/openapi.json",
             "/reset-password",
+            "/verify-email",  # Frontend email verification route
             "/api/v1/auth/forgot-password",
             "/api/v1/auth/reset-password",
-            "/api/v1/auth/verify-reset-token"
+            "/api/v1/auth/verify-reset-token",
+            "/api/v1/dual-auth/email/verify",  # API endpoint for email verification
+            "/api/v1/dual-auth/email/resend-verification"  # API endpoint to resend verification
         ]
         # Require API key for all routes, including dashboard
         # (Do not bypass API key for /api/v1/dashboard)

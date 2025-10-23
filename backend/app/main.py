@@ -302,6 +302,246 @@ async def root():
     """Root endpoint that redirects to API documentation"""
     return RedirectResponse(url=f"{settings.API_V1_STR}/docs")
 
+@app.get("/verify-email", include_in_schema=False)
+async def verify_email_redirect(token: str):
+    """
+    Handle email verification from browser clicks.
+    Verifies the token and shows success/error page.
+    """
+    from fastapi.responses import HTMLResponse
+    from app.core.auth_service import AuthService
+    from app.db.session import get_db
+    
+    db = next(get_db())
+    try:
+        auth_service = AuthService(db)
+        result = auth_service.verify_email(token)
+        
+        # Return success HTML page
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Email Verified - ZivoHealth</title>
+            <style>
+                * {{
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }}
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 20px;
+                }}
+                .container {{
+                    background: white;
+                    border-radius: 20px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    padding: 40px;
+                    max-width: 500px;
+                    width: 100%;
+                    text-align: center;
+                }}
+                .icon {{
+                    width: 80px;
+                    height: 80px;
+                    background: #10b981;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin: 0 auto 24px;
+                    animation: scaleIn 0.5s ease-out;
+                }}
+                .checkmark {{
+                    width: 40px;
+                    height: 40px;
+                    border: 4px solid white;
+                    border-top: none;
+                    border-left: none;
+                    transform: rotate(45deg);
+                    margin-bottom: 10px;
+                }}
+                h1 {{
+                    color: #1f2937;
+                    font-size: 28px;
+                    margin-bottom: 12px;
+                    font-weight: 700;
+                }}
+                .email {{
+                    color: #6b7280;
+                    font-size: 16px;
+                    margin-bottom: 8px;
+                    font-weight: 500;
+                }}
+                .message {{
+                    color: #4b5563;
+                    font-size: 14px;
+                    line-height: 1.6;
+                    margin-bottom: 32px;
+                }}
+                .button {{
+                    display: inline-block;
+                    background: #ef4444;
+                    color: white;
+                    padding: 14px 32px;
+                    border-radius: 12px;
+                    text-decoration: none;
+                    font-weight: 600;
+                    font-size: 16px;
+                    transition: transform 0.2s, box-shadow 0.2s;
+                    box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4);
+                }}
+                .button:hover {{
+                    transform: translateY(-2px);
+                    box-shadow: 0 6px 20px rgba(239, 68, 68, 0.5);
+                }}
+                .footer {{
+                    margin-top: 32px;
+                    padding-top: 24px;
+                    border-top: 1px solid #e5e7eb;
+                    color: #9ca3af;
+                    font-size: 13px;
+                }}
+                @keyframes scaleIn {{
+                    from {{
+                        transform: scale(0);
+                        opacity: 0;
+                    }}
+                    to {{
+                        transform: scale(1);
+                        opacity: 1;
+                    }}
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="icon">
+                    <div class="checkmark"></div>
+                </div>
+                <h1>Email Verified!</h1>
+                <div class="email">{result.email}</div>
+                <p class="message">{result.message}</p>
+                <a href="zivohealth://home" class="button">Open ZivoHealth App</a>
+                <div class="footer">
+                    <p>© 2025 ZivoHealth. All rights reserved.</p>
+                    <p style="margin-top: 8px;">If the app doesn't open automatically, please open it manually.</p>
+                </div>
+            </div>
+            <script>
+                // Try to open the app automatically
+                setTimeout(function() {{
+                    window.location.href = 'zivohealth://home';
+                }}, 1000);
+            </script>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=html_content, status_code=200)
+        
+    except ValueError as e:
+        # Return error HTML page
+        error_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Verification Failed - ZivoHealth</title>
+            <style>
+                * {{
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }}
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 20px;
+                }}
+                .container {{
+                    background: white;
+                    border-radius: 20px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    padding: 40px;
+                    max-width: 500px;
+                    width: 100%;
+                    text-align: center;
+                }}
+                .icon {{
+                    width: 80px;
+                    height: 80px;
+                    background: #ef4444;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin: 0 auto 24px;
+                    font-size: 40px;
+                    color: white;
+                }}
+                h1 {{
+                    color: #1f2937;
+                    font-size: 28px;
+                    margin-bottom: 12px;
+                    font-weight: 700;
+                }}
+                .message {{
+                    color: #dc2626;
+                    font-size: 16px;
+                    line-height: 1.6;
+                    margin-bottom: 32px;
+                    padding: 16px;
+                    background: #fee2e2;
+                    border-radius: 8px;
+                }}
+                .help {{
+                    color: #6b7280;
+                    font-size: 14px;
+                    line-height: 1.6;
+                    margin-bottom: 24px;
+                }}
+                .footer {{
+                    margin-top: 32px;
+                    padding-top: 24px;
+                    border-top: 1px solid #e5e7eb;
+                    color: #9ca3af;
+                    font-size: 13px;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="icon">✕</div>
+                <h1>Verification Failed</h1>
+                <div class="message">{str(e)}</div>
+                <div class="help">
+                    <strong>What to do next:</strong><br>
+                    • The verification link may have expired<br>
+                    • Request a new verification email from the app<br>
+                    • Contact support if the problem persists
+                </div>
+                <div class="footer">
+                    <p>© 2025 ZivoHealth. All rights reserved.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=error_html, status_code=400)
+
 @app.get("/health", tags=["Health Check"])
 async def health_check():
     """Health check endpoint"""

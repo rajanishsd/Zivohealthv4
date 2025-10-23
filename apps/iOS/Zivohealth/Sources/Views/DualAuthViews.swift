@@ -31,6 +31,7 @@ struct DualLoginView: View {
         case passwordLogin
         case otpRequest
         case otpVerification
+        case emailVerificationWaiting
     }
 
     var body: some View {
@@ -88,13 +89,15 @@ struct DualLoginView: View {
                 case .methodSelection:
                     methodSelectionView
                 case .emailInput:
-                    emailInputView
+                    combinedLoginView
                 case .passwordLogin:
-                    passwordLoginView
+                    passwordLoginView  // Keep for backward compatibility
                 case .otpRequest:
                     otpRequestView
                 case .otpVerification:
                     otpVerificationView
+                case .emailVerificationWaiting:
+                    emailVerificationWaitingView
                 }
             }
             .padding()
@@ -133,6 +136,17 @@ struct DualLoginView: View {
                 reactivationMessage = "Your account has been reactivated. Welcome back!"
             }
             showReactivationAlert = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("EmailVerificationSuccess"))) { notification in
+            // Email was verified successfully via deep link
+            print("✅ [DualLoginView] Email verification success notification received")
+            if let message = notification.userInfo?["message"] as? String {
+                successMessage = message
+            } else {
+                successMessage = "Email verified successfully!"
+            }
+            // Navigate back to login
+            currentStep = .methodSelection
         }
     }
     
@@ -185,6 +199,129 @@ struct DualLoginView: View {
             }
             .foregroundColor(.zivoRed)
             .frame(maxWidth: .infinity)
+            .padding(.top, 8)
+        }
+    }
+    
+    // MARK: - Combined Login View (Email + Password)
+    private var combinedLoginView: some View {
+        VStack(spacing: 16) {
+            Text("Sign in to your account")
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .foregroundColor(.primary)
+            
+            // Email Field
+            VStack(spacing: 8) {
+                TextField("Email address", text: $email)
+                    .keyboardType(.emailAddress)
+                    .textContentType(.username)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                    .padding(14)
+                    .background(Color.white)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(!email.isEmpty && !isValidEmail ? Color.red : Color(.systemGray4), lineWidth: 1))
+                    .cornerRadius(12)
+                    .focused($focusedField, equals: .email)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .password }
+                
+                if !email.isEmpty && !isValidEmail {
+                    Text("Please enter a valid email address")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            
+            // Password Field
+            HStack {
+                if showPassword {
+                    TextField("Password", text: $password)
+                        .textContentType(.password)
+                } else {
+                    SecureField("Password", text: $password)
+                        .textContentType(.password)
+                }
+                
+                Button(action: { showPassword.toggle() }) {
+                    Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                        .foregroundColor(.gray)
+                }
+            }
+            .padding(14)
+            .background(Color.white)
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.systemGray4), lineWidth: 1))
+            .cornerRadius(12)
+            .focused($focusedField, equals: .password)
+            .submitLabel(.done)
+            .onSubmit { if isValidEmail && !password.isEmpty { loginWithPassword() } }
+            
+            // Sign In Button
+            Button(action: loginWithPassword) {
+                HStack {
+                    if isLoading { ProgressView().tint(.white) }
+                    Text("Sign In")
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.zivoRed)
+            .controlSize(.regular)
+            .disabled(!isValidEmail || password.isEmpty || isLoading)
+            
+            // Divider
+            HStack {
+                Rectangle().frame(height: 1).foregroundColor(Color(.systemGray4))
+                Text("or").font(.subheadline).foregroundColor(.secondary)
+                Rectangle().frame(height: 1).foregroundColor(Color(.systemGray4))
+            }
+            .padding(.vertical, 8)
+            
+                // Alternative Login Options
+                HStack(spacing: 8) {
+                    // Forgot Password Link
+                    NavigationLink("Forgot password?") {
+                        PatientPasswordResetView(email: email)
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.zivoRed)
+                    
+                    Text("|")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    // Use OTP Instead Link
+                    Button(action: {
+                        currentStep = .otpRequest
+                        password = ""
+                        otpSent = false
+                        otpCode = ""
+                    }) {
+                        Text("Use OTP to login")
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.zivoRed)
+                }
+            
+            // Sign Up and Back Links
+            VStack(spacing: 12) {
+                NavigationLink("Don't have an account? Sign up") { 
+                    DualRegistrationView { onSuccess() } 
+                }
+                .foregroundColor(.zivoRed)
+                .frame(maxWidth: .infinity)
+                
+                Button("Back") {
+                    currentStep = .methodSelection
+                    email = ""
+                    password = ""
+                    error = nil
+                    successMessage = nil
+                }
+                .foregroundColor(.zivoRed)
+            }
             .padding(.top, 8)
         }
     }
@@ -291,6 +428,8 @@ struct DualLoginView: View {
                 Button("Use verification code instead") {
                     currentStep = .otpRequest
                     password = ""
+                    otpSent = false
+                    otpCode = ""
                 }
                 .foregroundColor(.zivoRed)
                 
@@ -313,34 +452,110 @@ struct DualLoginView: View {
     // MARK: - OTP Request View
     private var otpRequestView: some View {
         VStack(spacing: 16) {
-            Text("Send verification code")
+            Text("Sign in with verification code")
                 .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .foregroundColor(.primary)
             
-            Text("We'll send a 6-digit code to \(email)")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            
-            Button(action: requestOTP) {
-                HStack {
-                    if isLoading { ProgressView().tint(.white) }
-                    Text("Send Code")
-                        .fontWeight(.semibold)
+            // Email Field
+            VStack(spacing: 8) {
+                TextField("Email address", text: $email)
+                    .keyboardType(.emailAddress)
+                    .textContentType(.username)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                    .padding(14)
+                    .background(Color.white)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(!email.isEmpty && !isValidEmail ? Color.red : Color(.systemGray4), lineWidth: 1))
+                    .cornerRadius(12)
+                    .focused($focusedField, equals: .email)
+                    .submitLabel(.done)
+                    .disabled(otpSent)  // Disable after OTP is sent
+                
+                if !email.isEmpty && !isValidEmail {
+                    Text("Please enter a valid email address")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.zivoRed)
-            .controlSize(.regular)
-            .disabled(isLoading)
             
+            // Send Verification Code Button
+            if !otpSent {
+                Button(action: requestOTP) {
+                    HStack {
+                        if isLoading { ProgressView().tint(.white) }
+                        Text("Send Verification Code")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.zivoRed)
+                .controlSize(.regular)
+                .disabled(!isValidEmail || isLoading)
+            }
+            
+            // OTP Input Section (shown after code is sent)
+            if otpSent {
+                VStack(spacing: 16) {
+                    Text("Enter the 6-digit code sent to")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    Text(email)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    TextField("000000", text: $otpCode)
+                        .keyboardType(.numberPad)
+                        .textContentType(.oneTimeCode)
+                        .multilineTextAlignment(.center)
+                        .font(.system(size: 24, weight: .bold, design: .monospaced))
+                        .padding(14)
+                        .background(Color.white)
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.systemGray4), lineWidth: 1))
+                        .cornerRadius(12)
+                        .focused($focusedField, equals: .otp)
+                        .onChange(of: otpCode) { newValue in
+                            if newValue.count == 6 {
+                                verifyOTP()
+                            }
+                        }
+                    
+                    Button(action: verifyOTP) {
+                        HStack {
+                            if isLoading { ProgressView().tint(.white) }
+                            Text("Verify Code")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.zivoRed)
+                    .controlSize(.regular)
+                    .disabled(otpCode.count != 6 || isLoading)
+                    
+                    Button("Resend Code") {
+                        requestOTP()
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.zivoRed)
+                }
+            }
+            
+            // Back Button
             Button("Back") {
-                currentStep = .passwordLogin
+                currentStep = .emailInput
+                email = ""
+                otpCode = ""
+                otpSent = false
                 error = nil
                 successMessage = nil
             }
-            .foregroundColor(.secondary)
+            .foregroundColor(.zivoRed)
+            .padding(.top, 8)
         }
     }
     
@@ -422,7 +637,7 @@ struct DualLoginView: View {
                     if emailExists {
                         currentStep = .passwordLogin
                     } else {
-                        currentStep = .otpRequest
+                        self.error = "No User found with this email. Please sign up first."
                     }
                     isLoading = false
                 }
@@ -461,10 +676,141 @@ struct DualLoginView: View {
                 }
             } catch {
                 await MainActor.run {
-                    self.error = "Login failed. Please check your credentials."
+                    // Check if error is due to unverified email
+                    let errorMessage = "\(error)"
+                    if errorMessage.contains("EMAIL_NOT_VERIFIED") || errorMessage.contains("Inactive user") {
+                        self.error = nil
+                        // Navigate to verification waiting screen
+                        self.currentStep = .emailVerificationWaiting
+                        self.successMessage = "Please verify your email to continue. Check your inbox for the verification link."
+                    } else {
+                        // Extract the actual error message from the backend
+                        if let range = errorMessage.range(of: "HTTP \\d+: ", options: .regularExpression) {
+                            // Extract everything after "HTTP 401: " and clean up trailing characters
+                            var message = String(errorMessage[range.upperBound...])
+                            // Remove trailing "))" or ")" that might be part of the error wrapper
+                            message = message.trimmingCharacters(in: CharacterSet(charactersIn: ")\""))
+                            self.error = message
+                        } else if errorMessage.contains("serverError(") {
+                            // Extract message from serverError("message")
+                            if let start = errorMessage.firstIndex(of: "\""),
+                               let end = errorMessage.lastIndex(of: "\""),
+                               start < end {
+                                self.error = String(errorMessage[errorMessage.index(after: start)..<end])
+                            } else {
+                                self.error = "Login failed. Please check your credentials."
+                            }
+                        } else {
+                            self.error = "Login failed. Please check your credentials."
+                        }
+                    }
                     isLoading = false
                 }
             }
+        }
+    }
+    
+    private func resendVerificationEmailFromLogin() {
+        error = nil
+        successMessage = nil
+        isLoading = true
+        
+        Task {
+            do {
+                let message = try await NetworkService.shared.resendVerificationEmail(email: email)
+                await MainActor.run {
+                    print("✅ [DualLoginView] Verification email resent: \(message)")
+                    successMessage = "Verification email sent! Please check your inbox."
+                    isLoading = false
+                    
+                    // Clear success message after 5 seconds
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                        successMessage = nil
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.error = "Failed to resend verification email. Please try again."
+                    isLoading = false
+                }
+            }
+        }
+    }
+    
+    // MARK: - Email Verification Waiting View (Login)
+    private var emailVerificationWaitingView: some View {
+        VStack(spacing: 24) {
+            // Icon
+            Image(systemName: "envelope.circle.fill")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 100, height: 100)
+                .foregroundColor(.zivoRed)
+                .padding(.top, 20)
+            
+            Text("Email Verification Required")
+                .font(.system(size: 26, weight: .bold))
+                .foregroundColor(.zivoRed)
+                .frame(maxWidth: .infinity, alignment: .center)
+            
+            VStack(spacing: 16) {
+                Text("We've sent a verification email to:")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                
+                Text(email)
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(8)
+                
+                Text("Please check your inbox and click the verification link to activate your account before signing in.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
+            
+            Divider()
+                .padding(.vertical, 8)
+            
+            VStack(spacing: 12) {
+                Text("Didn't receive the email?")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                
+                Button(action: resendVerificationEmailFromLogin) {
+                    HStack {
+                        if isLoading { ProgressView().tint(.zivoRed) }
+                        Text("Resend Verification Email")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.zivoRed)
+                .controlSize(.regular)
+                .disabled(isLoading)
+                
+                Text("Check your spam folder if you don't see it")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            
+            Spacer()
+            
+            Button("Back to Sign In") {
+                currentStep = .methodSelection
+                email = ""
+                password = ""
+                error = nil
+                successMessage = nil
+            }
+            .foregroundColor(.zivoRed)
+            .padding(.bottom, 20)
         }
     }
     
@@ -475,21 +821,51 @@ struct DualLoginView: View {
         
         Task {
             do {
-                _ = try await NetworkService.shared.requestOTP(email: email)
+                let message = try await NetworkService.shared.requestOTP(email: email)
                 await MainActor.run {
-                    currentStep = .otpVerification
-                    otpSent = true
-                    isLoading = false
-                    successMessage = "Code sent successfully"
-                    
-                    // Clear success message after 3 seconds
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                        successMessage = nil
+                    // Check if it's a generic message (user doesn't exist)
+                    if message.contains("If an account exists") {
+                        // Show generic message without moving to OTP input
+                        otpSent = false
+                        isLoading = false
+                        successMessage = message
+                        
+                        // Clear success message after 5 seconds
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                            successMessage = nil
+                        }
+                    } else {
+                        // Real OTP sent - show OTP input
+                        otpSent = true
+                        isLoading = false
+                        successMessage = "Code sent successfully. Please check your email."
+                        focusedField = .otp  // Auto-focus on OTP field
+                        
+                        // Clear success message after 3 seconds
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            successMessage = nil
+                        }
                     }
                 }
             } catch {
                 await MainActor.run {
-                    self.error = "Failed to send verification code. Please try again."
+                    // Check if error is due to unverified email
+                    let errorMessage = "\(error)"
+                    if errorMessage.contains("EMAIL_NOT_VERIFIED") {
+                        self.error = nil
+                        // Navigate to verification waiting screen
+                        self.currentStep = .emailVerificationWaiting
+                        self.successMessage = "Please verify your email first. Check your inbox for the verification link."
+                    } else {
+                        // Extract the actual error message or show generic one
+                        if let range = errorMessage.range(of: "HTTP \\d+: ", options: .regularExpression) {
+                            var message = String(errorMessage[range.upperBound...])
+                            message = message.trimmingCharacters(in: CharacterSet(charactersIn: ")\""))
+                            self.error = message
+                        } else {
+                            self.error = "Failed to send verification code. Please try again."
+                        }
+                    }
                     isLoading = false
                 }
             }
@@ -554,10 +930,6 @@ struct DualLoginView: View {
 // MARK: - Registration View (Updated)
 struct DualRegistrationView: View {
     @AppStorage("userMode") private var userMode: UserMode = .patient
-    @State private var firstName: String = ""
-    @State private var middleName: String = ""
-    @State private var lastName: String = ""
-    @State private var fullName: String = "" // Keep for backward compatibility
     @State private var email: String = ""
     @State private var password: String = ""
     @State private var confirmPassword: String = ""
@@ -566,8 +938,6 @@ struct DualRegistrationView: View {
     @State private var showPassword: Bool = false
     @State private var showConfirmPassword: Bool = false
     @State private var currentStep: RegistrationStep = .methodSelection
-    @State private var otpCode: String = ""
-    @State private var otpSent: Bool = false
     @FocusState private var focusedField: Field?
     @State private var showOnboarding: Bool = false
     @State private var acceptedPrivacyPolicy: Bool = false
@@ -577,13 +947,12 @@ struct DualRegistrationView: View {
 
     var onSuccess: () -> Void
 
-    private enum Field { case firstName, middleName, lastName, email, password, confirmPassword, otp }
+    private enum Field { case email, password, confirmPassword }
     
     private enum RegistrationStep {
         case methodSelection
-        case basicInfo
-        case passwordSetup
-        case otpVerification
+        case emailPasswordSetup
+        case emailVerificationWaiting
     }
 
     var body: some View {
@@ -628,12 +997,10 @@ struct DualRegistrationView: View {
                 switch currentStep {
                 case .methodSelection:
                     registrationMethodSelectionView
-                case .basicInfo:
-                    basicInfoView
-                case .passwordSetup:
-                    passwordSetupView
-                case .otpVerification:
-                    otpVerificationView
+                case .emailPasswordSetup:
+                    emailPasswordSetupView
+                case .emailVerificationWaiting:
+                    emailVerificationWaitingView
                 }
             }
             .padding()
@@ -648,19 +1015,29 @@ struct DualRegistrationView: View {
             OnboardingFlowView()
                 .environmentObject(NetworkService.shared)
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("EmailVerificationSuccess"))) { notification in
+            // Email was verified successfully via deep link
+            print("✅ [DualRegistrationView] Email verification success notification received")
+            // Show success message and allow user to proceed to login
+            error = nil
+            if let message = notification.userInfo?["message"] as? String {
+                // Show alert informing user they can now sign in
+                Task {
+                    await MainActor.run {
+                        // Navigate back to method selection with a success indicator
+                        currentStep = .methodSelection
+                    }
+                }
+            }
+        }
     }
     
     // MARK: - Registration Method Selection
     private var registrationMethodSelectionView: some View {
         VStack(spacing: 16) {
-            Text("Choose how you'd like to create your account")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .foregroundColor(.primary)
-            
             // Email Registration Button
             Button(action: {
-                currentStep = .basicInfo
+                currentStep = .emailPasswordSetup
             }) {
                 HStack {
                     Image(systemName: "envelope.fill")
@@ -702,43 +1079,14 @@ struct DualRegistrationView: View {
         }
     }
     
-    // MARK: - Basic Info View
-    private var basicInfoView: some View {
+    // MARK: - Combined Email & Password Setup View
+    private var emailPasswordSetupView: some View {
         VStack(spacing: 16) {
-            Text("Personal Information")
+            Text("Create Your Account")
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: .leading)
             
-            TextField("First name", text: $firstName)
-                .textContentType(.givenName)
-                .padding(14)
-                .background(Color.white)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.systemGray4), lineWidth: 1))
-                .cornerRadius(12)
-                .focused($focusedField, equals: .firstName)
-                .submitLabel(.next)
-                .onSubmit { focusedField = .middleName }
-            
-            TextField("Middle name (optional)", text: $middleName)
-                .textContentType(.middleName)
-                .padding(14)
-                .background(Color.white)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.systemGray4), lineWidth: 1))
-                .cornerRadius(12)
-                .focused($focusedField, equals: .middleName)
-                .submitLabel(.next)
-                .onSubmit { focusedField = .lastName }
-            
-            TextField("Last name", text: $lastName)
-                .textContentType(.familyName)
-                .padding(14)
-                .background(Color.white)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.systemGray4), lineWidth: 1))
-                .cornerRadius(12)
-                .focused($focusedField, equals: .lastName)
-                .submitLabel(.next)
-                .onSubmit { focusedField = .email }
-            
+            // Email Field
             VStack(spacing: 8) {
                 TextField("Email address", text: $email)
                     .keyboardType(.emailAddress)
@@ -751,7 +1099,7 @@ struct DualRegistrationView: View {
                     .cornerRadius(12)
                     .focused($focusedField, equals: .email)
                     .submitLabel(.next)
-                    .onSubmit { proceedToPasswordSetup() }
+                    .onSubmit { focusedField = .password }
                 
                 if !email.isEmpty && !isValidEmail {
                     Text("Please enter a valid email address")
@@ -761,38 +1109,7 @@ struct DualRegistrationView: View {
                 }
             }
             
-            Button(action: proceedToPasswordSetup) {
-                HStack {
-                    if isLoading { ProgressView().tint(.white) }
-                    Text("Continue")
-                        .fontWeight(.semibold)
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.zivoRed)
-            .controlSize(.regular)
-            .disabled(!isValidBasicInfo || isLoading)
-            
-            Button("Back") {
-                currentStep = .methodSelection
-                fullName = ""
-                email = ""
-                password = ""
-                confirmPassword = ""
-                error = nil
-            }
-            .foregroundColor(.zivoRed)
-        }
-    }
-    
-    // MARK: - Password Setup View
-    private var passwordSetupView: some View {
-        VStack(spacing: 16) {
-            Text("Create Password")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            
+            // Password Fields
             VStack(spacing: 12) {
                 HStack {
                     if showPassword {
@@ -866,16 +1183,9 @@ struct DualRegistrationView: View {
             .controlSize(.regular)
             .disabled(!isValidPasswordAndAgreed || isLoading)
             
-            // Alternative: OTP registration
-            Button("Use verification code instead") {
-                currentStep = .otpVerification
-                password = ""
-                confirmPassword = ""
-            }
-            .foregroundColor(.zivoRed)
-            
             Button("Back") {
-                currentStep = .basicInfo
+                currentStep = .methodSelection
+                email = ""
                 password = ""
                 confirmPassword = ""
                 error = nil
@@ -908,89 +1218,80 @@ struct DualRegistrationView: View {
         }
     }
     
-    // MARK: - OTP Verification View
-    private var otpVerificationView: some View {
-        VStack(spacing: 16) {
-            Text("Verify your email")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
+    // MARK: - Email Verification Waiting View
+    private var emailVerificationWaitingView: some View {
+        VStack(spacing: 24) {
+            // Icon
+            Image(systemName: "envelope.circle.fill")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 100, height: 100)
+                .foregroundColor(.zivoRed)
+                .padding(.top, 20)
             
-            Text("Enter the 6-digit code sent to \(email)")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Verify Your Email")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundColor(.zivoRed)
+                .frame(maxWidth: .infinity, alignment: .center)
             
-            TextField("000000", text: $otpCode)
-                .keyboardType(.numberPad)
-                .textContentType(.oneTimeCode)
-                .multilineTextAlignment(.center)
-                .font(.system(size: 24, weight: .bold, design: .monospaced))
-                .padding(14)
-                .background(Color.white)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.systemGray4), lineWidth: 1))
-                .cornerRadius(12)
-                .focused($focusedField, equals: .otp)
-                .onChange(of: otpCode) { newValue in
-                    if newValue.count == 6 && isAgreementsAccepted {
-                        registerWithOTP()
-                    }
-                }
-            
-            // Privacy Policy and Terms Agreement
-            privacyAndTermsAgreement
-            
-            Button(action: registerWithOTP) {
-                HStack {
-                    if isLoading { ProgressView().tint(.white) }
-                    Text("Verify & Create Account")
-                        .fontWeight(.semibold)
-                }
-                .frame(maxWidth: .infinity)
+            VStack(spacing: 16) {
+                Text("We've sent a verification email to:")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                
+                Text(email)
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(8)
+                
+                Text("Please check your inbox and click the verification link to activate your account.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.zivoRed)
-            .controlSize(.regular)
-            .disabled(otpCode.count != 6 || !isAgreementsAccepted || isLoading)
+            
+            Divider()
+                .padding(.vertical, 8)
             
             VStack(spacing: 12) {
-                Button("Resend Code") {
-                    requestOTP()
-                }
-                .foregroundColor(.zivoRed)
+                Text("Didn't receive the email?")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
                 
-                Button("Back") {
-                    currentStep = .passwordSetup
-                    otpCode = ""
-                    password = ""
-                    confirmPassword = ""
-                    error = nil
+                Button(action: resendVerificationEmail) {
+                    HStack {
+                        if isLoading { ProgressView().tint(.zivoRed) }
+                        Text("Resend Verification Email")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .foregroundColor(.secondary)
+                .buttonStyle(.bordered)
+                .tint(.zivoRed)
+                .controlSize(.regular)
+                .disabled(isLoading)
+                
+                Text("Check your spam folder if you don't see it")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
             }
-        }
-        .sheet(isPresented: $showPrivacyPolicy) {
-            NavigationView {
-                PrivacyPolicyView()
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") {
-                                showPrivacyPolicy = false
-                            }
-                        }
-                    }
+            
+            Spacer()
+            
+            Button("Back to Sign In") {
+                currentStep = .methodSelection
+                email = ""
+                password = ""
+                confirmPassword = ""
+                error = nil
             }
-        }
-        .sheet(isPresented: $showTermsOfService) {
-            NavigationView {
-                TermsOfServiceView()
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") {
-                                showTermsOfService = false
-                            }
-                        }
-                    }
-            }
+            .foregroundColor(.zivoRed)
+            .padding(.bottom, 20)
         }
     }
     
@@ -1068,10 +1369,6 @@ struct DualRegistrationView: View {
         return emailPredicate.evaluate(with: email)
     }
     
-    private var isValidBasicInfo: Bool {
-        !firstName.isEmpty && !lastName.isEmpty && !email.isEmpty && isValidEmail
-    }
-    
     private var isValidPassword: Bool {
         password.count >= 8 && password == confirmPassword
     }
@@ -1081,97 +1378,72 @@ struct DualRegistrationView: View {
     }
     
     private var isValidPasswordAndAgreed: Bool {
-        isValidPassword && isAgreementsAccepted
-    }
-    
-    private func proceedToPasswordSetup() {
-        currentStep = .passwordSetup
+        !email.isEmpty && isValidEmail && isValidPassword && isAgreementsAccepted
     }
     
     private func registerWithPassword() {
         error = nil
         isLoading = true
         
-        // Compose fullName from split fields
-        let nameParts = [firstName, middleName, lastName].filter { !$0.isEmpty }
-        let composedFullName = nameParts.joined(separator: " ")
-        
         Task {
             do {
                 userMode = .patient
                 NetworkService.shared.handleRoleChange()
                 // Reset onboarding status for new user
                 NetworkService.shared.resetOnboardingStatus()
-                _ = try await NetworkService.shared.register(email: email, password: password, fullName: composedFullName)
+                let message = try await NetworkService.shared.register(email: email, password: password)
                 await MainActor.run {
-                    let onboardingCompleted = NetworkService.shared.isOnboardingCompleted()
-                    print("🔍 [DualAuthViews] Registration successful - onboardingCompleted: \(onboardingCompleted)")
-                    if !onboardingCompleted { 
-                        print("📋 [DualAuthViews] Showing onboarding flow")
-                        showOnboarding = true 
-                    } else { 
-                        print("✅ [DualAuthViews] Onboarding already completed, calling onSuccess")
-                        onSuccess() 
-                    }
+                    print("✅ [DualAuthViews] Registration successful: \(message)")
+                    print("📧 [DualAuthViews] Moving to email verification waiting screen")
+                    isLoading = false
+                    currentStep = .emailVerificationWaiting
                 }
             } catch {
                 await MainActor.run {
-                    self.error = "Registration failed. Please try again."
+                    // Extract the actual error message from the backend
+                    let errorMessage = "\(error)"
+                    if let range = errorMessage.range(of: "HTTP \\d+: ", options: .regularExpression) {
+                        // Extract everything after "HTTP 400: " and clean up trailing characters
+                        var message = String(errorMessage[range.upperBound...])
+                        // Remove trailing "))" or ")" that might be part of the error wrapper
+                        message = message.trimmingCharacters(in: CharacterSet(charactersIn: ")\""))
+                        self.error = message
+                    } else if errorMessage.contains("serverError(") {
+                        // Extract message from serverError("message")
+                        if let start = errorMessage.firstIndex(of: "\""),
+                           let end = errorMessage.lastIndex(of: "\""),
+                           start < end {
+                            self.error = String(errorMessage[errorMessage.index(after: start)..<end])
+                        } else {
+                            self.error = "Registration failed. Please try again."
+                        }
+                    } else {
+                        self.error = "Registration failed. Please try again."
+                    }
                     isLoading = false
                 }
             }
         }
     }
     
-    private func requestOTP() {
+    private func resendVerificationEmail() {
         error = nil
         isLoading = true
         
         Task {
             do {
-                _ = try await NetworkService.shared.requestOTP(email: email)
+                let message = try await NetworkService.shared.resendVerificationEmail(email: email)
                 await MainActor.run {
-                    otpSent = true
+                    print("✅ [DualAuthViews] Verification email resent: \(message)")
+                    // Show success message temporarily
+                    self.error = nil
                     isLoading = false
+                    
+                    // You could add a success banner here if desired
                 }
             } catch {
                 await MainActor.run {
-                    self.error = "Failed to send verification code. Please try again."
-                    isLoading = false
-                }
-            }
-        }
-    }
-    
-    private func registerWithOTP() {
-        error = nil
-        isLoading = true
-        
-        // Compose fullName from split fields
-        let nameParts = [firstName, middleName, lastName].filter { !$0.isEmpty }
-        let composedFullName = nameParts.joined(separator: " ")
-        
-        Task {
-            do {
-                userMode = .patient
-                NetworkService.shared.handleRoleChange()
-                // Reset onboarding status for new user
-                NetworkService.shared.resetOnboardingStatus()
-                _ = try await NetworkService.shared.registerWithOTP(email: email, code: otpCode, fullName: composedFullName)
-                await MainActor.run {
-                    let onboardingCompleted = NetworkService.shared.isOnboardingCompleted()
-                    print("🔍 [DualAuthViews] OTP Registration successful - onboardingCompleted: \(onboardingCompleted)")
-                    if !onboardingCompleted { 
-                        print("📋 [DualAuthViews] Showing onboarding flow")
-                        showOnboarding = true 
-                    } else { 
-                        print("✅ [DualAuthViews] Onboarding already completed, calling onSuccess")
-                        onSuccess() 
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.error = "Invalid verification code. Please try again."
+                    self.error = "Failed to resend verification email. Please try again."
                     isLoading = false
                 }
             }

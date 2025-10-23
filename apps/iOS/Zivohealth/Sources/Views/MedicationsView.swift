@@ -497,8 +497,6 @@ struct PrescriptionGroupsCard: View {
     let error: String?
     let onRefresh: () -> Void
     
-    @State private var selectedGroup: PrescriptionGroup?
-    
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Header
@@ -533,10 +531,12 @@ struct PrescriptionGroupsCard: View {
                         .font(.caption).foregroundColor(.secondary).multilineTextAlignment(.center)
                 }.frame(maxWidth: .infinity).padding(.vertical, 20)
             } else {
-                LazyVStack(spacing: 12) {
+                VStack(spacing: 16) {
                     ForEach(groups, id: \.id) { group in
-                        PrescriptionGroupRow(group: group)
-                            .onTapGesture { selectedGroup = group }
+                        NavigationLink(destination: PrescriptionGroupDetailPage(group: group)) {
+                            PrescriptionGroupCard(group: group)
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
                 }
             }
@@ -545,9 +545,182 @@ struct PrescriptionGroupsCard: View {
         .background(Color(.systemBackground))
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
-        .sheet(item: $selectedGroup) { group in
-            PrescriptionGroupDetailView(group: group)
+    }
+}
+
+// MARK: - Prescription Group Card (Top Level)
+struct PrescriptionGroupCard: View {
+    let group: PrescriptionGroup
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header with doctor name
+            HStack(alignment: .top, spacing: 12) {
+                // Orange pills icon
+                ZStack {
+                    Circle()
+                        .fill(Color.orange.opacity(0.2))
+                        .frame(width: 44, height: 44)
+                    
+                    Image(systemName: "pills.fill")
+                        .foregroundColor(.orange)
+                        .font(.title3)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Dr. \(group.doctorName)")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .lineLimit(2)
+                    
+                    if let date = group.prescribedAt {
+                        Text(DateFormatter.prescriptionDateShort.string(from: date) + " at " + DateFormatter.prescriptionTime.string(from: date))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+            }
+            
+                Divider()
+                
+                // List of medications (bullet points)
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(group.medications) { medication in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("•")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(medication.medicationName)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                
+                                if !medication.dosage.isEmpty || !medication.frequency.isEmpty {
+                                    HStack(spacing: 8) {
+                                        if !medication.dosage.isEmpty {
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "pills")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.blue)
+                                                Text(medication.dosage)
+                                                    .font(.caption)
+                                                    .foregroundColor(.blue)
+                                            }
+                                        }
+                                        
+                                        if !medication.frequency.isEmpty {
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "clock")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.green)
+                                                Text(medication.frequency)
+                                                    .font(.caption)
+                                                    .foregroundColor(.green)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            Spacer()
+                        }
+                    }
+                }
         }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color(.systemGray5), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
+    }
+}
+
+// MARK: - Individual Prescription Card
+struct IndividualPrescriptionCard: View {
+    let medication: PrescriptionMedication
+    let doctorName: String
+    let prescribedAt: Date?
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            HStack(alignment: .top, spacing: 12) {
+                // Orange pill icon
+                ZStack {
+                    Circle()
+                        .fill(Color.orange.opacity(0.2))
+                        .frame(width: 44, height: 44)
+                    
+                    Image(systemName: "pills.fill")
+                        .foregroundColor(.orange)
+                        .font(.title3)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(medication.medicationName)
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .lineLimit(2)
+                    
+                    if let date = prescribedAt {
+                        Text("Prescribed: \(DateFormatter.prescriptionDateShort.string(from: date))")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+            }
+            
+            // Quantity and Frequency
+            HStack(alignment: .top, spacing: 0) {
+                // Quantity column
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Quantity")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(medication.dosage.isEmpty ? "-" : medication.dosage)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                
+                // Frequency column
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Frequency")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(medication.frequency.isEmpty ? "-" : medication.frequency)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color(.systemGray5), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
     }
 }
 
@@ -555,30 +728,393 @@ struct PrescriptionGroupRow: View {
     let group: PrescriptionGroup
     
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "pills.fill").foregroundColor(.orange)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(group.doctorName).font(.headline)
-                if let date = group.prescribedAt {
-                    Text(DateFormatter.prescriptionDate.string(from: date))
-                        .font(.caption).foregroundColor(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            // Header with doctor name and date
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "pills.fill")
+                    .foregroundColor(.orange)
+                    .font(.title2)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(group.doctorName)
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                    
+                    if let date = group.prescribedAt {
+                        Text(DateFormatter.prescriptionDate.string(from: date))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
-                // Show up to two meds inline
-                ForEach(group.medications.prefix(2)) { med in
-                    Text("\(med.medicationName)\(med.dosage.isEmpty ? "" : " - \(med.dosage)")")
-                        .font(.caption).foregroundColor(.secondary)
-                }
-                if group.medications.count > 2 {
-                    Text("+ \(group.medications.count - 2) more")
-                        .font(.caption2).foregroundColor(.blue)
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+            }
+            
+            // Divider
+            Divider()
+            
+            // List all medications with dosage and frequency
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(group.medications) { med in
+                    HStack(alignment: .top, spacing: 8) {
+                        // Bullet point
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 2)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            // Medication name
+                            Text(med.medicationName)
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            
+                            // Dosage and frequency
+                            if !med.dosage.isEmpty || !med.frequency.isEmpty {
+                                HStack(spacing: 8) {
+                                    if !med.dosage.isEmpty {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "pills")
+                                                .font(.caption2)
+                                                .foregroundColor(.blue)
+                                            Text(med.dosage)
+                                                .font(.caption)
+                                                .foregroundColor(.blue)
+                                        }
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 3)
+                                        .background(Color.blue.opacity(0.1))
+                                        .cornerRadius(4)
+                                    }
+                                    
+                                    if !med.frequency.isEmpty {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "clock")
+                                                .font(.caption2)
+                                                .foregroundColor(.green)
+                                            Text(med.frequency)
+                                                .font(.caption)
+                                                .foregroundColor(.green)
+                                        }
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 3)
+                                        .background(Color.green.opacity(0.1))
+                                        .cornerRadius(4)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            Spacer()
-            Image(systemName: "chevron.right").foregroundColor(.secondary).font(.caption)
         }
         .padding()
-        .background(Color(.systemGray6))
+        .background(Color(.systemBackground))
         .cornerRadius(12)
+        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
+    }
+}
+
+// MARK: - Individual Medication Detail View
+struct PrescriptionMedicationDetailView: View {
+    let medication: PrescriptionMedication
+    let group: PrescriptionGroup
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Medication Icon
+                    ZStack {
+                        Circle()
+                            .fill(Color.orange.opacity(0.2))
+                            .frame(width: 80, height: 80)
+                        
+                        Image(systemName: "pills.fill")
+                            .foregroundColor(.orange)
+                            .font(.system(size: 40))
+                    }
+                    .padding(.top)
+                    
+                    // Medication Name
+                    Text(medication.medicationName)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .multilineTextAlignment(.center)
+                    
+                    // Prescribed By
+                    Text("Prescribed by \(group.doctorName)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    if let date = group.prescribedAt {
+                        Text(DateFormatter.prescriptionDate.string(from: date))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Divider()
+                        .padding(.horizontal)
+                    
+                    // Details Card
+                    VStack(alignment: .leading, spacing: 16) {
+                        // Quantity/Dosage
+                        MedicationInfoRow(
+                            title: "Quantity",
+                            value: medication.dosage.isEmpty ? "Not specified" : medication.dosage,
+                            icon: "pills"
+                        )
+                        
+                        Divider()
+                        
+                        // Frequency
+                        MedicationInfoRow(
+                            title: "Frequency",
+                            value: medication.frequency.isEmpty ? "Not specified" : medication.frequency,
+                            icon: "clock"
+                        )
+                        
+                        if !medication.instructions.isEmpty {
+                            Divider()
+                            
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Image(systemName: "note.text")
+                                        .foregroundColor(.blue)
+                                        .frame(width: 24)
+                                    Text("Instructions")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                }
+                                
+                                Text(medication.instructions)
+                                    .font(.body)
+                                    .foregroundColor(.secondary)
+                                    .padding(.leading, 32)
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
+                    .padding(.horizontal)
+                    
+                    // View Prescription Document (if available)
+                    if let link = group.prescriptionImageLink, !link.isEmpty {
+                        NavigationLink(destination: PrescriptionFileViewer(urlString: link)) {
+                            HStack {
+                                Image(systemName: "doc.text.fill")
+                                    .foregroundColor(.blue)
+                                Text("View Prescription Document")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding()
+                            .background(Color(.systemBackground))
+                            .cornerRadius(12)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color(.systemGray5), lineWidth: 1)
+                            )
+                        }
+                        .padding(.horizontal)
+                    }
+                    
+                    Spacer()
+                }
+                .padding(.bottom, 20)
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct MedicationInfoRow: View {
+    let title: String
+    let value: String
+    let icon: String
+    
+    var body: some View {
+        HStack(alignment: .top) {
+            Image(systemName: icon)
+                .foregroundColor(.blue)
+                .frame(width: 24)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text(value)
+                    .font(.body)
+                    .fontWeight(.medium)
+            }
+            
+            Spacer()
+        }
+    }
+}
+
+// MARK: - Prescription Group Detail Page
+struct PrescriptionGroupDetailPage: View {
+    let group: PrescriptionGroup
+    @State private var selectedMedication: PrescriptionMedication?
+    @State private var showingDocumentViewer = false
+    
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                // Doctor Header Card
+                VStack(spacing: 12) {
+                    // Doctor Icon
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue.opacity(0.2))
+                            .frame(width: 60, height: 60)
+                        
+                        Image(systemName: "stethoscope")
+                            .foregroundColor(.blue)
+                            .font(.system(size: 28))
+                    }
+                    
+                    Text("Dr. \(group.doctorName)")
+                        .font(.title3)
+                        .fontWeight(.bold)
+                    
+                    if let date = group.prescribedAt {
+                        Text("Prescribed on " + DateFormatter.prescriptionDate.string(from: date))
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(12)
+                .padding(.horizontal)
+                .padding(.top)
+                
+                // View Prescription Document Button
+                if let link = group.prescriptionImageLink, !link.isEmpty {
+                    Button(action: {
+                        showingDocumentViewer = true
+                    }) {
+                        HStack {
+                            Image(systemName: "doc.text.fill")
+                                .foregroundColor(.white)
+                                .font(.title3)
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("View Prescription Document")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.white)
+                                Text("Tap to view PDF or Image")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.9))
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "arrow.right.circle.fill")
+                                .foregroundColor(.white)
+                                .font(.title3)
+                        }
+                        .padding()
+                        .background(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .cornerRadius(12)
+                    }
+                    .padding(.horizontal)
+                    .sheet(isPresented: $showingDocumentViewer) {
+                        NavigationView {
+                            PrescriptionFileViewer(urlString: link)
+                        }
+                    }
+                } else {
+                    // Show placeholder when no document is uploaded
+                    VStack(spacing: 8) {
+                        HStack {
+                            Image(systemName: "doc.text")
+                                .foregroundColor(.gray)
+                                .font(.title3)
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Prescription Document")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.primary)
+                                Text("No document uploaded")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                        }
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
+                    }
+                    .padding(.horizontal)
+                }
+                
+                // Medications Section
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "pills.fill")
+                            .foregroundColor(.orange)
+                        Text("Medications (\(group.medications.count))")
+                            .font(.headline)
+                            .fontWeight(.bold)
+                    }
+                    .padding(.horizontal)
+                    
+                    VStack(spacing: 12) {
+                        ForEach(group.medications) { medication in
+                            IndividualPrescriptionCard(
+                                medication: medication,
+                                doctorName: group.doctorName,
+                                prescribedAt: group.prescribedAt
+                            )
+                            .onTapGesture {
+                                selectedMedication = medication
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+                
+                Spacer(minLength: 20)
+            }
+            .padding(.bottom, 20)
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Prescription Details")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $selectedMedication) { medication in
+            PrescriptionMedicationDetailView(medication: medication, group: group)
+        }
     }
 }
 
@@ -621,37 +1157,124 @@ struct PrescriptionGroupDetailView: View, Identifiable {
 
 struct PrescriptionFileViewer: View {
     let urlString: String
+    @State private var isLoading = true
+    @State private var loadError = false
+    
+    private var isPDF: Bool {
+        guard let url = URL(string: urlString) else { return false }
+        return url.pathExtension.lowercased() == "pdf"
+    }
     
     var body: some View {
         VStack {
             if let url = URL(string: urlString) {
-                if url.pathExtension.lowercased() == "pdf" {
-                    PDFKitRepresentable(url: url)
+                if isPDF {
+                    // PDF Viewer
+                    ZStack {
+                        PDFKitRepresentable(url: url, isLoading: $isLoading, loadError: $loadError)
+                        
+                        if isLoading {
+                            VStack(spacing: 12) {
+                                ProgressView()
+                                Text("Loading prescription...")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        
+                        if loadError {
+                            VStack(spacing: 12) {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .font(.largeTitle)
+                                    .foregroundColor(.orange)
+                                Text("Failed to load prescription")
+                                    .font(.headline)
+                                Text("Please check your connection and try again")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .padding()
+                        }
+                    }
                 } else {
-                    AsyncImage(url: url) { image in
-                        image.resizable().scaledToFit()
-                    } placeholder: {
-                        ProgressView()
+                    // Image Viewer
+                    ScrollView([.horizontal, .vertical]) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .scaledToFit()
+                            case .failure:
+                                VStack(spacing: 12) {
+                                    Image(systemName: "exclamationmark.triangle")
+                                        .font(.largeTitle)
+                                        .foregroundColor(.orange)
+                                    Text("Failed to load prescription")
+                                        .font(.headline)
+                                    Text("Please check your connection and try again")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .multilineTextAlignment(.center)
+                                }
+                                .padding()
+                            case .empty:
+                                VStack(spacing: 12) {
+                                    ProgressView()
+                                    Text("Loading prescription...")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            @unknown default:
+                                EmptyView()
+                            }
+                        }
                     }
                 }
             } else {
-                Text("Invalid file link")
+                VStack(spacing: 12) {
+                    Image(systemName: "doc.badge.ellipsis")
+                        .font(.largeTitle)
+                        .foregroundColor(.gray)
+                    Text("Invalid prescription link")
+                        .font(.headline)
+                }
+                .padding()
             }
         }
-        .padding()
+        .navigationTitle("Prescription")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
 import PDFKit
 struct PDFKitRepresentable: UIViewRepresentable {
     let url: URL
+    @Binding var isLoading: Bool
+    @Binding var loadError: Bool
     
     func makeUIView(context: Context) -> PDFView {
         let pdfView = PDFView()
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
         pdfView.displayDirection = .vertical
-        pdfView.document = PDFDocument(url: url)
+        
+        // Load PDF asynchronously
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let document = PDFDocument(url: url) {
+                DispatchQueue.main.async {
+                    pdfView.document = document
+                    isLoading = false
+                }
+            } else {
+                DispatchQueue.main.async {
+                    isLoading = false
+                    loadError = true
+                }
+            }
+        }
+        
         return pdfView
     }
     
@@ -861,4 +1484,19 @@ struct MedicationsHeaderView: View {
         .frame(height: 110 + topInset + 8)
         .ignoresSafeArea(.container, edges: .top)
     }
+}
+
+// MARK: - Date Formatter Extensions
+extension DateFormatter {
+    static let prescriptionDateShort: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM dd, yyyy"
+        return formatter
+    }()
+    
+    static let prescriptionTime: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter
+    }()
 } 

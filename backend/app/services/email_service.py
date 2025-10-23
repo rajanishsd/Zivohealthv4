@@ -187,6 +187,103 @@ class EmailService:
                 return True  # Return True in dev mode to not break the flow
             return False
 
+    def send_verification_email(self, to_email: str, verification_token: str, user_name: str = None) -> bool:
+        """
+        Send email verification email to user
+        """
+        try:
+            # Build verification URL
+            verification_url = f"{self.frontend_url.rstrip('/')}/verify-email?token={verification_token}"
+            
+            # Create message
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = "Verify Your ZivoHealth Email Address"
+            msg["From"] = self.from_email
+            msg["To"] = to_email
+
+            # Create HTML content
+            html_content = self._create_verification_email_html(verification_url, user_name or "User")
+            
+            # Create plain text content
+            text_content = self._create_verification_email_text(verification_url, user_name or "User")
+
+            # Attach parts
+            part1 = MIMEText(text_content, "plain")
+            part2 = MIMEText(html_content, "html")
+            msg.attach(part1)
+            msg.attach(part2)
+
+            # Send email
+            return self._send_email(msg, to_email)
+            
+        except Exception as e:
+            print(f"Error sending verification email: {e}")
+            return False
+
+    def _create_verification_email_html(self, verification_url: str, user_name: str) -> str:
+        """Create HTML email content for email verification"""
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Verify Your Email</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                .header {{ background-color: #e74c3c; color: white; padding: 20px; text-align: center; }}
+                .content {{ padding: 30px; background-color: #f9f9f9; }}
+                .button {{ display: inline-block; background-color: #e74c3c; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0; }}
+                .footer {{ padding: 20px; text-align: center; color: #666; font-size: 12px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>ZivoHealth</h1>
+                </div>
+                <div class="content">
+                    <h2>Welcome to ZivoHealth!</h2>
+                    <p>Hello {user_name},</p>
+                    <p>Thank you for creating your ZivoHealth account. To complete your registration and start using our platform, please verify your email address.</p>
+                    <p>Click the button below to verify your email:</p>
+                    <a href="{verification_url}" class="button">Verify Email Address</a>
+                    <p>If the button doesn't work, copy and paste this link into your browser:</p>
+                    <p><a href="{verification_url}">{verification_url}</a></p>
+                    <p><strong>This link will expire in 24 hours for security reasons.</strong></p>
+                    <p>If you didn't create this account, please ignore this email.</p>
+                </div>
+                <div class="footer">
+                    <p>© 2025 ZivoHealth. All rights reserved.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+    def _create_verification_email_text(self, verification_url: str, user_name: str) -> str:
+        """Create plain text email content for email verification"""
+        return f"""
+        ZivoHealth - Email Verification
+        
+        Hello {user_name},
+        
+        Thank you for creating your ZivoHealth account. To complete your registration and start using our platform, please verify your email address.
+        
+        Click the link below to verify your email:
+        {verification_url}
+        
+        This link will expire in 24 hours for security reasons.
+        
+        If you didn't create this account, please ignore this email.
+        
+        Best regards,
+        The ZivoHealth Team
+        
+        © 2025 ZivoHealth. All rights reserved.
+        """
+
     def send_otp_email(self, to_email: str, otp_code: str, user_name: str = None) -> bool:
         """
         Send OTP code email to user

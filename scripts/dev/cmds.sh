@@ -51,6 +51,17 @@ sudo docker compose --env-file /opt/zivohealth/.env -f /opt/zivohealth/docker-co
 
 patient@zivohealth.com
 
+
+## ML Worker
+
+aws --profile zivohealth logs tail /ecs/production-ml-worker --region us-east-1 --follow
+
+aws --profile zivohealth ecs describe-services \
+--cluster production-ml-worker-cluster \
+--services production-ml-worker \
+--region us-east-1 \
+--query 'services[0].{Running:runningCount}'
+
 rebuild
 
 export AWS_PROFILE=zivohealth AWS_REGION=us-east-1

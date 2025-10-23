@@ -1316,6 +1316,7 @@ IMPORTANT:
                 ml_worker_client = get_ml_worker_client()
                 if ml_worker_client.is_enabled():
                     ml_worker_client.send_nutrition_processing_trigger(user_id=user_id, priority='normal')
+                    logger.info(f"📤 Triggered ML worker for user {user_id}")
             except Exception as e:
                 logger.warning(f"⚠️  Failed to trigger ML worker for nutrition: {e}")
                 pass

@@ -341,13 +341,17 @@ public class NetworkService: ObservableObject {
         return baseURL + path
     }
 
-    private func headers(requiresAuth: Bool = true, requestBody: Data? = nil) -> [String: String] {
+    private func headers(requiresAuth: Bool = true, requestBody: Data? = nil, includeAPIKey: Bool = true) -> [String: String] {
         var headers = [
             "Content-Type": "application/json",
-            "Accept": "application/json",
-            "X-API-Key": apiKey, // API key for all requests
+            "Accept": "application/json"
         ]
-
+        
+        // Add API key if needed (most endpoints need it, except truly public ones like email verification)
+        if includeAPIKey {
+            headers["X-API-Key"] = apiKey
+        }
+        
         if requiresAuth {
             headers["Authorization"] = "Bearer \(authToken)"
         }
@@ -539,7 +543,7 @@ public class NetworkService: ObservableObject {
         do {
             print("🔁 [NetworkService] Refreshing access token using stored refresh token for \(userMode)")
             let body: [String: Any] = ["refresh_token": refresh]
-            let data = try await post("/auth/refresh", body: body, requiresAuth: false)
+            let data = try await post("/dual-auth/refresh", body: body, requiresAuth: false)
             let tokenResponse = try decoder.decode(TokenResponse.self, from: data)
             await MainActor.run {
                 authToken = tokenResponse.accessToken
@@ -1491,10 +1495,10 @@ public class NetworkService: ObservableObject {
         onboardingCompleted = false
     }
     
-    public func setCurrentUserInfo(email: String, fullName: String) {
-        print("👤 [NetworkService] Setting current user info - Email: \(email), Name: \(fullName)")
+    public func setCurrentUserInfo(email: String, fullName: String?) {
+        print("👤 [NetworkService] Setting current user info - Email: \(email), Name: \(fullName ?? "Not provided")")
         currentUserEmail = email
-        currentUserFullName = fullName
+        currentUserFullName = fullName ?? ""
     }
 
     // MARK: - Profile Edit
@@ -1616,26 +1620,19 @@ public extension NetworkService {
     private func ensureAuthentication() async throws {
         // Debug current token state
         print("🔍 [NetworkService] ensureAuthentication - Current state:")
-        print("   User Mode: \(userMode)")
         print("   Auth Token: \(authToken.isEmpty ? "Empty" : "Exists (\(authToken.count) chars)")")
-        
-        // Use cached values to avoid redundant KeychainService calls
-        let patientToken = (userMode == .patient) ? authToken : (keychain.retrieveToken(for: .patient) ?? "")
-        let doctorToken = (userMode == .doctor) ? authToken : (keychain.retrieveToken(for: .doctor) ?? "")
-        print("   Patient Token: \(patientToken.isEmpty ? "Empty" : "Exists (\(patientToken.count) chars)")")
-        print("   Doctor Token: \(doctorToken.isEmpty ? "Empty" : "Exists (\(doctorToken.count) chars)")")
         
         // Check if we have a valid token that hasn't expired
         if !authToken.isEmpty && !isTokenExpired() {
-            print("🔐 [NetworkService] Using existing valid auth token for \(userMode)")
+            print("🔐 [NetworkService] Using existing valid auth token")
             print("🎫 [NetworkService] Token length: \(authToken.count) characters")
             return
         }
 
         if !authToken.isEmpty {
-            print("⚠️ [NetworkService] Auth token expired for \(userMode), attempting refresh...")
+            print("⚠️ [NetworkService] Auth token expired, attempting refresh...")
             if await tryRefreshAccessTokenIfNeeded() {
-                print("✅ [NetworkService] Token refreshed for \(userMode)")
+                print("✅ [NetworkService] Token refreshed")
                 return
             }
             clearAuthToken()
@@ -1662,38 +1659,79 @@ public extension NetworkService {
     }
 
 
-    func register(email: String, password: String, fullName: String) async throws -> String {
-        print("📝 [NetworkService] Attempting registration for user: \(email)")
+    func register(email: String, password: String) async throws -> String {
+        print("📝 [NetworkService] Attempting registration with email verification for user: \(email)")
 
-        // Send split names as well; keep full_name for compatibility
-        let nameParts = fullName.split(separator: " ").map(String.init)
-        let first = nameParts.first ?? ""
-        let last = nameParts.count > 1 ? (nameParts.last ?? "") : ""
-        let middle = nameParts.count > 2 ? nameParts[1..<(nameParts.count-1)].joined(separator: " ") : ""
         let body: [String: Any] = [
             "email": email,
-            "password": password,
-            "first_name": first.isEmpty ? nil : first,
-            "middle_name": middle.isEmpty ? nil : middle,
-            "last_name": last.isEmpty ? nil : last,
-            "full_name": fullName,
-            "is_active": true,
+            "password": password
         ]
 
         do {
-            let data = try await post("/auth/register", body: body, requiresAuth: false)
-            print("✅ [NetworkService] Registration successful")
+            let data = try await post("/dual-auth/email/register", body: body, requiresAuth: false)
+            print("✅ [NetworkService] Registration successful - verification email sent")
 
-            let userResponse = try decoder.decode(UserResponse.self, from: data)
-            print("👤 [NetworkService] Created user with ID: \(userResponse.id)")
+            let response = try decoder.decode(EmailRegisterResponse.self, from: data)
+            print("📧 [NetworkService] Verification required: \(response.verification_required)")
             
-            // Store current user information
-            setCurrentUserInfo(email: userResponse.email, fullName: userResponse.fullName)
-
-            // Now login to get the token
-            return try await loginWithPassword(email: email, password: password)
+            // Store email for verification screen
+            currentUserEmail = email
+            
+            // Return message for UI
+            return response.message
         } catch {
             print("❌ [NetworkService] Registration failed: \(error)")
+            throw error
+        }
+    }
+    
+    func verifyEmail(token: String) async throws -> String {
+        print("📝 [NetworkService] Verifying email with token")
+        
+        let body: [String: Any] = ["token": token]
+        
+        do {
+            // This is a truly public endpoint - no API key needed
+            let data = try await request(
+                path: "/dual-auth/email/verify",
+                method: "POST",
+                body: body,
+                requiresAuth: false,
+                includeAPIKey: false
+            )
+            print("✅ [NetworkService] Email verified successfully")
+            
+            let response = try decoder.decode(EmailVerifyResponse.self, from: data)
+            return response.message
+        } catch {
+            print("❌ [NetworkService] Email verification failed: \(error)")
+            throw error
+        }
+    }
+    
+    func resendVerificationEmail(email: String) async throws -> String {
+        print("📝 [NetworkService] Resending verification email to: \(email)")
+        
+        let body: [String: Any] = ["email": email]
+        
+        do {
+            // This is a truly public endpoint - no API key needed
+            let data = try await request(
+                path: "/dual-auth/email/resend-verification",
+                method: "POST",
+                body: body,
+                requiresAuth: false,
+                includeAPIKey: false
+            )
+            print("✅ [NetworkService] Verification email resent successfully")
+            
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let message = json["message"] as? String {
+                return message
+            }
+            return "Verification email sent successfully"
+        } catch {
+            print("❌ [NetworkService] Failed to resend verification email: \(error)")
             throw error
         }
     }
@@ -1964,13 +2002,35 @@ extension NetworkService {
         print("💊 [NetworkService] Getting patient prescriptions")
         
         do {
-            let data = try await get("/chat-sessions/prescriptions/patient", requiresAuth: true)
+            let data = try await get("/prescriptions/grouped", requiresAuth: true)
             print("✅ [NetworkService] Patient prescriptions fetched successfully")
             
-            let prescriptions = try decoder.decode([PrescriptionWithSession].self, from: data)
-            print("📊 [NetworkService] Found \(prescriptions.count) prescriptions")
+            // Decode grouped format from backend
+            let groups = try decoder.decode([PrescriptionGroup].self, from: data)
+            print("📦 [NetworkService] Received \(groups.count) prescription groups")
             
-            return prescriptions
+            // Flatten grouped prescriptions into individual PrescriptionWithSession items
+            var flatPrescriptions: [PrescriptionWithSession] = []
+            for group in groups {
+                for med in group.medications {
+                    let prescription = PrescriptionWithSession(
+                        id: med.id,
+                        medicationName: med.medicationName,
+                        dosage: med.dosage,
+                        frequency: med.frequency,
+                        instructions: med.instructions,
+                        prescribedBy: med.prescribedBy,
+                        prescribedAt: med.prescribedAt,
+                        consultationId: group.consultationId ?? 0,
+                        chatSessionId: group.chatSessionId,
+                        doctorName: group.doctorName,
+                        sessionTitle: nil
+                    )
+                    flatPrescriptions.append(prescription)
+                }
+            }
+            print("📊 [NetworkService] Flattened to \(flatPrescriptions.count) prescriptions")
+            return flatPrescriptions
         } catch {
             print("❌ [NetworkService] Error fetching patient prescriptions: \(error)")
             throw error
@@ -1981,34 +2041,10 @@ extension NetworkService {
     func getPrescriptionGroups() async throws -> [PrescriptionGroup] {
         print("💊 [NetworkService] Getting grouped prescriptions")
         do {
-            let data = try await get("/chat-sessions/prescriptions/patient", requiresAuth: true)
-            // Endpoint returns either grouped objects or legacy flat items; try grouped first
-            if let groups = try? decoder.decode([PrescriptionGroup].self, from: data) {
-                print("📦 [NetworkService] Received \(groups.count) grouped prescriptions")
-                return groups
-            }
-            // Fallback: map flat list to single-med groups (for compatibility)
-            let flat = try decoder.decode([PrescriptionWithSession].self, from: data)
-            let mapped: [PrescriptionGroup] = flat.map { item in
-                PrescriptionGroup(
-                    id: item.id,
-                    chatSessionId: item.chatSessionId,
-                    consultationId: item.consultationId,
-                    doctorName: item.doctorName,
-                    prescribedAt: item.prescribedAt,
-                    prescriptionImageLink: nil,
-                    medications: [PrescriptionMedication(
-                        id: item.id,
-                        medicationName: item.medicationName,
-                        dosage: item.dosage,
-                        frequency: item.frequency,
-                        instructions: item.instructions,
-                        prescribedBy: item.prescribedBy,
-                        prescribedAt: item.prescribedAt
-                    )]
-                )
-            }
-            return mapped
+            let data = try await get("/prescriptions/grouped", requiresAuth: true)
+            let groups = try decoder.decode([PrescriptionGroup].self, from: data)
+            print("📦 [NetworkService] Received \(groups.count) grouped prescriptions")
+            return groups
         } catch {
             print("❌ [NetworkService] Error fetching grouped prescriptions: \(error)")
             throw error
@@ -2028,7 +2064,7 @@ extension NetworkService {
         ]
         
         do {
-            _ = try await post("/chat-sessions/\(sessionId)/prescriptions", body: body, requiresAuth: true)
+            _ = try await post("/prescriptions/session/\(sessionId)", body: body, requiresAuth: true)
             print("✅ [NetworkService] Prescription added to session successfully")
         } catch {
             print("❌ [NetworkService] Error adding prescription to session: \(error)")
@@ -2041,7 +2077,7 @@ extension NetworkService {
         print("💊 [NetworkService] Getting prescriptions for session \(sessionId)")
 
         do {
-            let data = try await get("/chat-sessions/\(sessionId)/prescriptions", requiresAuth: true)
+            let data = try await get("/prescriptions/session/\(sessionId)", requiresAuth: true)
             print("✅ [NetworkService] Session prescriptions fetched successfully")
 
             let prescriptions = try decoder.decode([Prescription].self, from: data)
@@ -2233,6 +2269,7 @@ extension NetworkService {
         bodyData: Data? = nil,
         contentType: String = "application/json",
         requiresAuth: Bool = true,
+        includeAPIKey: Bool = true,
         isRetry: Bool = false
     ) async throws -> Data {
         // Ensure authentication before making the request
@@ -2266,7 +2303,7 @@ extension NetworkService {
         }
 
         // Set headers with HMAC signature support
-        var headers = self.headers(requiresAuth: requiresAuth, requestBody: bodyDataForSignature)
+        var headers = self.headers(requiresAuth: requiresAuth, requestBody: bodyDataForSignature, includeAPIKey: includeAPIKey)
         
         // Honor caller-provided content type (e.g., form-urlencoded for login)
         if contentType != "application/json" {
@@ -2331,6 +2368,7 @@ extension NetworkService {
                     bodyData: bodyData,
                     contentType: contentType,
                     requiresAuth: requiresAuth,
+                    includeAPIKey: includeAPIKey,
                     isRetry: true
                 )
             }
@@ -2355,34 +2393,39 @@ extension NetworkService {
                     bodyData: bodyData,
                     contentType: contentType,
                     requiresAuth: requiresAuth,
+                    includeAPIKey: includeAPIKey,
                     isRetry: true
                 )
             }
 
             guard httpResponse.statusCode >= 200 && httpResponse.statusCode < 300 else {
                 print("❌ [NetworkService] Error status code: \(httpResponse.statusCode)")
-                if let error = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let message = error["detail"] as? String
-                {
-                    print("📄 [NetworkService] Error message from server: \(message)")
-                    // If backend says credentials are invalid, force a one-time token refresh and retry
-                    let lower = message.lowercased()
-                    if requiresAuth && !isRetry && authRetryCount < maxAuthRetries &&
-                        (lower.contains("not valid credentials") || lower.contains("could not validate credentials") || lower.contains("invalid credentials")) {
-                        print("🔄 [NetworkService] 'Not valid credentials' detected - forcing token refresh and retry")
-                        authRetryCount += 1
-                        clearAuthToken()
-                        return try await request(
-                            path: path,
-                            method: method,
-                            body: body,
-                            bodyData: bodyData,
-                            contentType: contentType,
-                            requiresAuth: requiresAuth,
-                            isRetry: true
-                        )
+                if let error = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    // Check both "detail" (FastAPI default) and "message" (custom error format)
+                    let message = (error["detail"] as? String) ?? (error["message"] as? String)
+                    
+                    if let message = message {
+                        print("📄 [NetworkService] Error message from server: \(message)")
+                        // If backend says credentials are invalid, force a one-time token refresh and retry
+                        let lower = message.lowercased()
+                        if requiresAuth && !isRetry && authRetryCount < maxAuthRetries &&
+                            (lower.contains("not valid credentials") || lower.contains("could not validate credentials") || lower.contains("invalid credentials")) {
+                            print("🔄 [NetworkService] 'Not valid credentials' detected - forcing token refresh and retry")
+                            authRetryCount += 1
+                            clearAuthToken()
+                            return try await request(
+                                path: path,
+                                method: method,
+                                body: body,
+                                bodyData: bodyData,
+                                contentType: contentType,
+                                requiresAuth: requiresAuth,
+                                includeAPIKey: includeAPIKey,
+                                isRetry: true
+                            )
+                        }
+                        throw NetworkError.serverError("HTTP \(httpResponse.statusCode): \(message)")
                     }
-                    throw NetworkError.serverError("HTTP \(httpResponse.statusCode): \(message)")
                 }
                 print("❓ [NetworkService] Unknown error occurred")
                 throw NetworkError.serverError("Unknown error occurred")
@@ -2461,7 +2504,7 @@ struct TokenResponse: Codable {
 struct UserResponse: Codable {
     let id: Int
     let email: String
-    let fullName: String
+    let fullName: String?
     let isActive: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -2470,6 +2513,18 @@ struct UserResponse: Codable {
         case fullName = "full_name"
         case isActive = "is_active"
     }
+}
+
+struct EmailRegisterResponse: Codable {
+    let message: String
+    let email: String
+    let verification_required: Bool
+}
+
+struct EmailVerifyResponse: Codable {
+    let message: String
+    let email: String
+    let verified: Bool
 }
 
 // MARK: - Dual Auth Response Types
@@ -2605,7 +2660,7 @@ extension NetworkService {
         let body: [String: Any] = ["email": email]
         
         do {
-            let data = try await post("/auth/email/start", body: body, requiresAuth: false)
+            let data = try await post("/dual-auth/email/start", body: body, requiresAuth: false)
             let response = try decoder.decode(EmailStartResponse.self, from: data)
             print("✅ [NetworkService] Email check successful: exists=\(response.exists)")
             return response
@@ -2619,49 +2674,43 @@ extension NetworkService {
     func loginWithPassword(email: String, password: String) async throws -> String {
         print("🔐 [NetworkService] Attempting login with password: \(email)")
 
-        // OAuth2 form-encoded payload: username + password
-        let loginData = "username=\(email)&password=\(password)"
-        let body = loginData.data(using: .utf8)!
+        let body: [String: Any] = [
+            "email": email,
+            "password": password
+        ]
 
         do {
-            // Use the OAuth2 compatible login endpoint
-            let data = try await post("/auth/login", body: body, contentType: "application/x-www-form-urlencoded", requiresAuth: false)
-            let tokenResponse = try decoder.decode(TokenResponse.self, from: data)
-
-            // Store access token and refresh token
-            authToken = tokenResponse.accessToken
-            if let refresh = tokenResponse.refreshToken { _ = keychain.storeRefreshToken(refresh, for: userMode) }
-
-            // Save token info on main actor and show reactivation message if applicable
+            // Use the dual-auth email/password login endpoint
+            let data = try await post("/dual-auth/email/password", body: body, requiresAuth: false)
+            let response = try decoder.decode(AuthResponse.self, from: data)
+            
+            // Store tokens in Keychain
+            authToken = response.tokens.accessToken
+            _ = keychain.storeRefreshToken(response.tokens.refreshToken, for: userMode)
+            
+            // Store user id for Reminders device registration
+            _ = KeychainService.shared.store(key: "zivo_user_id", value: String(response.user.id))
+            
+            // Save token info and user info
+            let tokenResponse = TokenResponse(
+                accessToken: response.tokens.accessToken,
+                tokenType: response.tokens.tokenType,
+                userType: response.tokens.userType,
+                expiresIn: response.tokens.expiresIn,
+                refreshToken: response.tokens.refreshToken
+            )
+            
             await MainActor.run {
                 saveTokenInfo(tokenResponse)
-                if tokenResponse.reactivated == true {
-                    NotificationCenter.default.post(
-                        name: .deletionCancelled,
-                        object: nil,
-                        userInfo: ["message": "Your account has been reactivated. Welcome back!"]
-                    )
-                }
-            }
-
-            // Fetch current user to populate profile info and store user_id
-            do {
-                let meData = try await get("/auth/me", requiresAuth: true)
-                let userResponse = try decoder.decode(UserResponse.self, from: meData)
-                await MainActor.run {
-                    setCurrentUserInfo(email: userResponse.email, fullName: userResponse.fullName)
-                    _ = KeychainService.shared.store(key: "zivo_user_id", value: String(userResponse.id))
-                    
-                    // Force UserDefaults synchronization
-                    UserDefaults.standard.synchronize()
-                    
-                    updateAuthenticationState()
-                    
-                    // Register pending FCM token if available
-                    AppDelegate.registerPendingFCMTokenIfNeeded()
-                }
-            } catch {
-                print("⚠️ [NetworkService] Failed to fetch /auth/me after login: \(error)")
+                setCurrentUserInfo(email: response.user.email, fullName: response.user.fullName)
+                
+                // Force UserDefaults synchronization
+                UserDefaults.standard.synchronize()
+                
+                updateAuthenticationState()
+                
+                // Register pending FCM token if available
+                AppDelegate.registerPendingFCMTokenIfNeeded()
             }
 
             // After successful login, check onboarding status from backend
@@ -2669,7 +2718,7 @@ extension NetworkService {
             _ = await checkOnboardingStatusFromBackend()
 
             print("✅ [NetworkService] Login successful for user: \(email)")
-            return tokenResponse.accessToken
+            return response.tokens.accessToken
         } catch {
             print("❌ [NetworkService] Login failed for user \(email): \(error)")
             throw error
@@ -2683,7 +2732,7 @@ extension NetworkService {
         let body: [String: Any] = ["email": email]
         
         do {
-            let data = try await post("/auth/email/otp/request", body: body, requiresAuth: false)
+            let data = try await post("/dual-auth/email/otp/request", body: body, requiresAuth: false)
             let response = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             let message = response?["message"] as? String ?? "OTP sent successfully"
             print("✅ [NetworkService] OTP request successful")
@@ -2704,7 +2753,7 @@ extension NetworkService {
         ]
         
         do {
-            let data = try await post("/auth/email/otp/verify", body: body, requiresAuth: false)
+            let data = try await post("/dual-auth/email/otp/verify", body: body, requiresAuth: false)
             let response = try decoder.decode(AuthResponse.self, from: data)
             
             // Store tokens in Keychain
@@ -2765,7 +2814,7 @@ extension NetworkService {
         ]
         
         do {
-            let data = try await post("/auth/email/otp/verify", body: body, requiresAuth: false)
+            let data = try await post("/dual-auth/email/otp/verify", body: body, requiresAuth: false)
             let response = try decoder.decode(AuthResponse.self, from: data)
             
             // Store tokens in Keychain
@@ -2832,7 +2881,7 @@ extension NetworkService {
         let body: [String: Any] = ["id_token": idToken]
         
         do {
-            let data = try await post("/auth/google/verify", body: body, requiresAuth: false)
+            let data = try await post("/dual-auth/google/verify", body: body, requiresAuth: false)
             let response = try decoder.decode(AuthResponse.self, from: data)
             
             // Store tokens in Keychain

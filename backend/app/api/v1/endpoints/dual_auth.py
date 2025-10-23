@@ -8,7 +8,9 @@ from app.core.auth_service import AuthService
 from app.schemas.auth import (
     EmailStartRequest, EmailStartResponse, EmailPasswordRequest,
     EmailOtpRequestRequest, EmailOtpVerifyRequest, GoogleSsoRequest,
-    RefreshTokenRequest, AuthResponse, AuthTokensResponse, DeviceInfo
+    RefreshTokenRequest, AuthResponse, AuthTokensResponse, DeviceInfo,
+    EmailRegisterRequest, EmailRegisterResponse, EmailVerifyRequest,
+    EmailVerifyResponse
 )
 
 router = APIRouter()
@@ -38,6 +40,70 @@ def get_client_ip(request: Request) -> str:
     
     # Fallback to direct connection
     return request.client.host if request.client else "unknown"
+
+@router.post("/email/register", response_model=EmailRegisterResponse)
+def email_register(
+    *,
+    db: Session = Depends(get_db),
+    request: Request,
+    register_data: EmailRegisterRequest,
+    _: bool = Depends(deps.verify_api_key_dependency),
+) -> Any:
+    """
+    Register new user with email and password.
+    Sends verification email to the user.
+    """
+    try:
+        auth_service = AuthService(db)
+        return auth_service.register_with_email(
+            email=register_data.email,
+            password=register_data.password
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+@router.post("/email/verify", response_model=EmailVerifyResponse)
+def email_verify(
+    *,
+    db: Session = Depends(get_db),
+    request: Request,
+    verify_data: EmailVerifyRequest,
+) -> Any:
+    """
+    Verify user's email address using verification token.
+    This is a public endpoint accessible from the mobile app.
+    """
+    try:
+        auth_service = AuthService(db)
+        return auth_service.verify_email(verify_data.token)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+@router.post("/email/resend-verification")
+def email_resend_verification(
+    *,
+    db: Session = Depends(get_db),
+    request: Request,
+    email_data: EmailStartRequest,
+) -> Any:
+    """
+    Resend verification email to user.
+    This is a public endpoint for users waiting to verify their email.
+    """
+    try:
+        auth_service = AuthService(db)
+        return auth_service.resend_verification_email(email_data.email)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 @router.post("/email/start", response_model=EmailStartResponse)
 def email_start(

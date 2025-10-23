@@ -349,6 +349,10 @@ def save_prescriptions_for_consultation(
     
     print(f"💊 [Doctor API] Saving {len(prescriptions)} prescriptions for consultation {request_id}")
     
+    # Generate a single group ID for all prescriptions in this consultation
+    from datetime import datetime
+    prescription_group_id = f"grp_consult_{request_id}_{int(datetime.utcnow().timestamp())}"
+    
     # If the consultation has a chat session, save prescriptions to that session
     if consultation_request.chat_session_id:
         try:
@@ -362,14 +366,15 @@ def save_prescriptions_for_consultation(
                     duration=prescription_data.get("duration", ""),
                     prescribed_by=prescription_data.get("prescribed_by", (" ".join([p for p in [getattr(current_doctor, 'first_name', None), getattr(current_doctor, 'middle_name', None), getattr(current_doctor, 'last_name', None)] if p]) or "")),
                     consultation_request_id=request_id,
-                    user_id=consultation_request.user_id
+                    user_id=consultation_request.user_id,
+                    prescription_group_id=prescription_group_id
                 )
                 
                 crud.prescription.create_with_session(
                     db=db, obj_in=prescription_create, session_id=session_id
                 )
                 
-            print(f"✅ [Doctor API] Successfully saved prescriptions to session {session_id}")
+            print(f"✅ [Doctor API] Successfully saved prescriptions to session {session_id} with group ID {prescription_group_id}")
             
         except ValueError as e:
             print(f"❌ [Doctor API] Invalid session ID format: {consultation_request.chat_session_id}")
@@ -406,14 +411,15 @@ def save_prescriptions_for_consultation(
                 duration=prescription_data.get("duration", ""),
                 prescribed_by=prescription_data.get("prescribed_by", (" ".join([p for p in [getattr(current_doctor, 'first_name', None), getattr(current_doctor, 'middle_name', None), getattr(current_doctor, 'last_name', None)] if p]) or "")),
                 consultation_request_id=request_id,
-                user_id=consultation_request.user_id
+                user_id=consultation_request.user_id,
+                prescription_group_id=prescription_group_id
             )
             
             crud.prescription.create_with_session(
                 db=db, obj_in=prescription_create, session_id=chat_session.id
             )
         
-        print(f"✅ [Doctor API] Successfully saved {len(prescriptions)} prescriptions to new session {chat_session.id}")
+        print(f"✅ [Doctor API] Successfully saved {len(prescriptions)} prescriptions to new session {chat_session.id} with group ID {prescription_group_id}")
     
     return {"message": f"Successfully saved {len(prescriptions)} prescriptions", "consultation_id": request_id}
 

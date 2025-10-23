@@ -23,6 +23,8 @@ struct HomeView: View {
     @State private var showMentalHealth = false
     @State private var showNutritionPlan = false
     @State private var showNutritionGoalSetup = false
+    @State private var showHealth360 = false
+    @State private var showActivitySleep = false
     @StateObject private var mentalHealthService = MentalHealthService.shared
 
     var body: some View {
@@ -95,6 +97,22 @@ struct HomeView: View {
             NavigationLink(
                 destination: MentalHealthView(),
                 isActive: $showMentalHealth,
+                label: { EmptyView() }
+            )
+            .hidden()
+        )
+        .background(
+            NavigationLink(
+                destination: Health360OverviewView(healthKitManager: healthKitManager),
+                isActive: $showHealth360,
+                label: { EmptyView() }
+            )
+            .hidden()
+        )
+        .background(
+            NavigationLink(
+                destination: ActivitySleepView(),
+                isActive: $showActivitySleep,
                 label: { EmptyView() }
             )
             .hidden()
@@ -218,6 +236,9 @@ struct HomeView: View {
         .cornerRadius(20)
         .padding(.horizontal, 16)
         .padding(.top, 8)
+        .onTapGesture {
+            showHealth360 = true
+        }
     }
     
     // MARK: - AI Nutritionist Card
@@ -366,6 +387,9 @@ struct HomeView: View {
                         goal: calorieGoalString,
                         progress: calorieProgress
                     )
+                    .onTapGesture {
+                        showNutrition = true
+                    }
                     
                     // Steps
                     DayMetricCard(
@@ -376,6 +400,9 @@ struct HomeView: View {
                         goal: "10,000",
                         progress: getStepsProgress()
                     )
+                    .onTapGesture {
+                        showActivitySleep = true
+                    }
                 }
                 
                 HStack(spacing: 16) {
@@ -388,6 +415,9 @@ struct HomeView: View {
                         subtitle: getBloodPressure(),
                         progress: nil
                     )
+                    .onTapGesture {
+                        showVitals = true
+                    }
                     
                     // Sleep
                     DayMetricCard(
@@ -398,6 +428,9 @@ struct HomeView: View {
                         subtitle: "Good quality",
                         progress: nil
                     )
+                    .onTapGesture {
+                        showActivitySleep = true
+                    }
                 }
             }
             .padding(.horizontal)

@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import auth
 from app.api.v1.endpoints import dual_auth
 from app.api.v1.endpoints import chat_sessions
+from app.api.v1.endpoints import prescriptions
 from app.api.v1.endpoints import doctors
 from app.api.v1.endpoints import health
 from app.api.v1.endpoints import appointments
@@ -37,10 +38,11 @@ from app.routes import dashboard
 api_router = APIRouter()
 
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
-api_router.include_router(dual_auth.router, prefix="/auth", tags=["dual-auth"])
+api_router.include_router(dual_auth.router, prefix="/dual-auth", tags=["dual-auth"])
 api_router.include_router(admin_auth.router, prefix="/auth", tags=["admin-auth"])
 api_router.include_router(password_reset.router, prefix="/auth", tags=["auth"])
 api_router.include_router(chat_sessions.router, prefix="/chat-sessions", tags=["chat-sessions"])
+api_router.include_router(prescriptions.router, prefix="/prescriptions", tags=["prescriptions"])
 api_router.include_router(doctors.router, prefix="/doctors", tags=["doctors"])
 api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(vitals.router, prefix="/vitals", tags=["vitals"])

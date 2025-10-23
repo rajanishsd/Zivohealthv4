@@ -149,15 +149,14 @@ struct OnboardingFlowView: View {
             }
             .onAppear {
                 print("🔎 [OnboardingFlow] onAppear prefilled: email=\(prefilledEmail ?? "<nil>") full=\(prefilledFullName ?? "<nil>") first=\(prefilledFirstName ?? "<nil>") last=\(prefilledLastName ?? "<nil>")")
-                let hasFirst = (prefilledFirstName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
-                let hasLast = (prefilledLastName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
-                let hasFull = (prefilledFullName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
-                if let email = prefilledEmail, (hasFirst || hasLast || hasFull) {
-                    print("🔎 [OnboardingFlow] Using prefillFromRegistration (names/full provided)")
+                
+                // If we have a prefilled email, use it (regardless of whether we have names)
+                if let email = prefilledEmail, !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    print("🔎 [OnboardingFlow] Using prefillFromRegistration with email: \(email)")
                     vm.prefillFromRegistration(email: email, fullName: prefilledFullName ?? "", firstName: prefilledFirstName, middleName: prefilledMiddleName, lastName: prefilledLastName)
                 } else {
                     // Fallback to Google data if available
-                    print("🔎 [OnboardingFlow] Falling back to prefillFromGoogle (no usable names/full)")
+                    print("🔎 [OnboardingFlow] No prefilled email, falling back to prefillFromGoogle")
                     vm.prefillFromGoogle()
                 }
             }

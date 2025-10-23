@@ -15,7 +15,8 @@ from app.models.user_identity import UserIdentity
 from app.models.login_event import LoginEvent
 from app.schemas.auth import (
     EmailStartResponse, AuthResponse, AuthTokensResponse, 
-    UserInfo, LoginEventCreate, DeviceInfo
+    UserInfo, LoginEventCreate, DeviceInfo, EmailRegisterResponse,
+    EmailVerifyResponse
 )
 from app.schemas.user import UserCreateGoogle
 from app.crud import user as user_crud
@@ -41,12 +42,118 @@ class AuthService:
             message="Email found" if user else "Email not found"
         )
 
+    def register_with_email(self, email: str, password: str) -> EmailRegisterResponse:
+        """Register new user with email and password, send verification email"""
+        # Check if user already exists
+        existing_user = user_crud.get_by_email(self.db, email=email)
+        if existing_user:
+            raise ValueError("A user with this email already exists")
+        
+        # Create inactive user directly
+        hashed_password = security.get_password_hash(password)
+        user = User(
+            email=email,
+            hashed_password=hashed_password,
+            is_active=False,  # User is inactive until email is verified
+            email_verified_at=None
+        )
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        
+        # Generate verification token
+        verification_token = self._generate_verification_token()
+        token_hash = self._hash_token(verification_token)
+        
+        # Store verification token in Redis with TTL (24 hours)
+        redis_key = f"email_verification:{user.id}"
+        self.redis_client.setex(redis_key, 86400, token_hash)  # 24 hours
+        
+        # Send verification email
+        email_sent = self.email_service.send_verification_email(email, verification_token)
+        
+        if not email_sent:
+            # Clean up user and token if email failed
+            self.db.delete(user)
+            self.db.commit()
+            self.redis_client.delete(redis_key)
+            raise ValueError("Failed to send verification email. Please try again.")
+        
+        return EmailRegisterResponse(
+            message="Registration successful. Please check your email to verify your account.",
+            email=email,
+            verification_required=True
+        )
+
+    def verify_email(self, token: str) -> EmailVerifyResponse:
+        """Verify email using verification token"""
+        # Find user by token
+        user_id = None
+        for key in self.redis_client.scan_iter("email_verification:*"):
+            stored_hash = self.redis_client.get(key)
+            token_hash = self._hash_token(token)
+            if stored_hash == token_hash:
+                user_id = int(key.split(":")[-1])
+                break
+        
+        if not user_id:
+            raise ValueError("Invalid or expired verification token")
+        
+        # Get user
+        user = self.db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise ValueError("User not found")
+        
+        # Activate user and mark email as verified
+        user.is_active = True
+        user.email_verified_at = datetime.utcnow()
+        self.db.commit()
+        
+        # Remove verification token from Redis
+        self.redis_client.delete(f"email_verification:{user_id}")
+        
+        # Create email identity
+        self._ensure_email_identity(user, user.email)
+        
+        return EmailVerifyResponse(
+            message="Email verified successfully. You can now sign in.",
+            email=user.email,
+            verified=True
+        )
+    
+    def resend_verification_email(self, email: str) -> Dict[str, str]:
+        """Resend verification email to user"""
+        user = user_crud.get_by_email(self.db, email=email)
+        
+        if not user:
+            raise ValueError("User not found")
+        
+        if user.is_active and user.email_verified_at:
+            raise ValueError("Email already verified")
+        
+        # Generate new verification token
+        verification_token = self._generate_verification_token()
+        token_hash = self._hash_token(verification_token)
+        
+        # Update verification token in Redis
+        redis_key = f"email_verification:{user.id}"
+        self.redis_client.setex(redis_key, 86400, token_hash)  # 24 hours
+        
+        # Send verification email
+        email_sent = self.email_service.send_verification_email(email, verification_token)
+        
+        if not email_sent:
+            raise ValueError("Failed to send verification email. Please try again.")
+        
+        return {"message": "Verification email sent successfully"}
+
     def authenticate_with_password(self, email: str, password: str, device_info: DeviceInfo, 
                                  ip_address: Optional[str] = None) -> AuthResponse:
         """Authenticate user with email and password"""
-        user = user_crud.authenticate(self.db, email=email, password=password)
+        # First, get user by email to check if they exist and their status
+        user = user_crud.get_by_email(self.db, email=email)
         
-        if not user or not user.is_active:
+        if not user:
             self._log_login_event(
                 user_id=None,
                 method="email_password",
@@ -54,6 +161,31 @@ class AuthService:
                 ip_address=ip_address,
                 success=False,
                 error_code="invalid_credentials"
+            )
+            raise ValueError("Invalid email or password")
+        
+        # Check if user is inactive (unverified email) BEFORE validating password
+        # This ensures users get the proper verification message even if they mistype password
+        if not user.is_active:
+            self._log_login_event(
+                user_id=user.id,
+                method="email_password",
+                device_info=device_info,
+                ip_address=ip_address,
+                success=False,
+                error_code="email_not_verified"
+            )
+            raise ValueError("EMAIL_NOT_VERIFIED")
+
+        # Now validate password (after checking user status)
+        if not security.verify_password(password, user.hashed_password):
+            self._log_login_event(
+                user_id=user.id,
+                method="email_password",
+                device_info=device_info,
+                ip_address=ip_address,
+                success=False,
+                error_code="invalid_password"
             )
             raise ValueError("Invalid email or password")
 
@@ -91,6 +223,36 @@ class AuthService:
         if not self._check_otp_rate_limit(email):
             raise ValueError("Too many OTP requests. Please try again later.")
 
+        # Check if user exists
+        user = user_crud.get_by_email(self.db, email=email)
+        
+        # If user doesn't exist, return generic success message (security - don't reveal account existence)
+        if not user:
+            self._log_login_event(
+                user_id=None,
+                method="email_otp",
+                device_info=device_info,
+                ip_address=ip_address,
+                success=False,
+                error_code="user_not_found"
+            )
+            return {
+                "message": "If an account exists with this email, a verification code will be sent.",
+                "status": "pending"
+            }
+        
+        # If user exists but is inactive (email not verified), return error
+        if not user.is_active:
+            self._log_login_event(
+                user_id=user.id,
+                method="email_otp",
+                device_info=device_info,
+                ip_address=ip_address,
+                success=False,
+                error_code="email_not_verified"
+            )
+            raise ValueError("EMAIL_NOT_VERIFIED")
+
         # Generate OTP
         otp = self._generate_otp()
         otp_hash = self._hash_otp(otp)
@@ -108,7 +270,7 @@ class AuthService:
             
             # Log failed OTP request
             self._log_login_event(
-                user_id=None,
+                user_id=user.id,
                 method="email_otp",
                 device_info=device_info,
                 ip_address=ip_address,
@@ -119,7 +281,7 @@ class AuthService:
         
         # Log OTP request
         self._log_login_event(
-            user_id=None,
+            user_id=user.id,
             method="email_otp",
             device_info=device_info,
             ip_address=ip_address,
@@ -187,6 +349,7 @@ class AuthService:
             # Verify Google ID token using iOS client ID
             # For mobile apps, we use the iOS client ID for verification
             # The mobile app uses PKCE, so no client secret is needed
+            print(f"🔍 [AuthService] Verifying Google token with CLIENT_ID: {settings.GOOGLE_CLIENT_ID}")
             idinfo = id_token.verify_oauth2_token(
                 id_token_str, 
                 requests.Request(), 
@@ -198,10 +361,13 @@ class AuthService:
             email_verified = idinfo.get('email_verified', False)
             name = idinfo.get('name')
             
+            print(f"✅ [AuthService] Google token verified - email: {email}, sub: {google_sub}, name: {name}")
+            
             if not email or not google_sub:
-                raise ValueError("Invalid Google token")
+                raise ValueError("Invalid Google token: missing email or sub")
                 
         except Exception as e:
+            print(f"❌ [AuthService] Google token verification failed: {type(e).__name__}: {e}")
             self._log_login_event(
                 user_id=None,
                 method="google",
@@ -210,7 +376,7 @@ class AuthService:
                 success=False,
                 error_code="invalid_google_token"
             )
-            raise ValueError("Invalid Google token")
+            raise ValueError(f"Invalid Google token: {str(e)}")
 
         # Find or create user
         user = self._find_or_create_google_user(email, google_sub, name, email_verified)
@@ -283,6 +449,14 @@ class AuthService:
         """Hash OTP for secure storage"""
         return hashlib.sha256(otp.encode()).hexdigest()
 
+    def _generate_verification_token(self) -> str:
+        """Generate a random verification token"""
+        return secrets.token_urlsafe(32)
+
+    def _hash_token(self, token: str) -> str:
+        """Hash token for secure storage"""
+        return hashlib.sha256(token.encode()).hexdigest()
+
     def _verify_otp(self, email: str, code: str) -> bool:
         """Verify OTP code"""
         redis_key = f"otp:{email}"
@@ -348,12 +522,15 @@ class AuthService:
 
     def _create_user_from_email(self, email: str) -> User:
         """Create new user from email (for OTP signup)"""
-        user_data = {
-            "email": email,
-            "hashed_password": None,  # No password for OTP users
-            "is_active": True
-        }
-        return user_crud.create(self.db, obj_in=user_data)
+        user = User(
+            email=email,
+            hashed_password=None,  # No password for OTP users
+            is_active=True
+        )
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
 
     def _find_or_create_google_user(self, email: str, google_sub: str, 
                                   name: Optional[str], email_verified: bool) -> User:

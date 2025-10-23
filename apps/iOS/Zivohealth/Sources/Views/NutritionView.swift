@@ -48,13 +48,13 @@ struct NutritionView: View {
     @State private var selectedImageData: Data?
     @State private var selectedImage: UIImage?
     
-    // Food image viewer
-    @State private var showingImageViewer = false
-    @State private var selectedMealForImage: NutritionDataResponse?
-    
     // Detailed meal view
     @State private var showingMealDetail = false
     @State private var selectedMealForDetail: NutritionDataResponse?
+    
+    // Meal type detail view
+    @State private var showingMealTypeDetail = false
+    @State private var selectedMealTypeGroupForDetail: MealTypeGroup?
     
     // Goal setup view
     @State private var navigateToGoalSetup = false
@@ -76,14 +76,16 @@ struct NutritionView: View {
             .background(Color(.systemGroupedBackground))
             .ignoresSafeArea(.container, edges: .top)
             
-            .sheet(isPresented: $showingImageViewer) {
-                if let meal = selectedMealForImage {
-                    FoodImageViewer(meal: meal)
-                }
-            }
             .sheet(isPresented: $showingMealDetail) {
                 if let meal = selectedMealForDetail {
                     MealDetailView(meal: meal)
+                }
+            }
+            .sheet(isPresented: $showingMealTypeDetail) {
+                if let group = selectedMealTypeGroupForDetail {
+                    NavigationView {
+                        MealTypeSummaryView(group: group)
+                    }
                 }
             }
             // Navigation to Nutrition Goal Setup (push, not sheet)
@@ -577,7 +579,7 @@ struct NutritionView: View {
                 Image(systemName: "fork.knife.circle.fill")
                     .foregroundColor(.purple)
                     .font(.title2)
-                Text("Recent Meals")
+                Text("Today's Meals by Type")
                     .font(.title3)
                     .fontWeight(.semibold)
                 Spacer()
@@ -592,22 +594,70 @@ struct NutritionView: View {
                 .cornerRadius(8)
             }
             
-            if nutritionManager.nutritionData.isEmpty {
+            if todaysMealTypeGroups.isEmpty {
                 Text("No meals logged yet")
-                        .foregroundColor(.secondary)
+                    .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding()
             } else {
-                ForEach(nutritionManager.nutritionData.prefix(3), id: \.id) { meal in
-                    mealRow(meal)
+                ForEach(todaysMealTypeGroups.prefix(2)) { group in
+                    compactMealTypeCard(group)
                         .onTapGesture {
-                            selectedMealForDetail = meal
-                            showingMealDetail = true
+                            selectedMealTypeGroupForDetail = group
+                            showingMealTypeDetail = true
                         }
                 }
             }
         }
         .padding()
+    }
+    
+    // Computed property for today's meal type groups
+    private var todaysMealTypeGroups: [MealTypeGroup] {
+        nutritionManager.todaysMeals.groupedByMealType()
+    }
+    
+    // Compact meal type card for preview
+    private func compactMealTypeCard(_ group: MealTypeGroup) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(group.mealType.emoji)
+                    .font(.title2)
+                Text(group.mealType.displayName)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                Spacer()
+                Text("\(group.mealCount) meal\(group.mealCount > 1 ? "s" : "")")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            // Calories and macros
+            HStack {
+                HStack(spacing: 4) {
+                    Image(systemName: "flame.fill")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                    Text("\(Int(group.totalCalories))")
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                        .foregroundColor(.orange)
+                }
+                
+                Spacer()
+                
+                nutritionBadge("P", value: Int(group.totalProtein), unit: "g", color: .red)
+                nutritionBadge("C", value: Int(group.totalCarbs), unit: "g", color: .blue)
+                nutritionBadge("F", value: Int(group.totalFat), unit: "g", color: .yellow)
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
     
     private func mealRow(_ meal: NutritionDataResponse) -> some View {
@@ -667,8 +717,8 @@ struct NutritionView: View {
                 
                 // Image button
                 Button(action: {
-                    selectedMealForImage = meal
-                    showingImageViewer = true
+                    selectedMealForDetail = meal
+                    showingMealDetail = true
                 }) {
                     HStack(spacing: 4) {
                         if meal.dataSource == .photoAnalysis && meal.imageUrl != nil {
@@ -824,8 +874,8 @@ struct NutritionHeaderView: View {
 struct MealsListView: View {
     @ObservedObject var nutritionManager: NutritionManager
     @State private var selectedDate = Date()
-    @State private var showingMealDetail = false
-    @State private var selectedMealForDetail: NutritionDataResponse?
+    @State private var showingMealTypeSummary = false
+    @State private var selectedMealTypeGroup: MealTypeGroup?
     @Environment(\.dismiss) private var dismiss
     
     // Filter meals for the selected date
@@ -840,6 +890,11 @@ struct MealsListView: View {
         }
     }
     
+    // Group meals by meal type
+    private var mealTypeGroups: [MealTypeGroup] {
+        filteredMealsForSelectedDate.groupedByMealType()
+    }
+    
     var body: some View {
         GeometryReader { geometry in
             ScrollView {
@@ -850,34 +905,33 @@ struct MealsListView: View {
                     // Content
                     LazyVStack(spacing: 16) {
                         // Date picker header card
-                    VStack(spacing: 12) {
-                        HStack {
-                            Text("Select Date")
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                            Spacer()
+                        VStack(spacing: 12) {
+                            HStack {
+                                Text("Select Date")
+                                    .font(.headline)
+                                    .fontWeight(.semibold)
+                                Spacer()
+                            }
+                            
+                            DatePicker(
+                                "Meal Date",
+                                selection: $selectedDate,
+                                in: ...Date(),
+                                displayedComponents: .date
+                            )
+                            .datePickerStyle(.compact)
+                            .onChange(of: selectedDate) { newDate in
+                                loadMealsForDate(newDate)
+                            }
                         }
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .cornerRadius(12)
+                        .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+                        .padding(.horizontal)
                         
-                        DatePicker(
-                            "Meal Date",
-                            selection: $selectedDate,
-                            in: ...Date(),
-                            displayedComponents: .date
-                        )
-                        .datePickerStyle(.compact)
-                        .onChange(of: selectedDate) { newDate in
-                            loadMealsForDate(newDate)
-                        }
-                    }
-                    .padding()
-                    .background(Color(.systemBackground))
-                    .cornerRadius(12)
-                    .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
-                    .padding(.horizontal)
-
-                    // Meals as stacked cards
-                    Group {
-                        if filteredMealsForSelectedDate.isEmpty {
+                        // Meal type groups as page view (Level 1)
+                        if mealTypeGroups.isEmpty {
                             VStack(spacing: 8) {
                                 Image(systemName: "fork.knife")
                                     .font(.title2)
@@ -890,105 +944,46 @@ struct MealsListView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 40)
                         } else {
-                            ForEach(filteredMealsForSelectedDate, id: \.id) { meal in
-                                mealRow(meal)
-                                    .onTapGesture {
-                                        selectedMealForDetail = meal
-                                        showingMealDetail = true
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Image(systemName: "square.grid.2x2.fill")
+                                        .foregroundColor(.purple)
+                                    Text("Meals by Type")
+                                        .font(.headline)
+                                        .fontWeight(.bold)
+                                    Spacer()
+                                }
+                                .padding(.horizontal)
+                                
+                                // Vertical stacked meal type cards
+                                VStack(spacing: 16) {
+                                    ForEach(mealTypeGroups) { group in
+                                        MealTypeCard(group: group) {
+                                            selectedMealTypeGroup = group
+                                            showingMealTypeSummary = true
+                                        }
                                     }
+                                }
+                                .padding(.horizontal)
                             }
                         }
                     }
-                    .padding(.horizontal)
                     .padding(.top, 8)
-                    }
                 }
             }
             .background(Color(.systemGroupedBackground))
             .ignoresSafeArea(.container, edges: .top)
         }
         .navigationBarHidden(true)
-        .sheet(isPresented: $showingMealDetail) {
-            if let meal = selectedMealForDetail {
-                MealDetailView(meal: meal)
+        .sheet(isPresented: $showingMealTypeSummary) {
+            if let group = selectedMealTypeGroup {
+                NavigationView {
+                    MealTypeSummaryView(group: group)
+                }
             }
         }
         .onAppear {
             loadMealsForDate(selectedDate)
-        }
-    }
-    
-    private func mealRow(_ meal: NutritionDataResponse) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    // Meal type and time
-                    HStack(spacing: 8) {
-                        Text(meal.mealType.emoji)
-                            .font(.title3)
-                        Text(meal.mealType.displayName)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundColor(.secondary)
-                        
-                        Spacer()
-                        
-                        if let mealTime = meal.mealDateTime {
-                            Text(mealTime, style: .time)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    
-                    // Dish name
-                    Text(meal.displayName)
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .lineLimit(2)
-                    
-                    // Calories
-                    Text("\(Int(meal.calories)) calories")
-                        .font(.subheadline)
-                        .foregroundColor(.orange)
-                        .fontWeight(.medium)
-                }
-                
-                Spacer()
-                
-                // Tap indicator
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            // Macronutrients badges
-            HStack {
-                nutritionBadge("P", value: Int(meal.proteinG), unit: "g", color: .red)
-                nutritionBadge("C", value: Int(meal.carbsG), unit: "g", color: .blue)
-                nutritionBadge("F", value: Int(meal.fatG), unit: "g", color: .yellow)
-                
-                if meal.fiberG > 0 {
-                    nutritionBadge("Fiber", value: Int(meal.fiberG), unit: "g", color: .green)
-                }
-                
-                Spacer()
-            }
-        }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
-    }
-    
-    private func nutritionBadge(_ label: String, value: Int, unit: String, color: Color) -> some View {
-        HStack(spacing: 2) {
-            Text(label)
-                .font(.caption2)
-                .fontWeight(.medium)
-                .foregroundColor(color)
-            Text("\(value)\(unit)")
-                .font(.caption2)
-                .foregroundColor(.secondary)
         }
     }
     

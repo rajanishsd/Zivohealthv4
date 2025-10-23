@@ -190,6 +190,22 @@ class IncrementalTableCopy:
                 initial_count = cursor.fetchone()[0]
             
             logger.info(f"Target table has {initial_count:,} rows before copy")
+            
+            # Get existing primary keys from target to skip them
+            logger.info(f"Fetching existing primary keys from target...")
+            with self.target_conn.cursor() as cursor:
+                cursor.execute(f'SELECT "{pk_column}" FROM {self.table_name};')
+                existing_pks = set(row[0] for row in cursor.fetchall())
+            
+            logger.info(f"✓ Found {len(existing_pks):,} existing records in target")
+            rows_to_skip = len(existing_pks)
+            rows_to_copy = total_rows - rows_to_skip
+            
+            if rows_to_copy <= 0:
+                logger.info("✅ All records already exist in target. Nothing to copy.")
+                return True
+            
+            logger.info(f"Will copy {rows_to_copy:,} new rows (skipping {rows_to_skip:,} existing)")
             logger.info(f"Starting incremental copy with batch size {self.batch_size}...")
             logger.info("=" * 60)
             
@@ -200,7 +216,7 @@ class IncrementalTableCopy:
             
             # Create progress bar
             pbar = tqdm(
-                total=total_rows,
+                total=rows_to_copy,
                 desc="Copying rows",
                 unit="rows",
                 unit_scale=True,
@@ -209,8 +225,8 @@ class IncrementalTableCopy:
             )
             
             try:
-                while offset < total_rows:
-                    # Fetch batch from source
+                while total_copied < rows_to_copy:
+                    # Fetch batch from source, excluding already-existing records
                     with self.source_conn.cursor() as source_cursor:
                         query = f"""
                             SELECT {column_list}
@@ -225,24 +241,30 @@ class IncrementalTableCopy:
                     if not rows:
                         break
                     
-                    # Insert batch into target using execute_values (faster)
-                    with self.target_conn.cursor() as target_cursor:
-                        placeholders = ', '.join([f'"{col}"' for col in column_names])
-                        insert_query = f"INSERT INTO {self.table_name} ({placeholders}) VALUES %s"
+                    # Filter out rows that already exist in target
+                    pk_index = column_names.index(pk_column)
+                    new_rows = [row for row in rows if row[pk_index] not in existing_pks]
+                    
+                    if new_rows:
+                        # Insert batch into target using execute_values (faster)
+                        with self.target_conn.cursor() as target_cursor:
+                            placeholders = ', '.join([f'"{col}"' for col in column_names])
+                            insert_query = f"INSERT INTO {self.table_name} ({placeholders}) VALUES %s"
+                            
+                            execute_values(
+                                target_cursor,
+                                insert_query,
+                                new_rows,
+                                page_size=self.batch_size
+                            )
+                            self.target_conn.commit()
                         
-                        execute_values(
-                            target_cursor,
-                            insert_query,
-                            rows,
-                            page_size=self.batch_size
-                        )
-                        self.target_conn.commit()
+                        total_copied += len(new_rows)
+                        
+                        # Update progress bar
+                        pbar.update(len(new_rows))
                     
-                    total_copied += len(rows)
                     offset += self.batch_size
-                    
-                    # Update progress bar
-                    pbar.update(len(rows))
                     
                     # Small delay to avoid overwhelming the connection
                     time.sleep(0.05)
@@ -259,19 +281,27 @@ class IncrementalTableCopy:
             
             logger.info("Copy completed!")
             logger.info(f"Source rows: {total_rows:,}")
+            logger.info(f"Existing in target (skipped): {rows_to_skip:,}")
             logger.info(f"Target rows before: {initial_count:,}")
             logger.info(f"Target rows after: {final_count:,}")
-            logger.info(f"Rows copied: {total_copied:,}")
+            logger.info(f"New rows copied: {total_copied:,}")
+            
+            # Verification
+            expected_final = initial_count + total_copied
+            rows_added = final_count - initial_count
             
             if truncate_target:
                 success = final_count == total_rows
             else:
-                success = (final_count - initial_count) == total_copied
+                success = (final_count == expected_final) and (rows_added == total_copied)
             
             if success:
                 logger.info("✅ Verification successful!")
+                if final_count == total_rows:
+                    logger.info("✅ All source records are now in target!")
             else:
-                logger.warning("⚠️  Row counts don't match as expected")
+                logger.warning(f"⚠️  Row counts don't match as expected")
+                logger.warning(f"   Expected: {expected_final:,}, Got: {final_count:,}")
             
             return success
             

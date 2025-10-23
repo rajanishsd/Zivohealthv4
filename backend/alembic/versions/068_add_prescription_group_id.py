@@ -18,12 +18,12 @@ depends_on = None
 def upgrade() -> None:
     # Add grouping ID column to prescriptions table
     op.add_column('prescriptions', sa.Column('prescription_group_id', sa.String(length=64), nullable=True))
-    # Helpful composite index for user+group queries
-    op.create_index('ix_prescriptions_group_user', 'prescriptions', ['prescription_group_id', 'user_id'], unique=False)
+    # Index for grouping queries
+    op.create_index('ix_prescriptions_group_id', 'prescriptions', ['prescription_group_id'], unique=False)
 
 
 def downgrade() -> None:
-    op.drop_index('ix_prescriptions_group_user', table_name='prescriptions')
+    op.drop_index('ix_prescriptions_group_id', table_name='prescriptions')
     op.drop_column('prescriptions', 'prescription_group_id')
 
 

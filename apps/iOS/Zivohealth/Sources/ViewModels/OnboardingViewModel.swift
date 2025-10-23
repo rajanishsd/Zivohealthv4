@@ -93,7 +93,16 @@ class OnboardingViewModel: ObservableObject {
 
             print("✅ [OnboardingVM] Prefilled from Google: first=\(firstName), middle=\(middleName), last=\(lastName)")
         } else {
-            print("ℹ️ [OnboardingVM] No Google profile found for prefilling")
+            print("ℹ️ [OnboardingVM] No Google profile found, using NetworkService email if available")
+            // Fallback to NetworkService stored email (from any login method)
+            if let backendEmail = NetworkService.shared.currentUserEmail, !backendEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                email = backendEmail
+                print("✅ [OnboardingVM] Prefilled email from NetworkService: \(email)")
+            }
+            if let backendFull = NetworkService.shared.currentUserFullName, !backendFull.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                fullName = backendFull
+                print("✅ [OnboardingVM] Prefilled fullName from NetworkService: \(fullName)")
+            }
         }
     }
 
